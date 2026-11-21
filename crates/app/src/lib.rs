@@ -12764,6 +12764,184 @@ mod tests {
         );
     }
 
+    /// What one Insert chord does in a console with «good» marked, on the platform named: what was
+    /// left on the clipboard, read from the context's output as [`copy_at`] does, and what the
+    /// program received.
+    ///
+    /// **The chord is seeded as a key**, which is how the desktop delivers Ctrl+Insert on every
+    /// platform since D115 and Shift+Insert when the clipboard holds no text.
+    fn insert_chord_at(
+        modifiers_held: egui::Modifiers,
+        keymap: &keyboard::Keymap,
+        copy_enabled: bool,
+        windows: bool,
+    ) -> (Option<String>, Vec<u8>) {
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        pane.screen.advance(b"good night");
+        pane.screen.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
+        });
+        pane.screen.extend_selection(Cell {
+            row: 0,
+            col: 3,
+            half: Half::Right,
+        });
+        let mut modifiers = egui::Modifiers::NONE;
+        enqueue(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(modifiers_held),
+                egui::Event::Key {
+                    key: egui::Key::Insert,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: modifiers_held,
+                },
+            ],
+        );
+        pane.send_keys_on(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            keymap,
+            copy_enabled,
+            windows,
+        );
+        let output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|request| match request {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            });
+        output.drop_without_applying_deltas();
+        (copied, pane.keystrokes.clone())
+    }
+
+    const CTRL: egui::Modifiers = egui::Modifiers {
+        alt: false,
+        ctrl: true,
+        shift: false,
+        mac_cmd: false,
+        command: true,
+    };
+    const SHIFT: egui::Modifiers = egui::Modifiers {
+        alt: false,
+        ctrl: false,
+        shift: true,
+        mac_cmd: false,
+        command: false,
+    };
+
+    #[test]
+    fn on_windows_ctrl_insert_copies_and_the_program_gets_nothing() {
+        // **D115.** The desktop no longer turns Ctrl+Insert into a copy request there, because that
+        // request is indistinguishable from Ctrl+C; it arrives as the key and is copied here.
+        // Both halves: copying with the interrupt still sent would be the defect half-fixed.
+        let (copied, sent) = insert_chord_at(CTRL, &keyboard::Keymap::default(), true, true);
+        assert_eq!(copied.as_deref(), Some("good"), "Ctrl+Insert did not copy");
+        assert!(
+            sent.is_empty(),
+            "Ctrl+Insert copied and also sent {:?} to the program",
+            String::from_utf8_lossy(&sent)
+        );
+    }
+
+    #[test]
+    fn off_windows_and_with_copying_off_ctrl_insert_belongs_to_the_program() {
+        // **The same chord where D115 does not apply.** On Linux and macOS it is D52's key, and on
+        // Windows with `key.copy = none` it is given back the way Ctrl+Shift+C is.
+        for (copy_enabled, windows) in [(true, false), (false, true)] {
+            let (copied, sent) =
+                insert_chord_at(CTRL, &keyboard::Keymap::default(), copy_enabled, windows);
+            assert_eq!(
+                copied, None,
+                "copied with copy {copy_enabled}, windows {windows}"
+            );
+            assert_eq!(
+                sent, b"\x1b[2;5~",
+                "copy {copy_enabled}, windows {windows}: Ctrl+Insert did not reach the program as \
+                 D52's key"
+            );
+        }
+    }
+
+    #[test]
+    fn on_windows_ctrl_insert_with_another_modifier_is_a_key() {
+        // Only the exact chord copies: Ctrl+Shift+Insert is D52's `CSI 2;6~` and copies nothing.
+        let ctrl_shift = egui::Modifiers {
+            shift: true,
+            ..CTRL
+        };
+        let (copied, sent) = insert_chord_at(ctrl_shift, &keyboard::Keymap::default(), true, true);
+        assert_eq!(copied, None, "Ctrl+Shift+Insert copied");
+        assert_eq!(sent, b"\x1b[2;6~", "Ctrl+Shift+Insert is not D52's key");
+    }
+
+    #[test]
+    fn on_windows_shift_insert_as_a_key_reaches_the_program_as_nothing_and_elsewhere_as_its_key() {
+        // **D115.** On Windows a bare Shift+Insert arrives as a key only when the clipboard holds
+        // no text, and then it is the application's paste chord, which never reaches the program —
+        // the rule `bytes` applies to Ctrl+Shift+V. On Linux it is D52's key, untouched.
+        let (_, on_windows) = insert_chord_at(SHIFT, &keyboard::Keymap::default(), true, true);
+        assert!(
+            on_windows.is_empty(),
+            "on Windows the paste chord reached the program as {:?}",
+            String::from_utf8_lossy(&on_windows)
+        );
+        let (_, elsewhere) = insert_chord_at(SHIFT, &keyboard::Keymap::default(), true, false);
+        assert_eq!(
+            elsewhere, b"\x1b[2;2~",
+            "off Windows Shift+Insert stopped being D52's key"
+        );
+    }
+
+    #[test]
+    fn a_chord_somebody_bound_to_ctrl_insert_wins_over_the_windows_copy() {
+        // **The door sits after the keymap.** A `key.new-tab = ctrl+insert` written in the file
+        // is accepted, so on Windows it has to do what it says instead of copying in silence.
+        let mut keymap = keyboard::Keymap::default();
+        keymap.bind(
+            keyboard::Action::NewTab,
+            Some(keyboard::Chord {
+                ctrl: true,
+                shift: false,
+                alt: false,
+                key: egui::Key::Insert,
+            }),
+        );
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        let mut modifiers = egui::Modifiers::NONE;
+        enqueue(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(CTRL),
+                egui::Event::Key {
+                    key: egui::Key::Insert,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: CTRL,
+                },
+            ],
+        );
+        let requests =
+            pane.send_keys_on(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true, true);
+        assert_eq!(
+            requests,
+            vec![WindowRequest::NewTab],
+            "the bound chord was taken by the Windows copy"
+        );
+    }
+
     /// A whole drag **to mark text**: the plain left button, which is what **D20** decides.
     ///
     /// The same four passes and for the same reasons as [`drag_a_pane`] — egui resolves the

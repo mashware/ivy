@@ -144,6 +144,35 @@ pub fn bytes(event: &Event, cursor_keys: CursorKeys) -> Option<Cow<'static, [u8]
     }
 }
 
+/// What Windows makes of a chord over Insert that the terminal keeps for itself (**D115**).
+#[derive(Debug, PartialEq, Eq)]
+enum InsertChord {
+    /// Exactly Ctrl+Insert, with copying switched on: the marked text goes to the clipboard.
+    Copy,
+    /// Exactly Shift+Insert arriving as a key, which the desktop does only when the clipboard holds
+    /// no text: the application's paste chord, so the program gets nothing.
+    Silence,
+}
+
+/// Which of the two, if any, `event` is under `chord`. Any other modifier set over Insert is left
+/// to `bytes`, which sends it in D52's form; Ctrl+Insert with copying off goes there too, as
+/// `CSI 2;5~`, the way Ctrl+Shift+C switched off reaches the program.
+fn insert_chord(event: &Event, chord: Modifiers, copy_enabled: bool) -> Option<InsertChord> {
+    let Event::Key {
+        key: Key::Insert,
+        pressed: true,
+        ..
+    } = event
+    else {
+        return None;
+    };
+    match (chord.ctrl, chord.shift, chord.alt) {
+        (true, false, false) if copy_enabled => Some(InsertChord::Copy),
+        (false, true, false) => Some(InsertChord::Silence),
+        _ => None,
+    }
+}
+
 /// What is sent to the program when text is really pasted.
 ///
 /// `bracketed` is what the program inside has requested: with it, the text goes surrounded by the two
@@ -738,6 +767,30 @@ impl crate::Pane {
         keymap: &Keymap,
         copy_enabled: bool,
     ) -> Vec<WindowRequest> {
+        self.send_keys_on(
+            ctx,
+            frame_started,
+            modifiers,
+            open_tabs,
+            keymap,
+            copy_enabled,
+            cfg!(target_os = "windows"),
+        )
+    }
+
+    /// [`Self::send_keys`] with the platform named, so the suite runs Windows' Insert chords
+    /// (**D115**) on the platform it runs on.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn send_keys_on(
+        &mut self,
+        ctx: &egui::Context,
+        frame_started: Instant,
+        modifiers: &mut egui::Modifiers,
+        open_tabs: usize,
+        keymap: &Keymap,
+        copy_enabled: bool,
+        windows: bool,
+    ) -> Vec<WindowRequest> {
         // It is asked once and not per event because **the mode cannot change halfway through a
         // pass**: it is set by the program inside with what it writes, and what it writes is
         // interpreted in the other half of the frame. (Asking it inside the closure would compile
@@ -967,6 +1020,21 @@ impl crate::Pane {
                         }
                         swallow_the_text = !chord.ctrl && !chord.command && !chord.alt;
                         return false;
+                    }
+                }
+
+                // **After the keymap, so a chord somebody bound wins.** On Windows Ctrl+Insert
+                // arrives as a key (D115) and copies here; a bare Shift+Insert that arrives as a
+                // key is the paste chord over a clipboard with no text, and like Ctrl+Shift+V it
+                // never reaches the program.
+                if windows {
+                    match insert_chord(event, chord, copy_enabled) {
+                        Some(InsertChord::Copy) => {
+                            to_copy = self.screen.selected_text();
+                            return false;
+                        }
+                        Some(InsertChord::Silence) => return false,
+                        None => {}
                     }
                 }
 
