@@ -11399,3 +11399,50 @@ four close tests passed on that host as well as on the system's.
   joined emoji — a line the host redraws could land a column off. Not measured.
 - The installer's contents are checked by the release job's install test, not by any pull-request
   job.
+
+## D113 — The window keeps its own standard error in a log file, and records a panic there itself
+
+**Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
+thread reads that pipe and writes every byte to `ivy.log` first and to the standard error Ivy was
+started with second. The file lives in the platform's log directory: `~/Library/Logs/Ivy/` on
+macOS, `$XDG_STATE_HOME/ivy/` on Linux (`~/.local/state/ivy/` when that variable is not an absolute
+path), `%LOCALAPPDATA%\Ivy\logs\` on Windows. At 4 MiB it becomes `ivy.log.1`, replacing the
+previous one, so the two files never hold more than 8 MiB. On Unix both are created readable by
+their owner only. A panic writes one record — time, thread, message, location and backtrace —
+straight to the file and to the original standard error, replacing Rust's default report.
+Settings shows the path and a button that shows it in the file manager. Only the window process is
+captured, and a measured run captures nothing. When the file cannot be opened, standard error stays
+exactly as it was and one line says why.
+
+**Why.** Opened from the Dock, a desktop launcher or the Start menu, nobody reads Ivy's standard
+error: launchd sends it to `/dev/null`, a launcher outside a systemd user unit drops it, and Windows
+keeps nothing for a windowed program. Every failure line this project decided to write there (D38,
+D41, D51, D56) was lost for the people who most need it, and a crash left no trace at all. Taking the
+stream at the process level captures all of them, and anything a dependency writes, without touching
+a single call site. The tee keeps a shell launch exactly as it was, and lets the cap hold while the
+window runs: a console that keeps failing cannot fill the disk.
+
+**How it ends.** `main`, not `run`, holds the capture: a window that cannot open is reported after
+`run` returns, so `main` prints that line itself while the capture still stands. Dropping the
+capture puts the original standard error back first; the pipe then has no writer, the thread reads
+its end and returns, and the wait for it is bounded at 100 ms (D57).
+
+**Measured.** Nothing on the frame: the thread never runs on it, and a measured run does not start
+it.
+
+**Discarded.**
+- **Pointing standard error at the file and nowhere else.** No running cap — rotation only at the
+  next start — and a shell launch would lose what it shows today.
+- **A logging macro at every call site.** About 120 sites in three crates, every new one able to
+  forget it, and nothing a dependency writes would arrive.
+- **Leaving it to the operating system.** No facility covers the three platforms, none records a
+  panic that unwinds, and none tells the person where to look.
+- **Chaining Rust's default panic report.** The file would hold every panic twice.
+- **A new About dialog for the path.** Ivy has none; one row in Settings is enough to find the file.
+
+**Open.**
+- That Rust's standard error on Windows reads the process's handle on every write, which is what
+  makes `SetStdHandle` take effect, is read from no source here: the Windows CI (#162) is what
+  proves it.
+- Helper programs (`panel-mcp`, `ivy-session`, `ivy-codex`) keep their standard error with whoever
+  launched them.
