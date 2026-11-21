@@ -3262,9 +3262,20 @@ about ten megabytes, another emoji set than the system's, and every `COLR` face 
 
 **Measured** with batch `colr`, which points the machine's emoji family at a pinned
 `Noto Color Emoji` in its `COLR` version 1 form; its control is `C`. The figures are that font's —
-heavy in gradients — not `Segoe UI Emoji`'s, which no script here can run.
+heavy in gradients — not `Segoe UI Emoji`'s, which no script here can run. Both measured on
+21 November 2026 on the same machine, one tab of two consoles, 43×38 each.
 
-<!-- annex filled at validate -->
+- **Drawing the outlines is paid once, and it is a millisecond.** In both `colr` runs one frame drew
+  **14 glyphs, all 14 from colour outlines**, in **1.273 ms and 1.282 ms**: about 91 µs a glyph at the
+  cell's size. Bitmap emoji are not comparable from these runs, because batch `Q` was not run with them.
+- **A screen with no emoji pays nothing measurable.** Batch `C` was run five times on this branch and
+  five times on its base, alternating. The rest of the frame came out at **230–404 µs** here and
+  **186–429 µs** on the base. Enqueueing the left console's paint came out at **212–336 µs** here and
+  **189–338 µs** on the base. The ranges overlap, so the honest reading is no measurable change.
+  **The medians are not equal, though**: 275 µs here against 215 µs on the base for the rest of
+  the frame. No code that runs without an emoji was changed. The only candidate is the build itself,
+  because the `text` feature is now compiled into the `vello_cpu` that epaint uses for its letters.
+  That candidate was not isolated. A later batch that finds the same gap should start there.
 
 ### The status panel, by another route to the same glyphs (#178)
 
