@@ -3656,6 +3656,42 @@ mod tests {
         assert!(received.so_far().is_empty());
     }
 
+    /// A cancelled Send whose worker fails after its console closed says the console closed
+    /// before what the worker reported, as a Send that was not cancelled does.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_send_whose_worker_fails_after_its_console_closed_says_so() {
+        let received = term_core::received::Received::new("annotated-cancel-closed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        let name = window.image.origin().unwrap().pane;
+        window.close_a_pane_called(name, &ctx).unwrap();
+        sender.send(Err("disk full".into())).unwrap();
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert!(!window.image.send.parked());
+        let notice = window.image.notice.clone().unwrap_or_default();
+        assert!(
+            notice.starts_with(
+                "The origin console has closed, and the cancelled copy's worker reported: \
+                 disk full"
+            ),
+            "{notice}"
+        );
+    }
+
     /// Clicks Send, takes the copy's write over once it `started`, and replaces the image, as the
     /// test helpers can though the drawer would not let a person: the marks cleared and another
     /// image opened from the same console, given a note of its own once decoded.

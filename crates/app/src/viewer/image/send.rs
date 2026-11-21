@@ -115,6 +115,8 @@ impl Sending {
         match std::mem::take(&mut self.phase) {
             Phase::Asked(_) => true,
             Phase::Writing(request, job) => {
+                // `start` refuses while a worker is parked, so there is never a second one here.
+                debug_assert!(self.parked.is_none(), "a second worker parked");
                 self.parked = Some((request, job));
                 true
             }
@@ -323,6 +325,11 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             )),
             _ => None,
         },
+        // As `failed` says it: a console that closed under the worker is the likely cause.
+        Err(why) if !window.all_panes().any(|p| p.name == request.pane) => Some(format!(
+            "{}, and the cancelled copy's worker reported: {why}",
+            Refusal::Closed
+        )),
         Err(why) => Some(format!("The cancelled copy's worker reported: {why}")),
     };
     let left = forsaken_folder(window, request);
