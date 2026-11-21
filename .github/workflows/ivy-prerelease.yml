@@ -90,6 +90,35 @@ jobs:
                             'windows_exit_an_exit_code_of_259_is_an_ended_program') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
+      - name: Test that a directory report crosses the bundled console host
+        shell: pwsh
+        # The test needs the pair beside its own binary, so the binary is copied into a folder of its
+        # own with it: in target/debug/deps every other test binary would load the pair too. It is
+        # ignored by default and run here by name, and the output has to name it as passed (D112).
+        run: |
+          $built = cargo test --locked -p term-core --lib --no-run --message-format=json |
+            ForEach-Object { try { $_ | ConvertFrom-Json } catch { } } |
+            Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'term_core' -and $_.executable }
+          if ($LASTEXITCODE -ne 0 -or -not $built) { throw 'the term-core test binary was not built' }
+          $dir = New-Item -ItemType Directory -Force -Path target/conpty-test
+          python scripts/conpty.py --to $dir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item $built.executable $dir
+          $test = Join-Path $dir (Split-Path $built.executable -Leaf)
+          $name = 'windows_conpty_osc7_reaches_the_screen_through_the_bundled_host'
+          & $test --ignored --exact "tests::$name" 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          # The close tests again, now on the host an installed Ivy runs: the step above ran them on
+          # the system's (D111, D112).
+          & $test windows_exit --test-threads=1 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_exit_ordinary_end_is_reported',
+                            'windows_exit_close_ends_the_reader',
+                            'windows_exit_close_ends_a_parked_writer',
+                            'windows_exit_an_exit_code_of_259_is_an_ended_program') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass on the bundled host" }
+          }
 
   build:
     if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -264,8 +293,10 @@ jobs:
         run: |
           python scripts/release.py notices --metadata target/release-metadata.json --directory target/x86_64-pc-windows-msvc/release/notices
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/conpty.py --to target/conpty
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $Version = python scripts/release.py version
-          python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version
+          python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version --conpty-dir target/conpty
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check installed payload, replacement and removal
         shell: pwsh
@@ -273,7 +304,7 @@ jobs:
           IVY_DISPOSABLE_RUNNER: 'yes'
         run: |
           $Installer = (Get-ChildItem dist/*-setup.exe).FullName
-          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release
+          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -ConptyDir target/conpty
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ivy-windows-x86_64

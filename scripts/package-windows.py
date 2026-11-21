@@ -3,42 +3,45 @@
 import argparse
 from pathlib import Path
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
 
+import conpty
 from release import RELEASE_VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def check_pe(path):
-    data = path.read_bytes()
-    if len(data) < 64 or data[:2] != b"MZ":
-        raise ValueError(f"not a Windows executable: {path}")
-    offset = struct.unpack_from("<I", data, 60)[0]
-    if offset + 6 > len(data) or data[offset:offset + 4] != b"PE\0\0":
-        raise ValueError(f"missing PE header: {path}")
-    if struct.unpack_from("<H", data, offset + 4)[0] != 0x8664:
-        raise ValueError(f"not a Windows x64 executable: {path}")
+    conpty.check_x64_pe(path.read_bytes(), path)
 
 
-def stage(binaries, payload, version):
+def stage(binaries, payload, version, pair, files=None):
+    files = conpty.pin()["files"] if files is None else files
     if not RELEASE_VERSION.fullmatch(version):
         raise ValueError(f"unsupported release version: {version}")
     if payload.exists():
         raise ValueError(f"payload already exists: {payload}")
     for name in ("app.exe", "panel-mcp.exe"):
         check_pe(binaries / name)
+    verified = conpty.verify(pair, files)
     notices = binaries / "notices"
     if not notices.is_dir() or not any(p.is_file() for p in notices.rglob("*")):
         raise ValueError("missing Cargo dependency notices")
     payload.mkdir(parents=True)
     shutil.copyfile(binaries / "app.exe", payload / "Ivy.exe")
     shutil.copyfile(binaries / "panel-mcp.exe", payload / "panel-mcp.exe")
+    # Flat beside Ivy.exe: the library is found by name in the application directory, and it
+    # starts the host beside itself (D112).
+    # The bytes that were checked are the bytes written, so nothing can swap the pair in between.
+    for name, data in verified.items():
+        (payload / name).write_bytes(data)
     licenses = payload / "licenses"
     licenses.mkdir()
+    (licenses / "conpty").mkdir()
+    shutil.copyfile(ROOT / "resources/licenses/windows/conpty-MIT.txt",
+                    licenses / "conpty/LICENSE")
     for name in ("LICENSE", "COPYRIGHT", "THIRD-PARTY.md"):
         shutil.copyfile(ROOT / name, licenses / name)
     for name in ("LICENSE-MIT", "LICENSE-APACHE"):
@@ -58,6 +61,8 @@ def main():
     parser.add_argument("--binary-dir", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--conpty-dir", required=True, type=Path,
+                        help="directory holding the pair scripts/conpty.py fetched")
     parser.add_argument("--iscc", default=r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")
     args = parser.parse_args()
     try:
@@ -70,7 +75,7 @@ def main():
             raise ValueError(f"installer already exists: {expected}")
         with tempfile.TemporaryDirectory(prefix="ivy-windows-") as temporary:
             payload = Path(temporary) / "payload"
-            stage(args.binary_dir.resolve(), payload, args.version)
+            stage(args.binary_dir.resolve(), payload, args.version, args.conpty_dir.resolve())
             subprocess.run([args.iscc, f"/DReleaseVersion={args.version}",
                             f"/DPayloadDir={payload}", f"/DOutputDir={output}",
                             str(ROOT / "packaging/windows/ivy.iss")], check=True)

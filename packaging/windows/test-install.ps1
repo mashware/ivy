@@ -1,11 +1,15 @@
 param([Parameter(Mandatory=$true)][string]$Installer,
-      [Parameter(Mandatory=$true)][string]$BinaryDir)
+      [Parameter(Mandatory=$true)][string]$BinaryDir,
+      [Parameter(Mandatory=$true)][string]$ConptyDir)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:IVY_DISPOSABLE_RUNNER -ne 'yes') {
     throw 'Installation checks require a disposable GitHub Windows runner.'
 }
 $Installer = (Resolve-Path $Installer).Path
 $BinaryDir = (Resolve-Path $BinaryDir).Path
+$ConptyDir = (Resolve-Path $ConptyDir).Path
+$ConsoleHost = @((Get-Content (Join-Path $PSScriptRoot 'conpty.json') -Raw | ConvertFrom-Json).files.PSObject.Properties.Name)
+if ($ConsoleHost.Count -ne 2) { throw 'conpty.json does not name the console host pair' }
 $Root = Join-Path $env:RUNNER_TEMP ('ivy-install-' + [guid]::NewGuid())
 $Destination = Join-Path $Root 'Ivy'
 $env:XDG_CONFIG_HOME = Join-Path $Root 'preferences'
@@ -23,7 +27,13 @@ function Install-Candidate {
             throw "Installed executable differs: $($Pair[1])"
         }
     }
-    foreach ($Name in @('LICENSE', 'COPYRIGHT', 'THIRD-PARTY.md')) {
+    # Microsoft's console host travels flat beside Ivy.exe (D112).
+    foreach ($Name in $ConsoleHost) {
+        if ((Get-FileHash (Join-Path $ConptyDir $Name)).Hash -ne (Get-FileHash (Join-Path $Destination $Name)).Hash) {
+            throw "Installed console host file differs: $Name"
+        }
+    }
+    foreach ($Name in @('LICENSE', 'COPYRIGHT', 'THIRD-PARTY.md', 'conpty/LICENSE')) {
         if (!(Test-Path (Join-Path $Destination "licenses/$Name"))) { throw "Missing $Name" }
     }
     Get-ChildItem (Join-Path $BinaryDir 'notices') -Recurse -File | ForEach-Object {
@@ -41,7 +51,9 @@ Install-Candidate
 Install-Candidate
 $Process = Start-Process (Join-Path $Destination 'unins000.exe') -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
 if ($Process.ExitCode -ne 0) { throw "Uninstaller exited $($Process.ExitCode)" }
-if (Test-Path (Join-Path $Destination 'Ivy.exe')) { throw 'Uninstall retained application' }
+foreach ($Name in @('Ivy.exe') + $ConsoleHost) {
+    if (Test-Path (Join-Path $Destination $Name)) { throw "Uninstall retained $Name" }
+}
 if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Ivy.lnk')) { throw 'Uninstall retained shortcut' }
 foreach ($Name in $Before.Keys) {
     if ((Get-FileHash (Join-Path $Preferences $Name)).Hash -ne $Before[$Name]) { throw "User data changed: $Name" }
