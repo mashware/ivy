@@ -11405,17 +11405,19 @@ four close tests passed on that host as well as on the system's.
 **Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
 thread reads that pipe, writes every chunk to `ivy.log` and hands it to a second thread that writes
 it to the standard error Ivy was started with; when that one falls 256 chunks behind, the terminal
-loses lines and the file does not. The file lives in the platform's log directory:
+loses chunks and the file does not, and the terminal is told how many bytes it missed and which file
+has them as soon as it takes lines again. The file lives in the platform's log directory:
 `~/Library/Logs/Ivy/` on macOS, `~/.local/state/ivy/` on Linux, `%LOCALAPPDATA%\Ivy\logs\` on
 Windows. An absolute `$XDG_STATE_HOME` rules on every platform and the file goes in its `ivy/`, as
 `$XDG_CONFIG_HOME` does for the configuration, so an isolated run writes its own log. Once it holds
-4 MiB it becomes `ivy.log.1`, replacing the previous one; the rotation happens between writes, so
-each file can pass the cap by the one write that reached it. Every window is a process of its own
-and they share the file, so its size is read from the file before each write, and a window whose
-file was already moved aside follows the name instead of moving it again. On Unix both files are
+4 MiB it becomes `ivy.log.1`, replacing the previous one; the size is checked before each write, so
+the write that crosses the cap lands whole. Every window is a process of its own and they share the
+name, so before each write a window compares the file it holds with the file at the name, and one
+whose file was moved aside by another window, or deleted, follows the name. A file that cannot be
+moved aside is emptied and says why on its first line, so the cap still holds. On Unix both files are
 created readable by their owner only. A panic writes one record — time, thread, message, location
-and backtrace — straight to the file and to the original standard error, replacing Rust's default
-report. Settings shows the path and a button that shows it in the file manager. A measured run
+and backtrace — straight to the file, replacing Rust's default report, and hands it to the
+terminal's thread without waiting for it. Settings shows the path and a button that shows it in the file manager. A measured run
 captures nothing. When the file cannot be opened, standard error stays exactly as it was and one
 line says why.
 
@@ -11450,9 +11452,14 @@ there is no frame cost to declare (D13).
 - **A new About dialog for the path.** Ivy has none; one row in Settings is enough to find the file.
 
 **Open.**
-- **What the process writes as it aborts is lost from both copies.** A stack overflow, a failed
-  allocation or a panic inside a panic writes its line into the pipe and ends the process before
-  the thread can copy it. Before this decision a shell launch showed it.
+- **What the runtime writes as it aborts is lost from both copies.** A stack overflow, a failed
+  allocation, or the abort line after a panic inside a panic is written into the pipe and ends the
+  process before the thread can copy it; the panic records themselves still reach the file. Before
+  this decision a shell launch showed it.
+- **Two windows crossing the cap in the same instant** can both move the file aside, and the second
+  then replaces the first one's copy. It takes two processes within a few microseconds.
+- **At closing, lines written after standard error is put back** can reach a terminal before lines
+  still queued for it.
 - **A panic record can come before the lines that led to it.** It is written straight to the file
   while earlier lines may still be in the pipe.
 - **On Windows it is read, not run.** Rust's standard error asks for the process's handle on every

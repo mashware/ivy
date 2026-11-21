@@ -538,3 +538,49 @@ mod layout;
 mod usability;
 
 mod theme_preview;
+
+#[test]
+fn the_startup_page_names_the_log_file_and_shows_it_in_its_folder() {
+    let folder = std::env::temp_dir().join(format!("settings-log-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let log = std::fs::canonicalize(&folder).unwrap().join("ivy.log");
+    std::fs::write(&log, "a line\n").unwrap();
+    let mut editor = Editor {
+        draft: Some(Document::new(String::new())),
+        section: 3,
+        log_file: Some(log.clone()),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    paint(&mut editor, &ctx, size, vec![]);
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    let shown = log.display().to_string();
+    assert!(text.iter().any(|(s, _)| s == "Log file"), "{text:?}");
+    assert!(text.iter().any(|(s, _)| s == &shown), "{text:?}");
+    click_label(&mut editor, &ctx, "Show in folder");
+    let crate::opener::Desktop::Recorded(calls) = &editor.desktop else {
+        unreachable!("the tests' desktop records")
+    };
+    assert_eq!(calls, &[crate::opener::Call::Reveal(log)]);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_window_that_keeps_no_log_says_so_where_the_path_would_be() {
+    let mut editor = Editor {
+        draft: Some(Document::new(String::new())),
+        section: 3,
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    paint(&mut editor, &ctx, size, vec![]);
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    assert!(
+        text.iter()
+            .any(|(s, _)| s == "This window keeps no log file."),
+        "{text:?}"
+    );
+    assert!(!text.iter().any(|(s, _)| s == "Show in folder"));
+}

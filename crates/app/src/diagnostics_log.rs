@@ -5,6 +5,7 @@ mod swap;
 
 use sink::RotatingSink;
 use std::{
+    convert::Infallible,
     ffi::OsStr,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -16,8 +17,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-/// Past this many bytes the file becomes `ivy.log.1`. The rotation happens between writes, so
-/// each of the two can pass it by the write that reached it.
+/// Past this many bytes the file is moved aside as `ivy.log.1`. The size is checked before each
+/// write, so the write that crosses it lands whole and the file ends a little over it.
 const CAP: u64 = 4 * 1024 * 1024;
 const FILE: &str = "ivy.log";
 /// How long closing waits for the last lines to reach the file (D57: every wait is bounded).
@@ -32,6 +33,9 @@ static PATH: OnceLock<PathBuf> = OnceLock::new();
 /// Standard error and the panic hook belong to the whole process: a second capture would save
 /// the first one's pipe as «the original».
 static TAKEN: AtomicBool = AtomicBool::new(false);
+/// Where the panic hook hands its record for the terminal. Taken back when the capture closes, so
+/// the terminal's thread can see its input end.
+static TERMINAL: Mutex<Option<mpsc::SyncSender<Vec<u8>>>> = Mutex::new(None);
 
 /// The file this window keeps, when it keeps one.
 pub(crate) fn path() -> Option<&'static Path> {
@@ -47,9 +51,8 @@ pub struct Capture {
 
 struct Live {
     swapped: swap::Swapped,
-    done: mpsc::Receiver<()>,
-    /// How many threads signal on `done` when they have copied everything.
-    copiers: usize,
+    /// Never carries a message: it disconnects when the last copying thread has finished.
+    done: mpsc::Receiver<Infallible>,
     // Held for the life of the capture, outside the thread, so that a copying thread that ends
     // early leaves writers blocked rather than failing — and `eprintln!` panics when it fails.
     _reader: std::io::PipeReader,
@@ -64,18 +67,23 @@ impl Capture {
         let Live {
             swapped,
             done,
-            copiers,
             _reader,
         } = live;
+        TERMINAL
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         // Putting the original back removes the pipe's writer, which is what ends the copying.
+        // Lines written from here on go straight to the original, and can reach a terminal before
+        // queued ones still being copied.
         drop(swapped);
-        let deadline = Instant::now() + SHUTDOWN;
         // Abandoned past the deadline: a program started with an inherited standard error keeps the
         // pipe open, and its threads have nothing left to say that the window is waiting for.
-        (0..copiers).all(|_| {
-            done.recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .is_ok()
-        })
+        match done.recv_timeout(SHUTDOWN) {
+            Err(mpsc::RecvTimeoutError::Disconnected) => true,
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+            Ok(never) => match never {},
+        }
     }
 }
 
@@ -112,7 +120,12 @@ pub fn start() -> Capture {
 /// Starts keeping the log in `directory`. Anything that fails leaves standard error as it was
 /// and says why on it, once.
 fn start_in(directory: Option<PathBuf>) -> Capture {
-    match capture(directory) {
+    let outcome = if TAKEN.swap(true, Ordering::AcqRel) {
+        Err("this process already keeps one".into())
+    } else {
+        capture(directory).inspect_err(|_| TAKEN.store(false, Ordering::Release))
+    };
+    match outcome {
         Ok(live) => Capture { live: Some(live) },
         Err(why) => {
             let _ = writeln!(std::io::stderr().lock(), "ivy: no log file: {why}");
@@ -122,9 +135,6 @@ fn start_in(directory: Option<PathBuf>) -> Capture {
 }
 
 fn capture(directory: Option<PathBuf>) -> Result<Live, String> {
-    if TAKEN.swap(true, Ordering::AcqRel) {
-        return Err("this process already keeps one".into());
-    }
     let directory = directory.ok_or("no directory to keep it in")?;
     create_directory(&directory).map_err(|e| format!("{}: {e}", directory.display()))?;
     let path = directory.join(FILE);
@@ -134,11 +144,9 @@ fn capture(directory: Option<PathBuf>) -> Result<Live, String> {
     // line saying why is written.
     let (reader, swapped) = swap::swap().map_err(|e| format!("standard error: {e}"))?;
     let sink = Arc::new(Mutex::new(sink));
-    let (finished, done) = mpsc::channel();
-    let mut copiers = 1;
+    let (finished, done) = mpsc::channel::<Infallible>();
     let forward = match swapped.original() {
         Some(original) => {
-            copiers += 1;
             Some(forwarder(original, finished.clone()).map_err(|e| format!("no thread: {e}"))?)
         }
         None => None,
@@ -147,19 +155,20 @@ fn capture(directory: Option<PathBuf>) -> Result<Live, String> {
         .try_clone()
         .map_err(|e| format!("standard error: {e}"))?;
     let copied = Arc::clone(&sink);
+    let terminal = forward.clone();
     std::thread::Builder::new()
         .name("log file".into())
         .spawn(move || {
+            let _finished = finished;
             pump(from, &copied, forward);
-            let _ = finished.send(());
         })
         .map_err(|e| format!("no thread: {e}"))?;
-    install_hook(sink, path.clone(), swapped.original());
+    *TERMINAL.lock().unwrap_or_else(PoisonError::into_inner) = terminal;
+    install_hook(sink, path.clone());
     let _ = PATH.set(path);
     Ok(Live {
         swapped,
         done,
-        copiers,
         _reader: reader,
     })
 }
@@ -168,18 +177,26 @@ fn capture(directory: Option<PathBuf>) -> Result<Live, String> {
 /// terminal paused with Ctrl+S, a parent that never drains its pipe — holds up only itself.
 fn forwarder(
     mut original: Box<dyn Write + Send>,
-    finished: mpsc::Sender<()>,
+    finished: mpsc::Sender<Infallible>,
 ) -> std::io::Result<mpsc::SyncSender<Vec<u8>>> {
     let (to, chunks) = mpsc::sync_channel::<Vec<u8>>(ORIGINAL_BACKLOG);
     std::thread::Builder::new()
         .name("log file: terminal".into())
         .spawn(move || {
-            for chunk in chunks {
-                let _ = original.write_all(&chunk);
-            }
-            let _ = finished.send(());
+            let _finished = finished;
+            copy_to_terminal(chunks, &mut original);
         })?;
     Ok(to)
+}
+
+/// Every chunk, in order, until nobody can send one any more. A write that fails does not stop
+/// the next one: a terminal that comes back gets what follows.
+fn copy_to_terminal(chunks: mpsc::Receiver<Vec<u8>>, original: &mut dyn Write) {
+    // Bounded: it ends when the pump and the panic hook have both dropped their senders, which
+    // closing the capture does.
+    for chunk in chunks {
+        let _ = original.write_all(&chunk);
+    }
 }
 
 #[cfg(unix)]
@@ -197,14 +214,16 @@ fn create_directory(directory: &Path) -> std::io::Result<()> {
 }
 
 /// Copies every byte read into the file, and hands it on to the original standard error without
-/// waiting for it, until the pipe has no writer left. This thread must never write to standard
-/// error itself: it is the only reader of that pipe.
+/// waiting for it, until the pipe has no writer left. What the terminal could not take is said to
+/// it, once it takes chunks again, as a count and the file that has them. This thread must never
+/// write to standard error itself: it is the only reader of that pipe.
 fn pump(
     mut from: impl Read,
     sink: &Mutex<RotatingSink>,
     forward: Option<mpsc::SyncSender<Vec<u8>>>,
 ) {
     let mut buffer = vec![0; 8192];
+    let mut dropped = 0usize;
     loop {
         let read = match from.read(&mut buffer) {
             Ok(0) => return,
@@ -213,24 +232,33 @@ fn pump(
             Err(_) => return,
         };
         let chunk = &buffer[..read];
+        let mut log = None;
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = sink
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .write(chunk);
+            let mut sink = sink.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = sink.write(chunk);
+            if dropped > 0 {
+                log = Some(sink.path().to_owned());
+            }
         }));
-        if let Some(forward) = &forward {
-            let _ = forward.try_send(chunk.to_vec());
+        let Some(forward) = &forward else { continue };
+        if let Some(log) = log {
+            let note = format!(
+                "[ivy: {dropped} bytes not shown here; see {}]\n",
+                log.display()
+            );
+            if forward.try_send(note.into_bytes()).is_err() {
+                dropped += read;
+                continue;
+            }
+            dropped = 0;
+        }
+        if forward.try_send(chunk.to_vec()).is_err() {
+            dropped += read;
         }
     }
 }
 
-fn install_hook(
-    sink: Arc<Mutex<RotatingSink>>,
-    path: PathBuf,
-    original: Option<Box<dyn Write + Send>>,
-) {
-    let original = Mutex::new(original);
+fn install_hook(sink: Arc<Mutex<RotatingSink>>, path: PathBuf) {
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
         let text = record(
@@ -242,14 +270,14 @@ fn install_hook(
             &std::backtrace::Backtrace::force_capture().to_string(),
         );
         // Written here and not through the pipe: this replaces Rust's own report, and a panic in
-        // the copying thread could not copy its own record.
+        // the copying thread could not copy its own record. The terminal gets it through its own
+        // thread, never waited for: a terminal that stopped reading must not turn a panic into a
+        // window that hangs.
         write_record(&sink, &path, text.as_bytes());
-        if let Some(original) = original
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_mut()
+        if let Ok(terminal) = TERMINAL.try_lock()
+            && let Some(terminal) = terminal.as_ref()
         {
-            let _ = original.write_all(text.as_bytes());
+            let _ = terminal.try_send(text.into_bytes());
         }
     }));
 }

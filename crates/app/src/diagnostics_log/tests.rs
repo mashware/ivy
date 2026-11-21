@@ -88,9 +88,88 @@ fn the_pump_copies_every_byte_to_the_file_and_hands_it_on_until_the_pipe_ends() 
 fn an_original_that_stopped_reading_holds_up_neither_the_file_nor_the_pipe() {
     let (path, sink) = sink_in("stalled");
     // Room for one chunk and nobody taking it: a terminal paused with Ctrl+S.
-    let (to, _never_read) = mpsc::sync_channel(1);
-    pump(three_chunks(), &sink, Some(to));
+    let (to, never_read) = mpsc::sync_channel(1);
+    let (ended, pumped) = mpsc::channel();
+    std::thread::spawn(move || {
+        pump(three_chunks(), &sink, Some(to));
+        let _ = ended.send(());
+    });
+    // A pump that waited for the terminal would never get here.
+    assert!(
+        pumped.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "the pump waited"
+    );
     assert_eq!(std::fs::read(&path).unwrap(), b"one\ntwo\nthree\n");
+    drop(never_read);
+}
+
+/// Four chunks; before the fourth is read, whatever the terminal has queued is taken.
+struct Paused<'a> {
+    chunks: Vec<&'static [u8]>,
+    terminal: &'a mpsc::Receiver<Vec<u8>>,
+    seen: Vec<Vec<u8>>,
+}
+
+impl Read for Paused<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.chunks.len() == 1 {
+            self.seen.extend(self.terminal.try_iter());
+        }
+        let Some(chunk) = self.chunks.first().copied() else {
+            return Ok(0);
+        };
+        self.chunks.remove(0);
+        buffer[..chunk.len()].copy_from_slice(chunk);
+        Ok(chunk.len())
+    }
+}
+
+#[test]
+fn what_the_terminal_missed_is_counted_to_it_when_it_takes_lines_again() {
+    let (path, sink) = sink_in("missed");
+    let (to, terminal) = mpsc::sync_channel(2);
+    let mut paused = Paused {
+        chunks: vec![b"one\n", b"two\n", b"three\n", b"four\n"],
+        terminal: &terminal,
+        seen: Vec::new(),
+    };
+    pump(&mut paused, &sink, Some(to));
+    let mut seen = paused.seen;
+    seen.extend(terminal.try_iter());
+    let note = format!("[ivy: 6 bytes not shown here; see {}]\n", path.display());
+    assert_eq!(
+        seen,
+        [&b"one\n"[..], b"two\n", note.as_bytes(), b"four\n"],
+        "the terminal is told what it missed, before what follows"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"one\ntwo\nthree\nfour\n");
+}
+
+/// A terminal whose first write fails.
+struct Flaky(usize, Vec<u8>);
+impl Write for Flaky {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 += 1;
+        if self.0 == 1 {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        self.1.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_terminal_write_that_fails_does_not_stop_the_next_one() {
+    let (to, chunks) = mpsc::sync_channel(ORIGINAL_BACKLOG);
+    to.send(b"lost\n".to_vec()).unwrap();
+    to.send(b"kept\n".to_vec()).unwrap();
+    drop(to);
+    let mut terminal = Flaky(0, Vec::new());
+    copy_to_terminal(chunks, &mut terminal);
+    assert_eq!(terminal.1, b"kept\n");
 }
 
 #[test]
@@ -143,7 +222,8 @@ struct Child {
 }
 
 fn child(name: &str, directory: &Path, environment: &[(&str, &OsStr)]) -> Child {
-    let output = Command::new(std::env::current_exe().unwrap())
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
         .args([
             &format!("diagnostics_log::tests::{name}"),
             "--exact",
@@ -152,9 +232,12 @@ fn child(name: &str, directory: &Path, environment: &[(&str, &OsStr)]) -> Child 
             "--test-threads=1",
         ])
         .env(DIRECTORY, directory)
-        .envs(environment.iter().copied())
-        .output()
-        .unwrap();
+        .env_remove("XDG_STATE_HOME");
+    // A measuring session the developer left exported would veto the capture being tested.
+    for measuring in crate::MEASUREMENT_VARIABLES {
+        command.env_remove(measuring);
+    }
+    let output = command.envs(environment.iter().copied()).output().unwrap();
     assert!(output.status.success(), "{name} failed: {output:?}");
     Child {
         file: std::fs::read_to_string(directory.join(FILE)).unwrap_or_default(),
@@ -176,10 +259,12 @@ fn child_writes_one_line() {
     // Putting the original back is what ends the pipe: without it the copying threads would
     // never finish and closing would report the deadline.
     assert!(capture.close(), "the copying threads did not finish");
-    assert!(
-        start_in(directory_from_parent()).live.is_none(),
-        "a second capture in one process is refused"
-    );
+    if path().is_some() {
+        assert!(
+            start_in(directory_from_parent()).live.is_none(),
+            "a second capture in one process is refused"
+        );
+    }
 }
 
 #[test]
@@ -188,6 +273,13 @@ fn a_line_on_standard_error_reaches_the_file_and_still_reaches_the_original() {
     let child = child("child_writes_one_line", &dir, &[]);
     assert_eq!(child.file, format!("{MARKER}\n"));
     assert!(child.original.contains(MARKER), "{}", child.original);
+    assert!(
+        child
+            .original
+            .contains("ivy: no log file: this process already keeps one"),
+        "{}",
+        child.original
+    );
     let named = format!("log path: Some({:?})", dir.join(FILE));
     assert!(child.said.contains(&named), "{}", child.said);
 }
@@ -198,9 +290,12 @@ fn a_directory_that_cannot_be_made_leaves_standard_error_as_it_was_and_says_why(
     let blocker = dir.join("a file");
     std::fs::write(&blocker, b"").unwrap();
     let child = child("child_writes_one_line", &blocker.join("logs"), &[]);
-    assert!(
-        child.original.contains("ivy: no log file: "),
-        "{}",
+    let because = format!("ivy: no log file: {}: ", blocker.join("logs").display());
+    assert!(child.original.contains(&because), "{}", child.original);
+    assert_eq!(
+        child.original.matches("ivy: no log file: ").count(),
+        1,
+        "a start that failed leaves the next one free to try: {}",
         child.original
     );
     assert!(child.original.contains(MARKER), "{}", child.original);

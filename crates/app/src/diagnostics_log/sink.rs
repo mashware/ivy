@@ -1,4 +1,4 @@
-//! The file the captured stream lands in, and the one rule that keeps it bounded.
+//! The file the captured stream lands in, and the rules that keep it bounded and findable.
 
 use std::{
     fs::{File, OpenOptions},
@@ -8,10 +8,10 @@ use std::{
 
 /// `ivy.log`, written from its end and moved aside once it holds the cap.
 ///
-/// The size is read from the file before each write, never counted here: every window of Ivy is a
-/// process of its own (the lease in `session/ownership.rs`) and they all append to the same file,
-/// so a count of one process's own bytes would let the file grow past the cap and would rename a
-/// file another process had just started.
+/// Before each write the file this sink holds is compared with the file at the name, by identity
+/// and not by a count of its own bytes: every window of Ivy is a process of its own (the lease in
+/// `session/ownership.rs`) and they all append to the same name. A sink whose file another window
+/// moved aside, or somebody deleted, follows the name instead of writing where nobody looks.
 pub(super) struct RotatingSink {
     path: PathBuf,
     file: Option<File>,
@@ -29,11 +29,18 @@ impl RotatingSink {
         })
     }
 
-    /// Writes `bytes` whole into the current file, moving it aside first when it already holds the
-    /// cap. A chunk is never split across the two files, so either can pass the cap by one write.
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Writes `bytes` whole into the file at the name, moving it aside first when it already holds
+    /// the cap. The check comes before the write, so the write that crosses the cap lands whole.
     pub(super) fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        if !self.holds_the_name() {
+            self.file = append(&self.path).ok();
+        }
         let full = match &self.file {
-            Some(file) => file.metadata()?.len() >= self.cap,
+            Some(file) => file.metadata().map_or(true, |now| now.len() >= self.cap),
             None => true,
         };
         if full {
@@ -46,17 +53,35 @@ impl RotatingSink {
         file.write_all(bytes)
     }
 
-    /// Moves a full file aside, unless another window already did: then the name holds a fresh
-    /// file, and renaming it would delete the copy that window just made. A rename that fails —
-    /// the file deleted under us, another program holding it — leaves writing to go on past the
-    /// cap rather than stop: a log that stops says nothing about why.
+    fn holds_the_name(&self) -> bool {
+        let Some(file) = &self.file else {
+            return false;
+        };
+        matches!(
+            (identity(file), identity_at(&self.path)),
+            (Ok(held), Ok(named)) if held == named
+        )
+    }
+
+    /// Moves the full file aside. When that cannot be done — another program holds the file, the
+    /// directory turned read-only — the file is emptied instead and says so on its first line:
+    /// writing on past the cap would let a failing console fill the disk, and stopping would leave
+    /// a log that says nothing about why.
+    ///
+    /// Two windows that find the file full in the same instant can both rename: the second moves
+    /// the first one's fresh file over the copy. Accepted: it takes two processes crossing the cap
+    /// within the same few microseconds, and costs one copy, never the current file.
     fn rotate(&mut self) {
         self.file = None;
-        let fresh = std::fs::metadata(&self.path).is_ok_and(|now| now.len() < self.cap);
-        if !fresh {
-            let _ = std::fs::rename(&self.path, rotated(&self.path));
-        }
+        let moved = std::fs::rename(&self.path, rotated(&self.path));
         self.file = append(&self.path).ok();
+        if let (Err(why), Some(file)) = (moved, &mut self.file) {
+            let _ = file.set_len(0);
+            let _ = writeln!(
+                file,
+                "ivy: could not move the full log aside ({why}); it was started again"
+            );
+        }
     }
 }
 
@@ -75,6 +100,30 @@ pub(super) fn append(path: &Path) -> std::io::Result<File> {
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     options.open(path)
+}
+
+#[cfg(unix)]
+fn identity(file: &File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(unix)]
+fn identity_at(path: &Path) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path)?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn identity(file: &File) -> std::io::Result<(u64, u64)> {
+    crate::windows_fs::identity(file)
+}
+
+#[cfg(windows)]
+fn identity_at(path: &Path) -> std::io::Result<(u64, u64)> {
+    crate::windows_fs::identity(&File::open(path)?)
 }
 
 #[cfg(test)]
@@ -140,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn two_windows_writing_one_file_keep_it_under_the_cap_and_lose_nothing() {
+    fn two_windows_sharing_one_file_rotate_it_once_and_lose_nothing() {
         let dir = scratch("two");
         let path = dir.join("ivy.log");
         let mut first = RotatingSink::open(path.clone(), 10).unwrap();
@@ -156,7 +205,18 @@ mod tests {
     }
 
     #[test]
-    fn a_rotation_that_cannot_rename_keeps_writing_rather_than_stopping() {
+    fn a_log_deleted_while_the_window_runs_comes_back_at_the_next_line() {
+        let dir = scratch("deleted");
+        let path = dir.join("ivy.log");
+        let mut sink = RotatingSink::open(path.clone(), 10).unwrap();
+        sink.write(b"before").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        sink.write(b"after").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"after");
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_moved_aside_starts_again_and_says_why() {
         let dir = scratch("stuck");
         let path = dir.join("ivy.log");
         let mut sink = RotatingSink::open(path.clone(), 4).unwrap();
@@ -164,8 +224,13 @@ mod tests {
         // A directory where the copy should go makes every rename fail, on every platform.
         std::fs::create_dir(rotated(&path)).unwrap();
         sink.write(b"5").unwrap();
-        sink.write(b"6").unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"123456");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with("ivy: could not move the full log aside ("),
+            "{text}"
+        );
+        assert!(text.ends_with("it was started again\n5"), "{text}");
+        assert!(!text.contains("1234"), "the full file was emptied: {text}");
     }
 
     #[cfg(unix)]

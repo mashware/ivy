@@ -7,8 +7,9 @@
 
 use std::io::{PipeReader, Write};
 
-/// The pipe standing in for standard error. Dropping it puts the original back, so no path can
-/// leave standard error pointing at a pipe nobody reads.
+/// The pipe standing in for standard error. Putting the original back is its `Drop`, so every
+/// early return of the capture puts it back without a line written for it. `None` only inside
+/// that `Drop`.
 pub(super) struct Swapped(Option<platform::State>);
 
 /// Makes a fresh pipe the process's standard error and hands back its read end.
@@ -19,8 +20,8 @@ pub(super) fn swap() -> std::io::Result<(PipeReader, Swapped)> {
 }
 
 impl Swapped {
-    /// Something that writes to the original standard error directly; nothing when the process was
-    /// born without one.
+    /// Something that writes to the original standard error directly; nothing when Windows gave
+    /// the process no handle, or the copy cannot be made.
     pub(super) fn original(&self) -> Option<Box<dyn Write + Send>> {
         platform::original(self.0.as_ref()?)
     }
@@ -154,15 +155,9 @@ struct Console {
 impl Write for Console {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.pending.extend_from_slice(bytes);
-        let whole = match std::str::from_utf8(&self.pending) {
-            Ok(_) => self.pending.len(),
-            Err(error) if error.error_len().is_none() => error.valid_up_to(),
-            Err(_) => self.pending.len(),
-        };
-        let text: Vec<u16> = String::from_utf8_lossy(&self.pending[..whole])
-            .encode_utf16()
-            .collect();
-        self.pending.drain(..whole);
+        let (text, used) = whole_characters(&self.pending);
+        let text: Vec<u16> = text.encode_utf16().collect();
+        self.pending.drain(..used);
         let mut sent = 0;
         while sent < text.len() {
             let mut written = 0;
@@ -188,5 +183,52 @@ impl Write for Console {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+/// The text that can be written now from `pending`, and how many of its bytes that used. Bytes
+/// that are not UTF-8 become U+FFFD where they stand; only a character still arriving — the start
+/// of one at the very end — is left for the next write.
+#[cfg(any(windows, test))]
+fn whole_characters(pending: &[u8]) -> (String, usize) {
+    let mut text = String::new();
+    let mut used = 0;
+    loop {
+        match std::str::from_utf8(&pending[used..]) {
+            Ok(rest) => {
+                text.push_str(rest);
+                return (text, pending.len());
+            }
+            Err(error) => {
+                let valid = used + error.valid_up_to();
+                text.push_str(std::str::from_utf8(&pending[used..valid]).unwrap_or_default());
+                match error.error_len() {
+                    None => return (text, valid),
+                    Some(invalid) => {
+                        text.push(char::REPLACEMENT_CHARACTER);
+                        used = valid + invalid;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::whole_characters;
+
+    #[test]
+    fn a_character_split_between_two_writes_waits_for_its_last_bytes() {
+        let euro = "€".as_bytes();
+        assert_eq!(whole_characters(&[b'a', euro[0], euro[1]]), ("a".into(), 1));
+        assert_eq!(whole_characters(euro), ("€".into(), 3));
+    }
+
+    #[test]
+    fn a_bad_byte_before_a_split_character_spoils_only_itself() {
+        let euro = "€".as_bytes();
+        let pending = [0xFF, b'a', euro[0], euro[1]];
+        assert_eq!(whole_characters(&pending), ("\u{FFFD}a".into(), 2));
     }
 }

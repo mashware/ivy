@@ -461,7 +461,7 @@ fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
 /// Where the window keeps what it reports about its own failures, so a report can include it.
 fn log_file(editor: &mut Editor, ui: &mut egui::Ui) {
     ui.label("Log file");
-    match crate::diagnostics_log::path() {
+    match &editor.log_file {
         Some(path) => {
             ui.weak(path.display().to_string());
             if ui.button("Show in folder").clicked() {
