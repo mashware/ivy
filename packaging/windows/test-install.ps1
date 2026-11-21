@@ -68,6 +68,9 @@ if ($SoftwareOpenGL) {
         }
     }
 }
+# The ordinary launch goes first: a control that fails for an unexpected reason would otherwise stop
+# the run before anyone learns whether Ivy starts at all.
+& $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'normal')
 foreach ($Control in 'crash', 'shell', 'layout', 'deadline') {
     $Rejected = $false
     try {
@@ -88,7 +91,6 @@ foreach ($Control in 'crash', 'shell', 'layout', 'deadline') {
     }
     if (-not $Rejected) { throw "Launch control '$Control' incorrectly passed" }
 }
-& $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'normal')
 foreach ($File in $Borrowed) { Remove-Item $File }
 # Repeat installation to exercise replacement without claiming an older-version upgrade trial.
 Install-Candidate
