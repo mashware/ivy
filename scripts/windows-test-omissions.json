@@ -433,6 +433,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::fixture_read_failure_preserves_child_traceback_and_stage",
+    "reason": "unix-only: launches /usr/bin/python3 in a POSIX PTY to retain a real child traceback"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "panel::overlay::native_tests::foreign_client_root_and_closed_holder_are_refused",
     "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
   },

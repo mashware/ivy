@@ -387,46 +387,10 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "tests::a_click_beside_the_silence_is_not_answered_by_it",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::a_click_on_the_silence_takes_it_off_the_glass_through_the_mouse_pass",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "tests::a_console_click_uses_the_old_pixels_and_does_not_clear_the_selection",
     "reason": "opening a link sometimes clears the console selection",
     "issue": "https://github.com/mashware/ivy/issues/188",
     "intermittent": true
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::a_console_that_stopped_receiving_says_so_over_its_grid",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::a_console_that_went_quiet_puts_no_sentence_of_ours_in_its_grid",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::a_console_too_short_for_the_whole_sentence_says_nothing_at_all",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::a_console_whose_reading_ended_badly_does_not_close_the_window_on_its_own",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
   },
   {
     "binary": "app/app:lib",
@@ -456,12 +420,6 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "tests::dismissing_the_silence_takes_the_sentence_away_and_undoes_nothing",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "tests::done_probes_the_file_after_a_watcher_notice_was_consumed",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
@@ -484,18 +442,6 @@
     "name": "tests::settings_editor::tests::an_open_editor_does_not_stop_output_in_any_tab",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::the_program_of_the_console_born_on_splitting_sees_the_size_of_its_pane",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::the_silence_is_stroked_filled_and_drawn_where_its_box_is",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
   },
   {
     "binary": "app/app:lib",
@@ -588,66 +534,6 @@
     "name": "every_blocking_wait_in_production_code_is_bounded_or_declared_abandoned",
     "reason": "the repository guard reads the checkout in Unix form",
     "issue": "https://github.com/mashware/ivy/issues/190"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::a_console_that_is_still_reading_has_no_ending_to_report",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::a_failure_carries_the_systems_own_number_where_the_kind_says_nothing",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::a_lang_passed_by_the_caller_beats_the_decided_one",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::closing_an_ordinary_console_does_not_spend_the_abandon_deadline",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::the_decided_lang_reaches_the_program",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::the_program_receives_the_terminal_type",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::the_program_receives_the_variables_passed_to_it",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::what_the_program_writes_arrives_over_the_channel",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::with_none_by_value_the_variable_is_removed_even_though_the_crate_sets_it",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "term-core/term_core:lib",
-    "name": "tests::without_passing_anything_the_variable_is_not_defined",
-    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
-    "issue": "https://github.com/mashware/ivy/issues/187"
   },
   {
     "binary": "app/app:lib",
