@@ -2249,6 +2249,7 @@ mod tests {
             return;
         }
         let mut discoverer = Discoverer::default();
+        let mut proportions = Vec::new();
         for (height, width) in [(20u32, 40u32), (40, 20), (17, 17)] {
             let (_, _, measurements) = discoverer
                 .color_glyph(&ctx, '\u{1F600}', height, width)
@@ -2264,7 +2265,18 @@ mod tests {
                 "for a slot of {width}x{height} the emoji came out at {measurements:?}: it fills no axis, \
                  so it looks smaller than it fits"
             );
+            proportions.push(measurements.x / measurements.y);
         }
+        // **And it keeps its own proportion whatever the slot's.** The three slots are wide, tall and
+        // square, so an image bent toward its slot — stretched to fill it, or clamped one axis at a
+        // time — comes out in three proportions. Rounding to whole pixels moves it by a few hundredths.
+        // Which face drew it is not assumed: Noto's bitmap and Segoe's outlines have different ones.
+        let spread = proportions.iter().copied().fold(f32::MIN, f32::max)
+            - proportions.iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            spread < 0.1,
+            "the emoji came out in proportions {proportions:?} for three slots: it bends to its slot"
+        );
     }
 
     #[test]
