@@ -2,6 +2,7 @@
 //! line naming the copy, with the notes, typed into that console and submitted with Enter.
 use super::super::delivery::{self, Enter, Refusal};
 use super::flatten;
+use super::tools::Asked;
 use crate::viewer::load::{Job, take};
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -63,11 +64,72 @@ pub(crate) struct Sending {
     /// Where the copy would go for the image's console this frame, or why it cannot.
     pub(super) target: Option<Result<PathBuf, String>>,
     phase: Phase,
+    /// The worker of a Send cancelled while it wrote its copy. A write cannot be interrupted, so
+    /// it is kept and polled until it ends, and what it wrote is removed then; no other Send
+    /// starts meanwhile, as the decoder's abandoned slot keeps a second decode from starting, so
+    /// two workers never race for one copy name (#197).
+    parked: Option<(Request, Job<PathBuf>)>,
+    /// What a parked worker's end left to say, until a drawer lays it out: the image it was for
+    /// may be closed by then, and the next one opened clears the notice it would have gone to.
+    pub(super) unshown: Option<String>,
 }
 
 impl Sending {
     pub(super) fn busy(&self) -> bool {
         !matches!(self.phase, Phase::Idle)
+    }
+
+    /// Whether a cancelled Send's worker is still writing its copy.
+    pub(super) fn parked(&self) -> bool {
+        self.parked.is_some()
+    }
+
+    /// Whether `poll` has anything to do: a Send on its way, or a cancelled one's worker.
+    pub(super) fn pending(&self) -> bool {
+        self.busy() || self.parked.is_some()
+    }
+
+    /// Whether Cancel can still take the Send back: until its line is typed. Offered for the
+    /// whole write rather than after a delay, because a slow disk is not a stuck one and no
+    /// constant tells them apart; the person does.
+    pub(super) fn cancellable(&self) -> bool {
+        self.in_flight().is_some()
+    }
+
+    /// Takes up what a click in the notes asked, saying in `notice` what became of it.
+    pub(super) fn answer(&mut self, asked: Option<Asked>, notice: &mut Option<String>) {
+        match asked {
+            Some(Asked::Send(request)) => {
+                self.ask(request);
+                *notice = None;
+            }
+            Some(Asked::Cancel) if self.cancel() => {
+                *notice = Some(if self.parked.is_some() {
+                    format!("{CANCELLED} {STILL_FINISHING}.")
+                } else {
+                    CANCELLED.into()
+                });
+            }
+            _ => {}
+        }
+    }
+
+    /// Takes back the Send whose line is not typed yet, parking its worker if it has one.
+    /// Answers whether there was one.
+    fn cancel(&mut self) -> bool {
+        match std::mem::take(&mut self.phase) {
+            Phase::Asked(_) => true,
+            Phase::Writing(request, job) => {
+                // `start` refuses while a worker is parked, so there is never a second one here.
+                debug_assert!(self.parked.is_none(), "a second worker parked");
+                self.parked = Some((request, job));
+                true
+            }
+            phase => {
+                self.phase = phase;
+                false
+            }
+        }
     }
 
     /// A click on Send, taken up on the next frame. One at a time: a click while another Send is
@@ -198,6 +260,14 @@ pub(crate) fn aim(window: &mut crate::Window) {
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
+    // No timer while it runs: its worker wakes the window when it ends, and one that never ends
+    // must not wake it for the life of the app.
+    if let Some((_, job)) = &window.image.send.parked
+        && let Some(written) = take(job)
+    {
+        let (request, _) = window.image.send.parked.take().expect("a parked worker");
+        forsake(window, &request, written);
+    }
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
         Phase::Enter(enter, at) if frame > at => {
@@ -243,6 +313,72 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
     window.image.say(format!("{why}; nothing was sent{left}."));
 }
 
+/// A cancelled Send's worker ended: the copy it wrote is removed, and with it the folder of a
+/// console that closed meanwhile. What could not be removed is said, and so is a worker's failure
+/// in its own words, which name a half-written copy it could not remove; a copy it did not write
+/// is not touched, because a refused `create_new` means the file is somebody else's.
+fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBuf, String>) {
+    let stays = match written {
+        Ok(path) => match std::fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
+                "The cancelled copy at {} could not be removed: {error}",
+                path.display()
+            )),
+            _ => None,
+        },
+        // As `failed` says it: a console that closed under the worker is the likely cause.
+        Err(why) if !window.all_panes().any(|p| p.name == request.pane) => Some(format!(
+            "{}, and the cancelled copy's worker reported: {why}",
+            Refusal::Closed
+        )),
+        Err(why) => Some(format!("The cancelled copy's worker reported: {why}")),
+    };
+    let left = forsaken_folder(window, request);
+    let said = match stays {
+        Some(stays) => format!("{stays}{left}."),
+        None if !left.is_empty() => format!("The cancelled copy is gone{left}."),
+        None => {
+            // Send is greyed out while the worker is parked, and the drawer says why: once it
+            // ends cleanly, that is no longer true. Send is said ready only where it would be:
+            // with marks to send and a folder to write their copy into.
+            let ready = window.image.has_marks()
+                && window
+                    .image
+                    .origin()
+                    .is_some_and(|o| copy_path(window, o.pane).is_ok());
+            let notice = &mut window.image.notice;
+            if notice
+                .as_deref()
+                .is_some_and(|n| n.contains(STILL_FINISHING))
+            {
+                let ready = if ready { "; Send is ready" } else { "" };
+                *notice = Some(format!("{CANCELLED} Its copy is gone{ready}."));
+            }
+            return;
+        }
+    };
+    // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
+    eprintln!("{said}");
+    // The worker it waited for has ended: a notice saying so is no longer true, and is not kept.
+    let notice = &mut window.image.notice;
+    if notice
+        .as_deref()
+        .is_some_and(|n| n.contains(STILL_FINISHING))
+    {
+        *notice = Some(CANCELLED.into());
+    }
+    window.image.send.unshown = Some(said);
+}
+
+/// Puts `said` after the drawer's `notice` rather than in its place: that one may be a refusal or
+/// a failed Send nobody has read yet.
+pub(super) fn join(notice: &mut Option<String>, said: String) {
+    *notice = Some(match notice.take() {
+        Some(current) => format!("{current} {said}"),
+        None => said,
+    });
+}
+
 /// A console that closed while its copy was being written could not remove its directory, which
 /// held the copy; once the copy is gone, the directory goes as it would have. Answers what is left
 /// to say about it in the drawer, which is nothing when it went or was already gone. `PanelDir`
@@ -277,6 +413,10 @@ fn start(
     request: Request,
     ctx: &egui::Context,
 ) -> Result<Phase, String> {
+    // First: the parked worker may yet create the very file this Send's line names.
+    if window.image.send.parked.is_some() {
+        return Err(STILL_FINISHING.into());
+    }
     if window.image.document() != Some(request.document) {
         return Err(REPLACED.into());
     }
@@ -333,6 +473,12 @@ fn deliver(
         }
     }
 }
+
+/// What Cancel says it did.
+const CANCELLED: &str = "Send cancelled; nothing was sent.";
+
+/// Why Send waits while a cancelled Send's worker is still writing its copy.
+const STILL_FINISHING: &str = "Still finishing the previous copy";
 
 /// Why a Send whose image is no longer the one shown goes nowhere.
 const REPLACED: &str = "The image this was drawn on is no longer the one shown";
