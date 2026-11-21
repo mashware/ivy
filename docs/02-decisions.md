@@ -11463,9 +11463,12 @@ a Ctrl+Z in the very pass of the click is refused too, and so is a second Send. 
 is typed, a Cancel beside «Sending…» takes the Send back** (#197): the marks and notes stay and
 unfreeze, nothing is typed, and a worker already writing is parked — a write cannot be
 interrupted — and polled from the window's input pass until it ends, when its copy is removed, and
-with it the folder of a console that closed meanwhile. While a worker is parked, a Send is refused
-with «Still finishing the previous copy» before any other check, so two workers never race for one
-name; the decoder's abandoned read is the same pattern. **While the copy is
+with it the folder of a console that closed meanwhile. While a worker is parked, Send is greyed
+out and the drawer says «Still finishing the previous copy» until the worker ends cleanly, and a
+Send asked anyway is refused with it before any other check, so two workers never race for one
+name; the decoder's abandoned read is the same pattern. What a parked worker leaves to say — a
+failure, a copy or folder it could not remove — goes to standard error as well, and waits for the
+next drawer that lays the notes out, because the image it was for may be closed by then. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that

@@ -360,7 +360,8 @@ pub(super) fn notes(
     // what it asks for is composed after the notes, from what they hold at the end of this pass.
     // The fields carry ids of their own: a button or a notice that comes and goes ahead of them
     // would otherwise renumber egui's automatic ids and take the keyboard from a note mid-word.
-    let ready = matches!(sending.target, Some(Ok(_))) && !sending.busy();
+    // Not while a cancelled Send's worker may yet create the copy this one would name.
+    let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
     let (clicked, cancelled) = fixed.send.as_ref().map_or((false, false), |label| {
         let height = fixed.button_height(label);
         let label = Arc::clone(label);

@@ -99,7 +99,11 @@ impl Sending {
                 *notice = None;
             }
             Some(Asked::Cancel) if self.cancel() => {
-                *notice = Some("Send cancelled; nothing was sent.".into());
+                *notice = Some(if self.parked.is_some() {
+                    format!("{CANCELLED} {STILL_FINISHING}.")
+                } else {
+                    CANCELLED.into()
+                });
             }
             _ => {}
         }
@@ -325,7 +329,15 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
     let said = match stays {
         Some(stays) => format!("{stays}{left}."),
         None if !left.is_empty() => format!("The cancelled copy is gone{left}."),
-        None => return,
+        None => {
+            // Send is greyed out while the worker is parked, and the drawer says why: once it
+            // ends cleanly, that is no longer true.
+            let notice = &mut window.image.notice;
+            if notice.as_deref().is_some_and(|n| n.contains(STILL_FINISHING)) {
+                *notice = Some(format!("{CANCELLED} Its copy is gone; Send is ready."));
+            }
+            return;
+        }
     };
     // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
     eprintln!("{said}");
@@ -368,7 +380,7 @@ fn start(
 ) -> Result<Phase, String> {
     // First: the parked worker may yet create the very file this Send's line names.
     if window.image.send.parked.is_some() {
-        return Err("Still finishing the previous copy".into());
+        return Err(STILL_FINISHING.into());
     }
     if window.image.document() != Some(request.document) {
         return Err(REPLACED.into());
@@ -426,6 +438,12 @@ fn deliver(
         }
     }
 }
+
+/// What Cancel says it did.
+const CANCELLED: &str = "Send cancelled; nothing was sent.";
+
+/// Why Send waits while a cancelled Send's worker is still writing its copy.
+const STILL_FINISHING: &str = "Still finishing the previous copy";
 
 /// Why a Send whose image is no longer the one shown goes nowhere.
 const REPLACED: &str = "The image this was drawn on is no longer the one shown";

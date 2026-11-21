@@ -3481,8 +3481,9 @@ mod tests {
     }
 
     /// While the copy is written, a Cancel beside «Sending…» takes the Send back: the marks and
-    /// notes stay and can be edited again, and nothing is typed. A Send while the cancelled
-    /// worker is still writing is refused with why; once that worker ends its copy is removed,
+    /// notes stay and can be edited again, and nothing is typed. While the cancelled worker is
+    /// still writing, Send is greyed out and the drawer says why, and a Send asked anyway is
+    /// refused with it; once that worker ends its copy is removed, the drawer says Send is ready,
     /// and the next Send goes through.
     #[cfg(unix)]
     #[test]
@@ -3508,12 +3509,22 @@ mod tests {
         press(&mut window, &ctx, general);
         painted(&mut window, &ctx, vec![egui::Event::Text("x".into())]);
         assert_eq!(marks_of(&window).general, "x", "the notes stayed frozen");
+        let parked = "Send cancelled; nothing was sent. Still finishing the previous copy.";
+        assert_eq!(window.image.notice.as_deref(), Some(parked));
 
         click_send(&mut window, &ctx);
+        assert!(!window.image.sending(), "a greyed-out Send was taken up");
+        assert_eq!(window.image.notice.as_deref(), Some(parked));
+        window.image.send.ask(send::Request {
+            document: window.image.document().unwrap(),
+            pane: window.image.origin().unwrap().pane,
+            path: copy.clone(),
+            line: "x".into(),
+        });
         painted(&mut window, &ctx, vec![]);
         let notice = window.image.notice.clone().unwrap_or_default();
         assert!(
-            notice.contains("Still finishing the previous copy"),
+            notice.starts_with("Still finishing the previous copy"),
             "{notice}"
         );
         assert!(!window.image.sending());
@@ -3523,6 +3534,11 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         assert!(!window.image.send.parked());
         assert!(!copy.exists(), "the cancelled copy stayed");
+        let notice = window.image.notice.clone().unwrap_or_default();
+        assert!(
+            notice.ends_with("Send is ready.") && !notice.contains("Still finishing"),
+            "{notice}"
+        );
         std::thread::sleep(Duration::from_millis(200));
         assert!(received.so_far().is_empty(), "a cancelled Send typed");
 
