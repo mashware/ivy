@@ -733,8 +733,8 @@ before sending. From the click on Send until the line is typed, the marks and no
 changed, but **Cancel**, beside «Sending…» while the copy is written, takes the Send back: the
 marks and notes stay and can be changed again, nothing is typed, and the copy is removed once it
 is finished. Until then another Send says «Still finishing the previous copy». On a drawer too
-short for the column, a notice there is cut to one line and shown whole on hover; the Send
-button keeps its height. The original file is never changed, and the copies are removed when
+short for the column, a notice there is cut to one line and shown whole on hover; shorter
+still, that line stays and the Send button is cut under it. The original file is never changed, and the copies are removed when
 that console closes. While marks are not sent, the image stays: opening another image or
 document, or closing its tab, says so. Only empty authorities,
 localhost and the verified local hostname are accepted as local file links.

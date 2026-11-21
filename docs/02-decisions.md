@@ -11435,8 +11435,10 @@ starts its serials again, since the opening already tells its fields apart.
   own under both, the full width, because a copy's path wraps into many lines in a column. Neither
   paints outside the drawer's body: on a drawer too short for the toolbar, a wrapped notice and
   the button, the image gives up its height first, then the notice is cut to one line, shown whole
-  on hover, and cut at the button's top where not even that line fits; the button keeps its full
-  height and is clipped below the toolbar rather than laid over it (#197).
+  on hover, above a button that keeps its full height; where not even that line fits above the
+  button, the line takes the column's head and the button is cut under it, never laid over the
+  toolbar: a refusal clipped away says nothing at all, a button cut short still names what it
+  does (#197).
 - **presses Enter in a write of its own, on a later frame.** People driving Claude Code from tmux
   report that text and Enter sent together are read as part of the paste; a
   separate write a frame later is what a person's Enter is, for an agent and a shell alike. A

@@ -2841,11 +2841,10 @@ mod tests {
     }
 
     /// On a drawer too short for the toolbar, a wrapped refusal and the Send button, nothing of
-    /// the column or the line under it shows outside the drawer or over the toolbar: the refusal
-    /// is cut to one line, with the whole of it on hover, and the button keeps its full height.
-    /// Shorter, with no room for that line above the button, the line is cut at the button's top
-    /// rather than painted over it; shorter still, the column's own clip keeps the button off the
-    /// toolbar.
+    /// the column or the line under it shows outside the drawer or over the toolbar, and the
+    /// refusal always shows one whole line: cut to it, with the whole of it on hover, above a
+    /// button that keeps its full height while both fit; shorter, the line takes the column's head
+    /// and the button is cut under it rather than the refusal being cut away (#197).
     #[test]
     fn a_drawer_too_short_cuts_the_refusal_and_never_paints_over_the_toolbar() {
         let notice = "This image has marks that were not sent: send them or clear them before \
@@ -2864,29 +2863,13 @@ mod tests {
                 view.max,
             );
             let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
-            let painted = visible_texts(&shapes, footer);
-            assert!(
-                !painted.is_empty(),
-                "nothing of the column painted at {height}"
-            );
-            for (galley, shown) in &painted {
+            for (galley, shown) in &visible_texts(&shapes, footer) {
                 assert!(
                     !shown.is_positive() || below_bar.contains_rect(*shown),
                     "{:?} shows at {shown:?}, outside {below_bar:?}",
                     galley.text()
                 );
             }
-            if height < 80.0 {
-                continue;
-            }
-            let (button, _) = clipped_text(&shapes, |t| t.starts_with("Send to ")).unwrap();
-            let frame = shapes.iter().find_map(|clipped| match &clipped.shape {
-                egui::Shape::Rect(rect) if rect.rect.contains_rect(button) => Some(rect.rect),
-                _ => None,
-            });
-            let frame = frame.expect("the button has a frame");
-            assert!(frame.height() >= 32.0, "{frame:?}");
-            assert!(below_bar.contains_rect(frame), "{frame:?}");
             let said = visible_texts(&shapes, |t| t == notice);
             let [(said, shown)] = &said[..] else {
                 panic!("the refusal is not painted once at {height}");
@@ -2897,12 +2880,9 @@ mod tests {
                 said.rows.len()
             );
             assert!(
-                !shown.intersect(frame).is_positive(),
-                "{shown:?} over the button {frame:?} at {height}"
+                shown.height() >= said.rect.height() - 0.5,
+                "only {shown:?} of the refusal's line shows at {height}"
             );
-            if height < 100.0 {
-                continue;
-            }
             // Moved once, then held still: egui shows a tooltip only to a pointer at rest.
             let mut hover = vec![egui::Event::PointerMoved(shown.center())];
             let whole = (0..60).any(|_| {
@@ -2911,7 +2891,34 @@ mod tests {
                     .iter()
                     .any(|(galley, _)| !galley.elided)
             });
-            assert!(whole, "hovering the cut refusal does not show it whole");
+            assert!(
+                whole,
+                "hovering the cut refusal does not show it whole at {height}"
+            );
+            // Cut away entirely under the line, the button is not painted at all.
+            let Some((button, _)) = clipped_text(&shapes, |t| t.starts_with("Send to ")) else {
+                assert!(height < 100.0, "the button is not painted at {height}");
+                continue;
+            };
+            let frame = shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) if rect.rect.contains_rect(button) => {
+                    Some((rect.rect, rect.rect.intersect(clipped.clip_rect)))
+                }
+                _ => None,
+            });
+            let (frame, frame_shown) = frame.expect("the button has a frame");
+            assert!(frame.height() >= 32.0, "{frame:?}");
+            assert!(
+                !frame_shown.is_positive() || below_bar.contains_rect(frame_shown),
+                "{frame_shown:?}"
+            );
+            assert!(
+                !shown.intersect(frame_shown).is_positive(),
+                "{shown:?} over the button {frame_shown:?} at {height}"
+            );
+            if height > 100.0 {
+                assert_eq!(frame_shown, frame, "the button is cut where both fit");
+            }
         }
     }
 

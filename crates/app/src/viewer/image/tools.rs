@@ -116,10 +116,11 @@ pub(super) fn rows(marks: &Marks) -> usize {
 
 /// What the column keeps whole, outside the list that scrolls: the notice at its head and the
 /// Send button at its foot. Laid out before the drawer is split and painted as laid out, so the
-/// room `split` keeps for them is the room they take. The notice wraps whole while the column can
-/// hold it beside the button; where the drawer is too short for that, it is cut to one line with
-/// the whole of it on hover, because the button keeps its full height: a button squeezed to a
-/// sliver, or painted up over the toolbar, was the defect (#197).
+/// room `split` keeps for them is the room they take. The notice wraps whole while the body under
+/// the toolbar, less the column's margins, holds it above the button; shorter, it is cut to one
+/// line with the whole of it on hover. Where not even that line fits above the button, the line
+/// comes first and the button gives up its top: a refusal nobody can read was the defect, as was
+/// a button painted up over the toolbar (#197).
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
     send: Option<Arc<egui::Galley>>,
@@ -182,6 +183,12 @@ impl Fixed {
             .as_ref()
             .map_or(0.0, |send| self.button_height(send) + self.spacing);
         notice + send
+    }
+
+    /// Whether the notice and the button together are taller than `room`, the column's height
+    /// inside its margins: then the notice's line is painted first, at the column's head.
+    fn notice_first(&self, room: f32) -> bool {
+        self.notice.is_some() && self.height() > room
     }
 
     /// The button's text with its padding and its one-point border on both sides.
@@ -322,13 +329,33 @@ pub(super) fn notes(
         origin,
         sending,
     } = panel;
+    let inner = layout.column.shrink2(MARGIN);
     let mut column = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(layout.column.shrink2(MARGIN))
+            .max_rect(inner)
             .layout(egui::Layout::bottom_up(egui::Align::Min)),
     );
     // On a drawer too short for the button, its top is cut rather than laid over the toolbar.
     column.set_clip_rect(layout.column.intersect(column.clip_rect()));
+    let first = fixed
+        .notice
+        .as_ref()
+        .filter(|_| fixed.notice_first(inner.height()));
+    if let Some(notice) = first {
+        // Too short for the line above the button: the line takes the column's head, and the
+        // button is cut under it.
+        let band = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), notice.size().y));
+        let mut head = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("image-notice-first")
+                .max_rect(band),
+        );
+        head.set_clip_rect(band.intersect(column.clip_rect()));
+        head.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
+        let mut below = column.clip_rect();
+        below.min.y = below.min.y.max(band.bottom() + NOTICE_GAP);
+        column.set_clip_rect(below);
+    }
     // The button is laid out first so it keeps the column's foot however many notes there are;
     // what it asks for is composed after the notes, from what they hold at the end of this pass.
     // The fields carry ids of their own: a button or a notice that comes and goes ahead of them
@@ -359,11 +386,10 @@ pub(super) fn notes(
     }
     let rest = column.available_size();
     column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
-        // Where not even the notice's one line fits above the button, it is cut at the button's
-        // top rather than painted over it; its whole text is still on hover.
+        // Nothing here is painted over the button under it.
         ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
         // Outside the list that scrolls: a refusal is read without scrolling up to it.
-        if let Some(notice) = &fixed.notice {
+        if let Some(notice) = fixed.notice.as_ref().filter(|_| first.is_none()) {
             // A notice cut to one line is elided, and egui's label then shows it whole on hover.
             ui.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
             ui.add_space(NOTICE_GAP);
