@@ -430,8 +430,9 @@ mod tests {
 
     #[test]
     fn saved_identity_is_typed_and_lower_modes_remove_it() {
+        let directory = std::env::temp_dir().join("project");
         let document = serde_json::json!({"v":2,"tabs":[{"root":{"leaf":{
-            "panel_width":30,"folded":false,"cwd":"/tmp/project",
+            "panel_width":30,"folded":false,"cwd":directory,
             "resume":{"client":"codex","session_id":ID}
         }}}]});
         let parsed = session::interpret(&document.to_string()).unwrap();
@@ -444,10 +445,7 @@ mod tests {
             panic!("leaf");
         };
         assert!(leaf.resume.is_none());
-        assert_eq!(
-            leaf.cwd.as_deref(),
-            Some(std::path::Path::new("/tmp/project"))
-        );
+        assert_eq!(leaf.cwd.as_deref(), Some(directory.as_path()));
         let layout = parsed.without_directories();
         let session::StoredNode::Leaf(leaf) = &layout.tabs()[0].root else {
             panic!("leaf");

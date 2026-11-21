@@ -587,17 +587,16 @@ fn the_file_tab_keeps_a_code_file_across_tabs() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
     let pane = window.all_panes().next().unwrap().name;
-    let code = std::path::PathBuf::from("/r/src/lib.rs");
+    let root = std::env::temp_dir().join("viewer-file-tab");
+    let code = root.join("src").join("lib.rs");
+    let markdown = root.join("README.md");
     assert!(open_document_target(
         &mut window,
         pane,
-        "/r/README.md".into(),
+        markdown.clone(),
         None
     ));
-    assert!(!shows_as_code(
-        &window,
-        std::path::Path::new("/r/README.md")
-    ));
+    assert!(!shows_as_code(&window, &markdown));
     assert!(open_document_target(&mut window, pane, code.clone(), None));
     assert!(shows_as_code(&window, &code));
     activate(&mut window, false);

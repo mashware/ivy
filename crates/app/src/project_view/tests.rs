@@ -52,7 +52,10 @@ fn colliding_names_are_disambiguated_by_shared_identity_paths() {
     let second = identity("/two/same");
     let all = vec![(0, first.clone()), (1, second.clone())];
     assert_ne!(badge_name(&first, &all), badge_name(&second, &all));
-    assert_eq!(badge_name(&first, &all), "One/Same");
+    assert_eq!(
+        badge_name(&first, &all),
+        PathBuf::from("One").join("Same").to_str().unwrap()
+    );
     assert_eq!(badge_name(&first, &[(0, first.clone())]), "Same");
     assert_eq!(display_name("project-a"), "ProjectA");
     assert_eq!(display_name("my_project name"), "MyProjectName");
