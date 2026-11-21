@@ -44,6 +44,7 @@ mod clipboard;
 mod closing;
 mod console_input;
 pub(crate) mod control;
+pub mod diagnostics_log;
 mod pane_view;
 mod resume;
 use panel::pane::{identity_of, panel_or_none};

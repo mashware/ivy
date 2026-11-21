@@ -454,6 +454,24 @@ fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
     ui.weak("Markdown roadmaps are configured in the settings file: roadmap.<name> = <path>. The Board lays them out By milestone. Paths are read in the background; Markdown is shown as inert text.");
     ui.add_space(10.0);
     ui.weak("Changes apply on the next launch. Turning restoration off keeps the previous saved layout. Additional windows are temporary and do not save their layout.");
+    ui.add_space(18.0);
+    log_file(editor, ui);
+}
+
+/// Where the window keeps what it reports about its own failures, so a report can include it.
+fn log_file(editor: &mut Editor, ui: &mut egui::Ui) {
+    ui.label("Log file");
+    match crate::diagnostics_log::path() {
+        Some(path) => {
+            ui.weak(path.display().to_string());
+            if ui.button("Show in folder").clicked() {
+                editor.desktop.reveal(path);
+            }
+        }
+        None => {
+            ui.weak("This window keeps no log file.");
+        }
+    }
 }
 
 fn shortcuts(editor: &mut Editor, ui: &mut egui::Ui, errors: &[(String, String)]) {

@@ -11405,8 +11405,9 @@ four close tests passed on that host as well as on the system's.
 **Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
 thread reads that pipe and writes every byte to `ivy.log` first and to the standard error Ivy was
 started with second. The file lives in the platform's log directory: `~/Library/Logs/Ivy/` on
-macOS, `$XDG_STATE_HOME/ivy/` on Linux (`~/.local/state/ivy/` when that variable is not an absolute
-path), `%LOCALAPPDATA%\Ivy\logs\` on Windows. At 4 MiB it becomes `ivy.log.1`, replacing the
+macOS, `~/.local/state/ivy/` on Linux, `%LOCALAPPDATA%\Ivy\logs\` on Windows. An absolute
+`$XDG_STATE_HOME` rules on every platform and the file goes in its `ivy/`, as `$XDG_CONFIG_HOME` does
+for the configuration, so an isolated run writes its own log. At 4 MiB it becomes `ivy.log.1`, replacing the
 previous one, so the two files never hold more than 8 MiB. On Unix both are created readable by
 their owner only. A panic writes one record — time, thread, message, location and backtrace —
 straight to the file and to the original standard error, replacing Rust's default report.

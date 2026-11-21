@@ -36,6 +36,8 @@ pub(crate) struct Editor {
     timing: Timing,
     application: runtime::Application,
     pub(super) saved_startup_restore: Option<super::StartupRestore>,
+    /// Where «Show in folder» sends the log file (D113).
+    pub(super) desktop: crate::opener::Desktop,
 }
 
 impl Editor {

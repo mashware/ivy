@@ -531,6 +531,22 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/viewer/code_header/tests/window.rs",
         include_str!("../src/viewer/code_header/tests/window.rs"),
     ),
+    (
+        "app/src/diagnostics_log.rs",
+        include_str!("../src/diagnostics_log.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/sink.rs",
+        include_str!("../src/diagnostics_log/sink.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/swap.rs",
+        include_str!("../src/diagnostics_log/swap.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/tests.rs",
+        include_str!("../src/diagnostics_log/tests.rs"),
+    ),
     ("app/src/opener.rs", include_str!("../src/opener.rs")),
     (
         "app/src/opener/linux.rs",
