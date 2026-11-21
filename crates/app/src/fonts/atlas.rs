@@ -74,6 +74,16 @@ pub(super) struct Glyphs {
     pub(super) height: u32,
     /// Whether it was already said that the atlas filled.
     pub(super) said_the_ceiling: bool,
+    /// How many of the glyphs pasted since it was last read came from colour outlines (`COLR`) and
+    /// not from a bitmap. The measurement report says which path it timed: a batch that measures one
+    /// path and walks the other would otherwise publish its cost under the wrong name (#176).
+    pub(super) drawn_from_outlines: usize,
+}
+
+/// A colour glyph drawn to the size of its slot, and which of the two paths drew it.
+pub(super) struct Drawn {
+    pub(super) image: egui::ColorImage,
+    pub(super) from_outlines: bool,
 }
 
 impl Glyphs {
@@ -111,8 +121,16 @@ impl Glyphs {
         let spot = if let Some(saved) = saved.or_else(|| self.saved_ones.get(&(which_char, 0))) {
             *saved
         } else {
-            let spot = color_glyph_of(collection, sources, which_char, height, max_width)
-                .and_then(|image| self.blit(ctx, image));
+            let spot = match color_glyph_of(collection, sources, which_char, height, max_width) {
+                Some(drawn) => {
+                    let spot = self.blit(ctx, drawn.image);
+                    if spot.is_some() && drawn.from_outlines {
+                        self.drawn_from_outlines += 1;
+                    }
+                    spot
+                }
+                None => None,
+            };
             let key = if spot.is_some() { max_width } else { 0 };
             self.saved_ones.insert((which_char, key), spot);
             spot
@@ -216,7 +234,7 @@ pub(super) fn color_glyph_of(
     which_char: ColorEmoji,
     height: u32,
     max_width: u32,
-) -> Option<egui::ColorImage> {
+) -> Option<Drawn> {
     // **Only the families the system declares as emoji, and there the search ends.** It does not fall to
     // traversing them all as `look_for` does: a family that is not emoji and still covers an emoji
     // paints it **in monochrome** —on this machine `DejaVu Sans` takes the 😀 with `Noto Color Emoji`
@@ -241,8 +259,8 @@ pub(super) fn color_glyph_of(
             // most are monochrome. Without this check the first the system enumerates would win,
             // which is the defect this project has documented since **D24** and the one
             // Alacritty carries.
-            if let Some(image) = rasterize(&font, glyph, height, max_width) {
-                return Some(image);
+            if let Some(drawn) = rasterize(&font, &blob, face.index(), glyph, height, max_width) {
+                return Some(drawn);
             }
         }
     }
@@ -289,12 +307,12 @@ fn glyph_of(font: &skrifa::FontRef<'_>, which_char: ColorEmoji) -> Option<skrifa
 /// The pixels of a bitmap, in RGBA and with **the alpha already premultiplied**. `None` if what it brings
 /// is not a color drawing.
 ///
-/// **It is apart from `rasterize` so it can be asserted on, and it is not a detour.** Which of the three
-/// paths an emoji travels **is not decided by this project: it is decided by the font the machine has
+/// **It is apart from `bitmap_of` so it can be asserted on, and it is not a detour.** Which of the three
+/// bitmap paths an emoji travels **is not decided by this project: it is decided by the font the machine has
 /// installed**. On this one `Noto Color Emoji` rules, which brings PNG, so the other two would be delivered without
 /// any test ever having run them — and they are the two that come first in **F2.7**.
-/// Checked by mutating them with the body inside `rasterize`: removing the BGRA-to-RGBA swap, which paints
-/// blue what the emoji has as red, left the 647 tests green.
+/// Checked by mutating them when the body lived inside the function that rasterizes: removing the
+/// BGRA-to-RGBA swap, which paints blue what the emoji has as red, left the 647 tests green.
 pub(super) fn pixels_of(
     bitmap: &skrifa::bitmap::BitmapData<'_>,
     width: u32,
@@ -330,18 +348,156 @@ pub(super) fn pixels_of(
     }
 }
 
-/// The color bitmap of a glyph, rescaled to fit in the slot it is given.
+/// The color drawing of a glyph, fitted to the slot it is given: the face's color bitmap if it has
+/// one for the glyph, else its color outlines (`COLR`), else nothing.
 ///
-/// Returns `None` when that face does **not** bring the glyph in color: either it has no bitmap table, or it
-/// has one and for that glyph it stores an **alpha mask**, which is a monochrome drawing and therefore not
+/// Returns `None` when that face does **not** bring the glyph in color: no bitmap and no `COLR`
+/// record, or a bitmap that is an **alpha mask**, which is a monochrome drawing and therefore not
 /// this. The caller falls to the text path.
 ///
-/// **The color outlines —`COLR`— are left out, and not by oversight.** Painting them demands rasterizing
-/// outlines by hand, which is the custom rasterizer this milestone discarded on purpose for invalidating the
-/// whole measurement history. On Linux it is not noticed —the system emoji fonts are bitmap—
-/// but on Windows it is, because `Segoe UI Emoji` is `COLR`: it is declared as what
-/// **F2.7** lacks, not as something that works here.
-pub(super) fn rasterize(
+/// **The bitmap is asked first**, so a face that has one for the glyph never reaches the outlines
+/// (D25, #176). `font` must be `data` opened at `index`: the checks read the one and the library
+/// draws from the other, which is why this stays private to the one caller that builds both.
+fn rasterize(
+    font: &skrifa::FontRef<'_>,
+    data: &fontique::Blob<u8>,
+    index: u32,
+    glyph: skrifa::GlyphId,
+    height: u32,
+    max_width: u32,
+) -> Option<Drawn> {
+    if let Some(image) = bitmap_of(font, glyph, height, max_width) {
+        return Some(Drawn {
+            image,
+            from_outlines: false,
+        });
+    }
+    colr_of(font, data, index, glyph, height, max_width).map(|image| Drawn {
+        image,
+        from_outlines: true,
+    })
+}
+
+/// The color outlines of a glyph, drawn at the size the slot gives them.
+///
+/// **Only a glyph with a `COLR` record is drawn here.** The library draws whatever it is handed —
+/// color outlines, else a bitmap, else the plain outline in the paint color — so a glyph without the
+/// record would come out as a white silhouette, and in a monochrome symbol face (most of the families
+/// the system calls emoji) it would win over the color face behind it: the defect **D24** closed.
+///
+/// **It is placed on its advance and the face's vertical [`extent`] — never on its ink**: the advance
+/// across, the extent down. Fitted by its ink, every emoji of a face would get a scale and a baseline of its
+/// own. And it is drawn directly at that size, which `glyph_run` does with its glyph cache off — its
+/// default — and without hinting, which a colour glyph never takes and whose set-up for the whole
+/// font would otherwise be paid, and timed as drawing, on every glyph.
+///
+/// **A graph the library cannot walk is not drawn.** It drops a painting error and hands back
+/// whatever it got to draw, often nothing; remembered as a success, that blank would stand where the
+/// emoji is, for the rest of the session. So the graph is walked first, and a failure is said once per
+/// character and cell height — what the atlas remembers — and the next face is asked.
+///
+/// A layer drawn «in the text color» is drawn white: the atlas is not keyed by color.
+fn colr_of(
+    font: &skrifa::FontRef<'_>,
+    data: &fontique::Blob<u8>,
+    index: u32,
+    glyph: skrifa::GlyphId,
+    height: u32,
+    max_width: u32,
+) -> Option<egui::ColorImage> {
+    use skrifa::MetadataProvider as _;
+    let colour = font.color_glyphs().get(glyph)?;
+    let location = skrifa::instance::LocationRef::default();
+    let metrics = font.metrics(skrifa::instance::Size::unscaled(), location);
+    let advance = font
+        .glyph_metrics(skrifa::instance::Size::unscaled(), location)
+        .advance_width(glyph)?;
+    let (ascent, descent) = extent(font, &metrics);
+    let line_height = ascent - descent;
+    // A glyph with no advance is a mark drawn over its neighbour, not an emoji: there is no box to
+    // fit it to, and dividing by it would hand the library an infinite size.
+    if advance <= 0.0 || line_height <= 0.0 {
+        return None;
+    }
+    if let Err(error) = colour.paint(location, &mut WalkOnly) {
+        eprintln!(
+            "ivy: the colour outlines of glyph {} cannot be drawn ({error:?}); another emoji font is asked",
+            glyph.to_u32()
+        );
+        return None;
+    }
+    // Pixels per font unit — the same rule the bitmap path fits by.
+    let factor = (height as f32 / line_height).min(max_width as f32 / advance);
+    let width = ((advance * factor).round() as u32).clamp(1, max_width);
+    let tall = ((line_height * factor).round() as u32).clamp(1, height);
+    // The atlas refuses anything larger, so it is not drawn only to be thrown away.
+    if width as usize > ATLAS_SIDE || tall as usize > ATLAS_SIDE {
+        return None;
+    }
+    let (width_px, tall_px) = (u16::try_from(width).ok()?, u16::try_from(tall).ok()?);
+
+    let mut context = vello_cpu::RenderContext::new(width_px, tall_px);
+    let mut resources = vello_cpu::Resources::new();
+    context.set_paint(vello_cpu::color::palette::css::WHITE);
+    let font_data = vello_cpu::peniko::FontData::new(data.clone(), index);
+    context
+        .glyph_run(&mut resources, &font_data)
+        .font_size(f32::from(metrics.units_per_em) * factor)
+        .hint(false)
+        .fill_glyphs(std::iter::once(vello_cpu::Glyph {
+            id: glyph.to_u32(),
+            x: 0.0,
+            y: ascent * factor,
+        }));
+    context.flush();
+    let mut pixmap = vello_cpu::Pixmap::new(width_px, tall_px);
+    context.render(&mut pixmap, &mut resources);
+    // Nothing inked is not a colour drawing, whatever the record says: the next face, or the text
+    // path, shows the character instead of a blank remembered as a success.
+    if pixmap.data().iter().all(|pixel| pixel.a == 0) {
+        return None;
+    }
+    Some(egui::ColorImage::from_rgba_premultiplied(
+        [width as usize, tall as usize],
+        pixmap.data_as_u8_slice(),
+    ))
+}
+
+/// How far above and below the baseline the box of a face's colour glyphs reaches, in font units
+/// (the descent negative).
+///
+/// **The line is not enough.** `Segoe UI Emoji` declares a line flatter than its emoji — measured on
+/// Windows CI, its advance is 1.43 times its line — so a face placed on its line came out cut at the
+/// top or the bottom. The `OS/2` table's Windows extent is the one a face promises to keep its ink
+/// inside, because Windows clips at it; the box takes whichever of the two reaches further, so a
+/// face whose line already holds its ink keeps it.
+fn extent(font: &skrifa::FontRef<'_>, metrics: &skrifa::metrics::Metrics) -> (f32, f32) {
+    use skrifa::raw::TableProvider as _;
+    match font.os2() {
+        Ok(os2) => (
+            metrics.ascent.max(f32::from(os2.us_win_ascent())),
+            metrics.descent.min(-f32::from(os2.us_win_descent())),
+        ),
+        Err(_) => (metrics.ascent, metrics.descent),
+    }
+}
+
+/// A painter that draws nothing: walking a glyph's graph with it says whether the graph can be
+/// walked at all, which the library that draws it does not report.
+struct WalkOnly;
+
+impl skrifa::color::ColorPainter for WalkOnly {
+    fn push_transform(&mut self, _: skrifa::color::Transform) {}
+    fn pop_transform(&mut self) {}
+    fn push_clip_glyph(&mut self, _: skrifa::GlyphId) {}
+    fn push_clip_box(&mut self, _: skrifa::raw::types::BoundingBox<f32>) {}
+    fn pop_clip(&mut self) {}
+    fn fill(&mut self, _: skrifa::color::Brush<'_>) {}
+    fn push_layer(&mut self, _: skrifa::color::CompositeMode) {}
+}
+
+/// The color bitmap of a glyph, rescaled to fit in the slot it is given.
+fn bitmap_of(
     font: &skrifa::FontRef<'_>,
     glyph: skrifa::GlyphId,
     height: u32,
@@ -375,4 +531,376 @@ pub(super) fn rasterize(
         [final_width as usize, final_height as usize],
         shrunk.as_raw(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Google's `COLR` version 1 test glyphs: outlines and a `COLR` table, no colour bitmap — the shape
+    /// of `Segoe UI Emoji`, on a machine whose own emoji font is a bitmap one.
+    fn colr_fixture() -> fontique::Blob<u8> {
+        let bytes = include_bytes!("../../tests/fixtures/colr/colr_1.ttf");
+        fontique::Blob::new(std::sync::Arc::new(bytes.to_vec()))
+    }
+
+    fn drawn(
+        blob: &fontique::Blob<u8>,
+        glyph: u32,
+        height: u32,
+        max_width: u32,
+    ) -> Option<egui::ColorImage> {
+        let font = skrifa::FontRef::from_index(blob.data(), 0).expect("the fixture opens");
+        let drawn = rasterize(
+            &font,
+            blob,
+            0,
+            skrifa::GlyphId::new(glyph),
+            height,
+            max_width,
+        )?;
+        assert!(
+            drawn.from_outlines,
+            "a face with no bitmap was said to be drawn from one"
+        );
+        Some(drawn.image)
+    }
+
+    fn assert_near(
+        image: &egui::ColorImage,
+        (x, y): (usize, usize),
+        expected: [u8; 4],
+        what: &str,
+    ) {
+        let got = image.pixels[y * image.size[0] + x].to_array();
+        let close = got.iter().zip(expected).all(|(g, e)| g.abs_diff(e) <= 2);
+        assert!(
+            close,
+            "{what}: pixel ({x},{y}) is {got:?}, expected about {expected:?}"
+        );
+    }
+
+    #[test]
+    fn a_colr_glyph_is_drawn_in_its_palette_colours_premultiplied() {
+        // Glyph 84 is a cross filled blue at alpha 127, with a narrower, taller cross behind it
+        // filled orange (255, 165, 0) at alpha 178 — read from the paint graph `ttf-parser`'s own
+        // test spells out. Premultiplied, the orange alone is (178, 115, 0, 178); where the blue
+        // lies over it, blue + orange × (1 − 127/255) = (89, 58, 127, 217). A drawing that only
+        // asserted «not empty» would pass a white silhouette, which is what the library draws
+        // when it is handed a glyph and no colour.
+        let blob = colr_fixture();
+        // A 120-pixel slot puts the 1200 units of the box at a tenth of a pixel each, the scale
+        // the probes below were read at.
+        let image = drawn(&blob, 84, 120, 100).expect("a COLR glyph with no bitmap gave no image");
+        assert_eq!(
+            image.size,
+            [100, 120],
+            "not fitted on its advance (1000) and its Windows extent (950 up, 250 down)"
+        );
+        assert_near(
+            &image,
+            (50, 10),
+            [178, 115, 0, 178],
+            "the orange layer alone",
+        );
+        assert_near(
+            &image,
+            (50, 50),
+            [89, 58, 127, 217],
+            "the blue layer over the orange one",
+        );
+        assert_near(&image, (10, 50), [0, 0, 0, 0], "outside both layers");
+    }
+
+    #[test]
+    fn a_colr_glyph_takes_its_advance_and_extent_fitted_to_the_slot_and_not_its_ink() {
+        // The box is 1000 × 1200 units: the advance across, and down the `OS/2` Windows extent (950
+        // up, 250 down), which reaches below the face's line (950 up, nothing down). A 17-pixel cell
+        // two columns of 9 wide fits it at 17/1200 per unit, so 14 × 17. On the line alone it came
+        // out 18 × 17 — the box that cut `Segoe UI Emoji`. Fitted by its ink — a cross far narrower
+        // than its advance — it would come out another size, and every emoji of the face a size of
+        // its own.
+        let blob = colr_fixture();
+        let image = drawn(&blob, 84, 17, 18).expect("a COLR glyph with no bitmap gave no image");
+        assert_eq!(image.size, [14, 17]);
+    }
+
+    #[test]
+    fn a_glyph_with_no_colour_outlines_is_not_drawn() {
+        // Glyph 3 has an outline and no `COLR` record. The library would draw its outline in the
+        // paint colour — a white silhouette that would win over the colour face behind it.
+        let blob = colr_fixture();
+        assert!(
+            drawn(&blob, 3, 17, 18).is_none(),
+            "a glyph with no colour drawing came out as an image"
+        );
+    }
+
+    #[test]
+    fn a_colour_graph_that_cannot_be_walked_is_not_drawn() {
+        // Glyph 179 is the fixture's cyclic paint graph. The library drops the painting error and
+        // hands back what it got to draw; remembered as a success, that would stand where the emoji
+        // is for the rest of the session instead of the next face or the text path showing it.
+        let blob = colr_fixture();
+        assert!(
+            drawn(&blob, 179, 100, 100).is_none(),
+            "a graph the library cannot walk came out as a colour drawing"
+        );
+    }
+
+    #[cfg(windows)]
+    fn segoe_ui_emoji() -> Vec<u8> {
+        let windows = std::env::var("WINDIR").expect("WINDIR is set on Windows");
+        let path = std::path::Path::new(&windows)
+            .join("Fonts")
+            .join("seguiemj.ttf");
+        std::fs::read(&path).expect("Segoe UI Emoji is installed with Windows")
+    }
+
+    /// The premise the white context paint of `colr_of` rests on: the font Windows asks for emoji
+    /// draws none of these in «the text colour» (palette index `0xFFFF`). It is the only place that
+    /// font exists to be read, so it runs on Windows only. If it fails, the atlas has to learn the
+    /// text colour, which is follow-up work and not a reason to loosen this.
+    #[cfg(windows)]
+    #[test]
+    fn segoe_ui_emoji_draws_no_emoji_in_the_text_colour() {
+        use skrifa::MetadataProvider as _;
+        use skrifa::color::{Brush, ColorPainter, CompositeMode, Transform};
+
+        #[derive(Default)]
+        struct Fills {
+            seen: usize,
+            in_text_colour: usize,
+        }
+        impl Fills {
+            fn note(&mut self, indexes: impl Iterator<Item = u16>) {
+                for index in indexes {
+                    self.seen += 1;
+                    if index == 0xFFFF {
+                        self.in_text_colour += 1;
+                    }
+                }
+            }
+        }
+        impl ColorPainter for Fills {
+            fn push_transform(&mut self, _: Transform) {}
+            fn pop_transform(&mut self) {}
+            fn push_clip_glyph(&mut self, _: skrifa::GlyphId) {}
+            fn push_clip_box(&mut self, _: skrifa::raw::types::BoundingBox<f32>) {}
+            fn pop_clip(&mut self) {}
+            fn push_layer(&mut self, _: CompositeMode) {}
+            fn fill(&mut self, brush: Brush<'_>) {
+                match brush {
+                    Brush::Solid { palette_index, .. } => self.note(std::iter::once(palette_index)),
+                    Brush::LinearGradient { color_stops, .. }
+                    | Brush::RadialGradient { color_stops, .. }
+                    | Brush::SweepGradient { color_stops, .. } => {
+                        self.note(color_stops.iter().map(|stop| stop.palette_index))
+                    }
+                }
+            }
+        }
+
+        let bytes = segoe_ui_emoji();
+        let font = skrifa::FontRef::new(&bytes).expect("Segoe UI Emoji opens");
+        let keycap = glyph_of(
+            &font,
+            ColorEmoji {
+                base: '1',
+                keycap: true,
+            },
+        )
+        .expect("Segoe UI Emoji shapes the keycap 1");
+        let mapped = ['\u{1F600}', '\u{1F44D}', '\u{2601}'].map(|emoji| {
+            (
+                emoji,
+                font.charmap().map(emoji).expect("Segoe UI Emoji maps it"),
+            )
+        });
+        for (emoji, glyph) in mapped.into_iter().chain([('1', keycap)]) {
+            let colour = font
+                .color_glyphs()
+                .get(glyph)
+                .unwrap_or_else(|| panic!("{emoji:?} has no COLR record in Segoe UI Emoji"));
+            let mut fills = Fills::default();
+            colour
+                .paint(skrifa::instance::LocationRef::default(), &mut fills)
+                .expect("its paint graph walks");
+            assert!(
+                fills.seen > 0,
+                "{emoji:?}: the walk saw no fill, so it proved nothing"
+            );
+            assert_eq!(
+                fills.in_text_colour, 0,
+                "{emoji:?} draws {} of its {} fills in the text colour, which the atlas paints white",
+                fills.in_text_colour, fills.seen
+            );
+        }
+    }
+
+    /// The font Windows asks for emoji, which no Linux host carries: drawn on its line alone, its
+    /// emoji came out cut at the top or the bottom of their box. **Whole is judged in font units,
+    /// not in pixels**: the box can legitimately end where the ink does, so ink in its edge row says
+    /// nothing. Instead, the outlines its layers are clipped to must lie inside the advance and the
+    /// [`extent`]. The message carries the face's numbers, because Windows CI is the only place they
+    /// can be read.
+    #[cfg(windows)]
+    #[test]
+    fn segoe_ui_emoji_is_drawn_whole_inside_its_box() {
+        use skrifa::raw::TableProvider as _;
+        let blob = fontique::Blob::new(std::sync::Arc::new(segoe_ui_emoji()));
+        let font = skrifa::FontRef::from_index(blob.data(), 0).expect("Segoe UI Emoji opens");
+        let glyph = font
+            .charmap()
+            .map('\u{1F600}')
+            .expect("Segoe UI Emoji maps it");
+        let drawn = rasterize(&font, &blob, 0, glyph, 100, 100).expect("Segoe UI Emoji draws it");
+        assert!(
+            drawn.from_outlines,
+            "Segoe UI Emoji was expected to draw from outlines"
+        );
+        assert!(
+            drawn.image.pixels.iter().any(|pixel| pixel.a() > 0),
+            "nothing was drawn"
+        );
+
+        use skrifa::color::Transform;
+        /// `outer` applied after `inner`: a point goes through `inner` first.
+        fn then(outer: Transform, inner: Transform) -> Transform {
+            Transform {
+                xx: outer.xx * inner.xx + outer.xy * inner.yx,
+                yx: outer.yx * inner.xx + outer.yy * inner.yx,
+                xy: outer.xx * inner.xy + outer.xy * inner.yy,
+                yy: outer.yx * inner.xy + outer.yy * inner.yy,
+                dx: outer.xx * inner.dx + outer.xy * inner.dy + outer.dx,
+                dy: outer.yx * inner.dx + outer.yy * inner.dy + outer.dy,
+            }
+        }
+        /// The glyphs a colour graph clips its fills to, each with the transform in force where it
+        /// is clipped: `Segoe UI Emoji` moves its layers, so an outline read where it sits says
+        /// nothing about where it is drawn.
+        #[derive(Default)]
+        struct Layers {
+            glyphs: Vec<(skrifa::GlyphId, Transform)>,
+            stack: Vec<Transform>,
+        }
+        impl skrifa::color::ColorPainter for Layers {
+            fn push_transform(&mut self, transform: Transform) {
+                let current = self.stack.last().copied().unwrap_or_default();
+                self.stack.push(then(current, transform));
+            }
+            fn pop_transform(&mut self) {
+                self.stack.pop();
+            }
+            fn push_clip_glyph(&mut self, glyph: skrifa::GlyphId) {
+                let current = self.stack.last().copied().unwrap_or_default();
+                self.glyphs.push((glyph, current));
+            }
+            fn push_clip_box(&mut self, _: skrifa::raw::types::BoundingBox<f32>) {}
+            fn pop_clip(&mut self) {}
+            fn fill(&mut self, _: skrifa::color::Brush<'_>) {}
+            fn push_layer(&mut self, _: skrifa::color::CompositeMode) {}
+        }
+        /// The control points' bounds, moved by the layer's transform: an affine map keeps a curve
+        /// inside the hull of its moved control points, so these are never smaller than the ink's.
+        struct Bounds([f32; 4], Transform);
+        impl Bounds {
+            fn take(&mut self, x: f32, y: f32) {
+                let t = self.1;
+                let (x, y) = (t.xx * x + t.xy * y + t.dx, t.yx * x + t.yy * y + t.dy);
+                let [x0, y0, x1, y1] = &mut self.0;
+                (*x0, *y0, *x1, *y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+        impl skrifa::outline::OutlinePen for Bounds {
+            fn move_to(&mut self, x: f32, y: f32) {
+                self.take(x, y);
+            }
+            fn line_to(&mut self, x: f32, y: f32) {
+                self.take(x, y);
+            }
+            fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+                self.take(cx, cy);
+                self.take(x, y);
+            }
+            fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+                self.take(cx0, cy0);
+                self.take(cx1, cy1);
+                self.take(x, y);
+            }
+            fn close(&mut self) {}
+        }
+
+        let location = skrifa::instance::LocationRef::default();
+        let mut layers = Layers::default();
+        font.color_glyphs()
+            .get(glyph)
+            .expect("😀 has a COLR record")
+            .paint(location, &mut layers)
+            .expect("its paint graph walks");
+        let outlines = font.outline_glyphs();
+        let mut ink = Bounds(
+            [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+            Transform::default(),
+        );
+        for (layer, transform) in &layers.glyphs {
+            ink.1 = *transform;
+            outlines
+                .get(*layer)
+                .expect("a layer glyph has an outline")
+                .draw(
+                    skrifa::outline::DrawSettings::unhinted(
+                        skrifa::instance::Size::unscaled(),
+                        location,
+                    ),
+                    &mut ink,
+                )
+                .expect("a layer outline draws");
+        }
+        let metrics = font.metrics(skrifa::instance::Size::unscaled(), location);
+        let advance = font
+            .glyph_metrics(skrifa::instance::Size::unscaled(), location)
+            .advance_width(glyph);
+        let hhea = font
+            .hhea()
+            .map(|t| (t.ascender().to_i16(), t.descender().to_i16()));
+        let os2 = font.os2().map(|t| {
+            (
+                (t.s_typo_ascender(), t.s_typo_descender()),
+                (t.us_win_ascent(), t.us_win_descent()),
+            )
+        });
+        let head = font
+            .head()
+            .map(|t| (t.units_per_em(), t.x_min(), t.y_min(), t.x_max(), t.y_max()));
+        let (ascent, descent) = extent(&font, &metrics);
+        let [x0, y0, x1, y1] = ink.0;
+        let numbers = format!(
+            "{} layers, {} of them moved, ink x {x0}..{x1} y {y0}..{y1}; box x 0..{advance:?} y \
+             {descent}..{ascent}; line {} / {}, hhea {hhea:?}, OS/2 typo and win {os2:?}, head {head:?}, \
+             image {:?}",
+            layers.glyphs.len(),
+            layers
+                .glyphs
+                .iter()
+                .filter(|(_, t)| *t != Transform::default())
+                .count(),
+            metrics.ascent,
+            metrics.descent,
+            drawn.image.size,
+        );
+        assert!(
+            !layers.glyphs.is_empty(),
+            "the graph clipped to no outline, so nothing says where the ink is: {numbers}"
+        );
+        assert!(
+            y0 >= descent && y1 <= ascent,
+            "the ink reaches past the top or the bottom of the box: it is cut. {numbers}"
+        );
+        let advance = advance.expect("😀 has an advance");
+        assert!(
+            x0 >= 0.0 && x1 <= advance,
+            "the ink reaches past the left or the right of the box: it is cut. {numbers}"
+        );
+    }
 }

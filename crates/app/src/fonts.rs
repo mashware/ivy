@@ -340,6 +340,9 @@ pub struct ColorCost {
     pub rasterized: usize,
     /// How many times a color glyph was requested that the machine does not paint that way.
     pub failed: usize,
+    /// How many of the rasterized ones were drawn from colour outlines (`COLR`) and not from a
+    /// bitmap: the report says which path it timed (#176).
+    pub outlines: usize,
 }
 
 /// How asking the machine for a family by name ended.
@@ -466,6 +469,7 @@ impl Discoverer {
             } else {
                 color.failed += 1;
             }
+            color.outlines += std::mem::take(&mut glyphs.drawn_from_outlines);
         }
         measurements
     }
@@ -1967,9 +1971,14 @@ mod tests {
             keycap: true,
         };
         let drawn = color_glyph_of(collection, sources, keycap, 40, 40)
-            .expect("a machine that paints emoji in colour has no keycap to give");
-        let digit = color_glyph_of(collection, sources, ColorEmoji::from('1'), 40, 40)
-            .expect("a face that draws the keycap draws the digit too");
+            .expect("a machine that paints emoji in colour has no keycap to give")
+            .image;
+        // A face with no colour drawing for the bare digit cannot have drawn the keycap as it —
+        // `Segoe UI Emoji` keeps its digits as plain outlines, `Noto Color Emoji` draws them.
+        let Some(digit) = color_glyph_of(collection, sources, ColorEmoji::from('1'), 40, 40) else {
+            return;
+        };
+        let digit = digit.image;
         let ink = |image: &egui::ColorImage| image.pixels.iter().filter(|p| p.a() > 16).count();
         assert!(
             ink(&drawn) > 3 * ink(&digit),
@@ -2240,6 +2249,7 @@ mod tests {
             return;
         }
         let mut discoverer = Discoverer::default();
+        let mut proportions = Vec::new();
         for (height, width) in [(20u32, 40u32), (40, 20), (17, 17)] {
             let (_, _, measurements) = discoverer
                 .color_glyph(&ctx, '\u{1F600}', height, width)
@@ -2255,7 +2265,18 @@ mod tests {
                 "for a slot of {width}x{height} the emoji came out at {measurements:?}: it fills no axis, \
                  so it looks smaller than it fits"
             );
+            proportions.push(measurements.x / measurements.y);
         }
+        // **And it keeps its own proportion whatever the slot's.** The three slots are wide, tall and
+        // square, so an image bent toward its slot — stretched to fill it, or clamped one axis at a
+        // time — comes out in three proportions. Rounding to whole pixels moves it by a few hundredths.
+        // Which face drew it is not assumed: Noto's bitmap and Segoe's outlines have different ones.
+        let spread = proportions.iter().copied().fold(f32::MIN, f32::max)
+            - proportions.iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            spread < 0.1,
+            "the emoji came out in proportions {proportions:?} for three slots: it bends to its slot"
+        );
     }
 
     #[test]
