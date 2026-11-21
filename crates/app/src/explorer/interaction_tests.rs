@@ -260,6 +260,33 @@ fn wait_for_text(
     }
 }
 
+/// Waits until the search's own matches hold `name`. Seeing the name on screen is not enough: the
+/// tree can show it while the search worker has not answered, and a key pressed then picks nothing.
+fn wait_for_match(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+    name: &str,
+) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        frame(window, ctx, area, vec![]);
+        let found = super::search::matches(&mut window.explorer, pane).entries;
+        if found
+            .iter()
+            .any(|entry| entry.path.file_name().is_some_and(|file| file == name))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the search never matched {name:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn wait_for_source(
     window: &mut crate::Window,
     ctx: &egui::Context,
@@ -1594,7 +1621,9 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
     let shot = directory.0.join("docs/shot.png");
     click_icon(&mut window, &ctx, area, view::Icon::Search);
     type_text(&mut window, &ctx, area, "shot");
-    wait_for_text(&mut window, &ctx, area, "shot.png");
+    // The tree already shows shot.png (revealing notes.txt opened docs/), so the name on screen
+    // says nothing about the search: wait for the match itself.
+    wait_for_match(&mut window, &ctx, area, pane, "shot.png");
     assert_eq!(crate::viewer::shown_image(&window), None);
     frame(&mut window, &ctx, area, vec![open]);
     assert_eq!(
