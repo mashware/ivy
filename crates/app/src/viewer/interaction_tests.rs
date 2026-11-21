@@ -382,6 +382,19 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
         ..Default::default()
     };
     let control_click = |window: &mut crate::Window| {
+        let painted = window
+            .pane_called(names[1])
+            .unwrap()
+            .painted_console
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            painted
+                .local_at(pos, &metrics, painted.frame)
+                .map(|target| target.path),
+            Some(shot.clone()),
+            "the click fixture must still show the complete image path"
+        );
         for pressed in [true, false] {
             frame(
                 window,

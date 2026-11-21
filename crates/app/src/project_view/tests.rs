@@ -92,7 +92,8 @@ fn remote_directory_veto_clears_existing_badge_and_accounts_work() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         refresh(&mut window, &ctx);
-        if window.pane_called(pane).unwrap().project.is_some() {
+        // Both fixture directories must finish resolving before Windows can remove their tree.
+        if window.all_panes().all(|pane| pane.project.is_some()) {
             break;
         }
         assert!(
