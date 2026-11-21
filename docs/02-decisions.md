@@ -9274,6 +9274,9 @@ for anything else.
 - **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
   after the pass, on the first frame after the decode arrives, so that upload lands in the framework
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
+- **Marked and sent (21 November 2026).** A plain left drag draws on the image, and Send hands a
+  copy with the marks to the console the image came from: **D113**. Marks not yet sent keep the
+  image in the document tab, as unsent review comments keep their review.
 
 Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
 forces the Markdown kind and a kind change clears that state, which would erase the image on the
@@ -11399,3 +11402,85 @@ four close tests passed on that host as well as on the system's.
   joined emoji — a line the host redraws could land a column off. Not measured.
 - The installer's contents are checked by the release job's install test, not by any pull-request
   job.
+
+## D113 — Send writes an annotated copy into the console's own folder and submits one line with Enter
+
+**21 November 2026 — #178.** On an image open in the drawer (D72), a plain left drag or click draws
+an arrow, an ellipse, a rectangle or a numbered marker; each marker takes a note, and the image a
+general note. Marks are kept in the original's pixels, so zooming and panning move them with the
+image. Undo (its button, or Ctrl+Z — Cmd+Z on macOS — with no other modifier, while the drawer
+holds the keys and no text field has the keyboard), a delete per marker and Clear take them back;
+deleting a marker renumbers the ones after it with their notes. A drag shorter than four screen
+points leaves nothing: an image pixel means nothing on a 4 000-pixel screenshot fitted to 500
+points. **«Send to <console> and press Enter»** then:
+
+- **writes a copy into that console's `PANEL_DIR`**, the original's width × height with the marks
+  drawn antialiased by tiny-skia and the markers' numbers from the bundled Geist outlines, named
+  `annotated-<n>.png` with the first `n` whose name nothing in the folder takes, a dangling link
+  included. It is created with `create_new` on a worker, and on Unix with mode 0600 (elsewhere the
+  platform's default permissions); the original file is never written.
+- **types one line into that console**: `Annotated screenshot: <copy> · 1: <note> · 2: <note> ·
+  Note: <general>`, empty parts left out, every control character turned into a space. That text
+  is painted under the image and its notes before the click, from the same function that composes
+  what is sent — inside the paste markers when the console asks for them — together with «It is
+  added to whatever is already typed at that console's prompt, and Enter runs it.» The paste is
+  composed for the paste mode the console has when it is sent, after the copy is closed. The notes
+  sit in a fixed column beside the image, so the image keeps its height however many markers there
+  are, and go under it only where the drawer is too narrow for both; the line takes a band of its
+  own under both, the full width, because a copy's path wraps into many lines in a column.
+- **presses Enter in a write of its own, on a later frame.** People driving Claude Code from tmux
+  report that text and Enter sent together are read as part of the paste; a
+  separate write a frame later is what a person's Enter is, for an agent and a shell alike. A
+  frame egui runs twice still keeps the Enter for the next frame. The Git review's insertion keeps
+  writing no Enter.
+
+**Only the copy's path goes in the line, never the path the program printed.** The copy's name is
+the app's own (`[a-z0-9-]` and `.png` in a directory the app created); the original's is whatever a
+program chose and may hold shell syntax. **Nothing is escaped for a shell**: the app cannot know
+which shell or agent reads the line (D6), and no prefix keeps zsh from running a redirection. Into
+a plain shell, Enter runs the notes as a command; the person sees the line and the console's name
+before choosing to send, the D42 precedent.
+
+**Every refusal that can be known before writing is checked on the frame after the click**, in the
+window's input pass, before the copy is started — the image replaced, the console gone, no
+`PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
+keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
+or an earlier one freed) — and a refused Send writes no file.
+**From the click to the Enter the marks and notes are frozen**: the copy is drawn from them a frame
+after the click, and a delivered Send clears them, so an edit made meanwhile would be wiped unsent;
+a Ctrl+Z in the very pass of the click is refused too, and so is a second Send. **While the copy is
+written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
+recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
+`annotated-<n>.png`. When the copy is written the line goes to the image's own console in that
+frame, whichever tab is shown and whether the drawer is open, **if that image is still the one
+shown**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open another
+image while a Send is busy; the Send still carries which opening of an image it belongs to, as a
+guard should that refusal ever give. Each refusal says why and keeps the marks; a delivered Send
+clears them. A failure says everything it knows: a write that fails after its console closed names
+both, and a half-written copy that could not be removed is named with why.
+
+**The copies are the app's to remove.** A console records the copies delivered to it in a field
+declared before its `PanelDir`, so when its `Pane` is dropped — the console, its tab or the window
+closed — they are removed first, by the paths recorded and with `remove_file`; then `PanelDir`
+finds its directory empty and removes it as it always has. A process that is killed drops nothing
+and leaves both. A file the console's program left there is not touched and keeps the directory. A
+copy written for a console that closed before it could be delivered is removed with the directory
+it left, and so is that directory when the write failed; `PanelDir` had told standard error the
+directory remains, so its removal is told there too. `tests/shape.rs` pins the field order. A
+worker that never returns keeps the drawer locked: accepted for now, because `PANEL_DIR` lives
+under `$XDG_RUNTIME_DIR`, a tmpfs, where one exists, and recorded as a follow-up.
+
+Discarded: pins with normalised coordinates and no copy, because a model reads a circle drawn on
+the pixels reliably and «pin 2 at 0.43, 0.71» poorly; a hand-written line rasteriser and digit
+table, which gives aliased marks and crude numbers; the viewport's screenshot, which is at screen
+scale and includes the interface; the paste and the Enter in one write, the case reported to fail;
+driving the owner's Claude Code automatically to settle that before building, which would use their
+account unattended for what the manual check of this decision answers; numbering by the copies
+already delivered, which a stray `annotated-1.png` in the folder turned into a refusal of every
+later Send to that console; renaming the copy when a name is taken after the line was shown, which
+would send a line different from the one shown; teaching
+`PanelDir::remove` the app's file names, which puts app knowledge into the contract crate (the
+store's card «the contract removes what the contract puts there» argues for it, and is set aside
+here because the copies are the app's, not the contract's); escaping the notes for a shell; and
+refusing characters that are not shown as themselves in notes, since the person typing them is the
+person sending them, and control characters become spaces so the line shown is the line sent.

@@ -446,11 +446,11 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
             let opened = if crate::viewer::is_image(&path) {
-                crate::viewer::open_image_target(window, pane, path)
+                crate::viewer::open_image_target(window, pane, path).map_err(|why| why.to_string())
             } else if crate::viewer::open_document_target(window, pane, path, None) {
                 Ok(())
             } else {
-                Err("Send or clear the review comments before opening another document.".into())
+                Err(crate::viewer::kept_document(window).into())
             };
             match opened {
                 Ok(()) => ui.ctx().request_repaint(),

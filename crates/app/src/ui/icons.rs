@@ -41,6 +41,10 @@ pub(crate) enum Icon {
     CircleHalf,
     Cursor,
     Keyboard,
+    Ellipse,
+    Rectangle,
+    Marker,
+    Undo,
 }
 
 impl Icon {
@@ -79,6 +83,10 @@ impl Icon {
             Self::CircleHalf => glyph::CIRCLE_HALF,
             Self::Cursor => glyph::CURSOR,
             Self::Keyboard => glyph::KEYBOARD,
+            Self::Ellipse => glyph::CIRCLE,
+            Self::Rectangle => glyph::RECTANGLE,
+            Self::Marker => glyph::NUMBER_CIRCLE_ONE,
+            Self::Undo => glyph::ARROW_COUNTER_CLOCKWISE,
         }
     }
 }
@@ -167,6 +175,10 @@ mod tests {
             Icon::CircleHalf,
             Icon::Cursor,
             Icon::Keyboard,
+            Icon::Ellipse,
+            Icon::Rectangle,
+            Icon::Marker,
+            Icon::Undo,
         ];
         all.extend(FileKind::ALL.map(Icon::File));
         for icon in &all {
@@ -201,7 +213,11 @@ mod tests {
                 | Icon::ArrowUpRight
                 | Icon::CircleHalf
                 | Icon::Cursor
-                | Icon::Keyboard => {}
+                | Icon::Keyboard
+                | Icon::Ellipse
+                | Icon::Rectangle
+                | Icon::Marker
+                | Icon::Undo => {}
             }
         }
         all
