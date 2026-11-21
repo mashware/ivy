@@ -7072,7 +7072,10 @@ mod tests {
                 );
                 format!("Start-Sleep -Seconds {seconds}")
             } else if program == "yes" {
-                "while ($true) { [Console]::WriteLine(('ivy-child' + '-ready')) }".to_owned()
+                // ConPTY renders screen changes rather than passing through each write. Repeating
+                // one identical line can leave its viewport unchanged after the bridge is dropped;
+                // the counter keeps the rendered output changing so delivery loss is observable.
+                "[long]$counter = 0; while ($true) { [Console]::WriteLine(('ivy-child' + '-ready ' + $counter)); $counter++ }".to_owned()
             } else if program == "true" {
                 "exit 0".to_owned()
             } else if let Some(text) = program.strip_prefix("printf ") {

@@ -6261,10 +6261,18 @@ publishes for input.
   dependency; a skeptic refuted it by reading that the bridge *moves* the receiver into its own
   thread, which parks in a receive and cannot let go until the reader's sender closes; and a second
   reviewer refuted the refutation by finding **the bridge's other exit**. It breaks out of its
-  pick-up loop when its own stop flag is up — the flag its destructor sets — and that path is
-  reachable **only while the queue is at its ceiling**, which is precisely the jam that also parks
-  the reader inside a delivery. A test in that module already demonstrates the receiver being
-  dropped with the console alive.
+  pick-up loop when its own stop flag is up — the flag its destructor sets. At the time this was
+  recorded that path was reachable **only while the queue was at its ceiling**, precisely the jam
+  that also parks the reader inside a delivery. A test in that module demonstrated the receiver
+  being dropped with the console alive.
+
+  **Amended by native Windows testing in November 2026 (#187).** A dropped bridge now checks that
+  same flag before enqueuing every chunk, not only while waiting for capacity. Otherwise it keeps
+  the receiver until a full megabyte accumulates: a streaming Unix writer hides this, while
+  ConPTY renders changes in its buffer and need not deliver the child's original byte volume.
+  The regression keeps the queue below its ceiling, drops the bridge and supplies one more byte;
+  the thread must release its receiver and captured wake callback. It still needs that next chunk
+  to leave a blocking channel receive; no polling thread or new silence guarantee was added.
 
   So: a pane declares its console **before** the bridge, and Rust drops fields in declaration order,
   which is the only reason an ordinary close raises the flag first. **Reverse those two lines and

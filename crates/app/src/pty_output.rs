@@ -179,13 +179,15 @@ impl PtyOutput {
                 // thread stops draining the pseudoterminal, the kernel buffer fills up and the
                 // program blocks on writing. It waits with the chunk already in hand —received but
                 // not enqueued—, which is what makes the channel notice the jam.
-                while queue.bytes.len() >= QUEUE_CEILING {
-                    // Whoever picks up is whoever makes room, so if this object no longer exists,
-                    // the room is never going to arrive. It exits through the epilogue below and
-                    // not with a `return` so as not to skip the order between publishing the death
-                    // and notifying.
+                loop {
+                    // A dropped bridge has no consumer even below the ceiling. Check on every
+                    // chunk and after every capacity wake, before retaining any more output.
+                    // Exit through the epilogue to preserve death-before-notification ordering.
                     if thread_stop.load(Ordering::Relaxed) {
                         break 'pickup;
+                    }
+                    if queue.bytes.len() < QUEUE_CEILING {
+                        break;
                     }
                     let (reacquired, _) = thread_room
                         .wait_timeout(queue, RECHECK)
@@ -1302,6 +1304,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn destroying_the_bridge_below_the_ceiling_ends_its_thread_on_the_next_chunk() {
+        let witness = Arc::new(());
+        let thread_witness = Arc::clone(&witness);
+        let (sender, output) = channel();
+        let pty_output = PtyOutput::new(output, move || {
+            let _ = &thread_witness;
+        });
+        sender.send(vec![b'a']).unwrap();
+        assert!(wait_for(|| {
+            pty_output
+                .queue
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .bytes
+                .len()
+                == 1
+        }));
+        assert!(2 < QUEUE_CEILING, "the fixture must stay below the ceiling");
+
+        drop(pty_output);
+        // Keep the sender alive: channel closure must not rescue a missing stop check. A single
+        // further byte wakes a receiver waiting for output without filling the capacity queue.
+        let _ = sender.send(vec![b'b']);
+        assert!(
+            wait_for(|| Arc::strong_count(&witness) == 1),
+            "the dropped bridge retained its receiver and waker below the queue ceiling"
+        );
+        drop(sender);
+    }
+
     /// A pseudoterminal is not needed for any of what follows: the sentence is a decision over a
     /// value, and the value is the whole of what the reading thread reports.
     fn failed(errno: i32) -> Option<term_core::Ending> {
@@ -1467,10 +1500,8 @@ mod tests {
         // bridge's thread is made to let go of it, which is the reversal — and the reading reports
         // it as what it is instead of as a program that finished.
         //
-        // **The queue has to be at its ceiling for the thread to exit at all**: dropping the bridge
-        // raises a flag the thread only consults while waiting for room. That is the one exit that
-        // takes the receiver with it, and it is why this arm exists at all — a review found the
-        // exit after a first reading had ruled it out.
+        // Fill the queue to exercise the capacity-wait exit specifically. Below the ceiling,
+        // dropping the bridge is also observed on the next chunk; that path is tested separately.
         let (pty, output) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
             .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
