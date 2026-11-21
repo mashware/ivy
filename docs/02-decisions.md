@@ -11555,3 +11555,24 @@ there is no frame cost to declare (D13).
   runs only the tests it names.
 - Helper programs (`panel-mcp`, `ivy-session`, `ivy-codex`) keep their standard error with whoever
   launched them.
+
+## D115 — The Windows file viewer inspects directories through the handle it opened
+
+**Decided.** On Windows, the viewer's bounded file loader opens with
+`FILE_FLAG_BACKUP_SEMANTICS`, then uses the opened handle's metadata to reject a directory with
+`This is a folder, not a file`. Regular-file rejection and the read ceilings remain on that same
+handle. Unix keeps its nonblocking open, so a FIFO cannot hold the loader waiting for a writer.
+
+**Why.** Windows refuses an ordinary file open of a directory before the existing metadata check
+can identify it. The code and image viewers therefore showed an access error where their common
+loader promises the folder explanation (#186). Allowing a directory handle makes the existing
+check reachable; it does not allow reading the directory as a document.
+
+**Discarded.** Inspecting the pathname before opening it, or inspecting it after an open failure,
+would diagnose a separate pathname observation rather than the object the loader opened. Replacing
+native paths with slash-normalized strings would not solve this open failure and would change
+valid Unix filenames. A new path abstraction duplicates the platform path and canonicalization
+boundaries already in place (D107, D110).
+
+**Verification.** The code/image folder cases must run on Windows; a Linux pass does not exercise
+this open flag. Native desktop interaction remains separate from those loader tests.
