@@ -47,7 +47,7 @@ pub(crate) fn send_keys(window: &mut Window, ctx: &egui::Context) -> Vec<WindowR
     // borrows of the same owner— and here it is solved the same way, without leaving the table
     // somewhere nobody would look for it.
     let keymap = window.keymap.clone();
-    let to_copy = window.copy_enabled;
+    let clipboard = keyboard::Clipboard::native(window.copy_enabled);
     let tab = window.active_mut();
     // **The focused one is looked up by its name**, and if it does not turn up nobody is typed
     // to: writing into «the first one there is» would send the keys to a program the user is
@@ -55,13 +55,37 @@ pub(crate) fn send_keys(window: &mut Window, ctx: &egui::Context) -> Vec<WindowR
     let at = tab.where_the_focus_is();
     let requests = at
         .map(|at| {
-            tab.panes_mut()[at].send_keys(ctx, started, &mut modifiers, tabs_open, &keymap, to_copy)
+            tab.panes_mut()[at].send_keys(
+                ctx,
+                started,
+                &mut modifiers,
+                tabs_open,
+                &keymap,
+                clipboard,
+            )
         })
         .unwrap_or_default();
     // Declared on a pass somebody typed in, and only then: see this function's docblock.
     window.timed_separately += before.elapsed() * u32::from(typed);
     window.modifiers = modifiers;
     requests
+}
+
+/// What the window does to a batch before egui reads it: the injectors of the measured runs, and
+/// on Windows the clipboard request behind Ctrl+Insert and Shift+Delete (**D115**,
+/// [`keyboard::add_requests_behind`]). The platform is asked first, so a batch elsewhere is not
+/// even walked.
+pub(crate) fn before_egui(
+    window: &mut Window,
+    raw_input: &mut egui::RawInput,
+    ctx: &egui::Context,
+) {
+    if cfg!(target_os = "windows") {
+        keyboard::add_requests_behind(&mut raw_input.events);
+    }
+    crate::settings::editor::inject(window, raw_input);
+    crate::board::probe::inject(window, raw_input, ctx);
+    crate::sidebar::probe::inject(window, raw_input, ctx);
 }
 
 impl Window {

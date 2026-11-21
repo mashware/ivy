@@ -1025,8 +1025,8 @@ impl State {
                     self.egui_input.events.push(egui::Event::Copy);
                     return;
                 } else if is_paste_command(self.modifiers, active_key) {
-                    // **The first of the two changes this vendored copy carries** (the other is
-                    // in `is_cut_command`). Upstream returns here
+                    // **The first of the changes this vendored copy carries** (the others are in
+                    // `is_cut_command`, `is_copy_command` and `is_paste_command`). Upstream returns here
                     // unconditionally, so a paste chord pressed over a clipboard with no text
                     // reaches the application as nothing at all — not the paste, and not the key
                     // event either. In a terminal emulator that key has an owner other than the
@@ -1438,21 +1438,32 @@ fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
     // `Ctrl+Shift+X` — a terminal's close shortcut — became a cut before it was a key, the key was
     // never emitted, and the application could only read it as a cut. Excluding Shift leaves a bare
     // `Ctrl+X` a cut exactly as before and lets the chord arrive as the key, repeat flag included.
+    //
+    // **And its third (D115) drops upstream's Windows arm for Shift+Delete**: a terminal has nothing
+    // to cut, the request reached the program as `0x18` and `nano` exited. It is a key now, on
+    // every platform.
     keycode == egui::Key::Cut
         || (modifiers.command && !modifiers.shift && keycode == egui::Key::X)
-        || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Delete)
 }
 
 fn is_copy_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
-    keycode == egui::Key::Copy
-        || (modifiers.command && keycode == egui::Key::C)
-        || (cfg!(target_os = "windows") && modifiers.ctrl && keycode == egui::Key::Insert)
+    // **D115 drops upstream's Windows arm for Ctrl+Insert.** A copy request carries no key, so the
+    // application could not tell it from Ctrl+C, which must stay an interrupt; it arrives as the key
+    // and the application copies from that.
+    keycode == egui::Key::Copy || (modifiers.command && keycode == egui::Key::C)
 }
 
 fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
+    // **D115 narrows upstream's Windows arm to Shift alone.** Upstream looks at Shift and ignores the
+    // rest, so Alt+Shift+Insert was a paste too (Ctrl+Shift+Insert was caught by the copy arm
+    // first); both are keys now.
     keycode == egui::Key::Paste
         || (modifiers.command && keycode == egui::Key::V)
-        || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Insert)
+        || (cfg!(target_os = "windows")
+            && modifiers.shift
+            && !modifiers.ctrl
+            && !modifiers.alt
+            && keycode == egui::Key::Insert)
 }
 
 fn translate_mouse_button(button: winit::event::MouseButton) -> Option<egui::PointerButton> {

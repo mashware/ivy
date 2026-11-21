@@ -492,6 +492,13 @@ would never work:
 ivy: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
 ```
 
+**On Windows two more chords are the terminal's** (D115): `Ctrl+Insert` copies the marked text and
+`Shift+Insert` pastes, as in Windows Terminal. `key.copy = none` switches off `Ctrl+Insert` as well,
+and the program then receives it as `CSI 2;5~`. `Shift+Delete` is not a cut there: it reaches the
+program, as on Linux and macOS. A shortcut you bind to `ctrl+insert` wins over the copy; one bound to
+`shift+insert` only fires when the clipboard holds no text, because with text the desktop turns that
+chord into a paste before it is a key.
+
 ## What happens if you get it wrong
 
 **One badly written line does not take the file down.** It is ignored, you are told which one it is

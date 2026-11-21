@@ -5726,6 +5726,8 @@ purpose** — is the same function's Windows arm, `shift && Delete`, which has t
 Shift+Delete and Ctrl+Shift+Delete into a cut before they are keys, so on Windows they would reach the
 program as `0x18` instead of D52's `CSI 3;2~`/`CSI 3;6~`. Nothing here can observe it; F2.7 decides it
 on the platform, and the guard pins that arm as upstream's so the change is a visible decision.
+**Decided in D115**: the arm is gone, as is `is_copy_command`'s Windows Ctrl+Insert arm, and
+`is_paste_command`'s Shift+Insert arm requires Shift alone.
 
 **What was discarded.** Handling `Event::Cut` with Shift in `keyboard.rs` as a lookup of the chord,
 with no change to the copy. It keeps the copy at one change, and it pays for it with state of its own:
@@ -5738,7 +5740,8 @@ information the copy throws away. Chosen by the user at the fix's gate.
 before hashing the rest — the paste branch and `is_cut_command` — and pins the new arm and upstream's
 other two. The residual's constant was computed from the tree before the change, by a script that
 first reproduced the old constant exactly. The behaviour itself is out of reach of any test, for the
-reason above, so it is checked by hand (D53).
+reason above, so it is checked by hand (D53). Since D115 it cuts **four** places — the paste branch
+and the three clipboard predicates — and pins each predicate whole.
 
 ## D34 — The step between cells is a whole number of pixels
 
@@ -7555,7 +7558,9 @@ request: a copy is `0x03`, an interrupt, and a cut is `0x18` — `nano` exits on
 still becomes a key is the paste over a clipboard with no text, because D33's patch lets it fall
 through, and that one does go out as `CSI 2;2~`. None of this is new with this decision — it held
 while these keys had no bytes of their own — and none of it can be seen from Linux, where the suite
-runs.
+runs. **Decided in D115**: Shift+Delete is a key on Windows too, Ctrl+Insert copies and Shift+Insert
+pastes only when they are exactly those chords, and every other chord over the two keys takes the
+form above.
 
 **5. The four arrows follow the same two rules, and the wheel sends them in the program's mode.**
 Bare, an arrow is `CSI A..D` normally and `SS3 A..D` under DECCKM (`kcuu1`…`kcub1`); with any
@@ -7649,11 +7654,23 @@ so F2.7 names the observer it uses on each of them.
   `key_bytes` lets Shift through with Ctrl, so it reaches the program as `0x03` — the terminal's
   copy chord interrupting instead of copying. F2.7 rewrites the paste and copy rows for that
   platform rather than reading them as failures.
-- **Windows**: the vendored `egui-winit` turns chords over Insert and Delete into clipboard requests
-  before they are keys, and what reaches the program is `0x03` for a copy and `0x18` for a cut
-  (**D52**, last point). The `Shift+Insert` row is expected to fail there today — with text on the
-  clipboard it pastes instead — and `Ctrl+Insert` and `Shift+Delete` would send `0x03` and `0x18`
-  if pressed; those three are the ones F2.7 has to decide.
+- **Windows**: the three chords over Insert and Delete are decided in **D115**, and the list there
+  is the one below plus these rows, which replace the `Shift+Insert` one:
+
+  | Chord | Situation | The program receives |
+  |---|---|---|
+  | `Shift+Delete` | `nano` open; then `cat -v` | `nano` stays open; `cat -v` prints `^[[3;2~` and no `^X` behind it |
+  | `Ctrl+Insert` | text marked, `cat -v` running | nothing, and `cat` still running; the marked text is on the clipboard |
+  | `Ctrl+Shift+Insert` | `cat -v` | `^[[2;6~` |
+  | `Shift+Insert` | text on the clipboard | the text, pasted |
+  | `Shift+Insert` | an image on the clipboard | nothing at all |
+  | `AltGr+2`, `AltGr+´` | Spanish layout, a shell prompt | `@`, `{` |
+  | `AltGr+Q`, `AltGr+7` | German layout, a shell prompt | `@`, `{` |
+  | `Ctrl+Insert`, then `Shift+Delete` | text selected in a Settings field | copied; then cut |
+  | `Ctrl+Insert` | lines selected in the drawer's code viewer | copied |
+
+  The observer there is a console whose program echoes what it receives — `cat -v` inside Git Bash or
+  WSL, or `nano`/the prompt itself where only the effect is read.
 
 **What was discarded, and why.**
 
@@ -11555,3 +11572,76 @@ there is no frame cost to declare (D13).
   runs only the tests it names.
 - Helper programs (`panel-mcp`, `ivy-session`, `ivy-codex`) keep their standard error with whoever
   launched them.
+
+## D115 — On Windows, Ctrl+Insert copies, Shift+Insert pastes, and Shift+Delete belongs to the program
+
+**Decided.** The three chords that **D52** and **D53** left «for F2.7 to decide» are decided, for
+Windows only; Linux and macOS keep exactly what D52 gives them.
+
+| Chord | Before, on Windows | Now, on Windows |
+|---|---|---|
+| `Shift+Delete` (any other modifiers too) | a cut request with no modifiers → `0x18` to the program; `nano` exits | a key: `CSI 3;2~` (`CSI 3;m~` with others), as on Linux and macOS |
+| `Ctrl+Insert`, exactly | a copy request → `0x03`, an interrupt | copies the marked text, through the same switch as `Ctrl+Shift+C` (`key.copy`); with copy switched off it reaches the program as `CSI 2;5~` |
+| `Ctrl+Insert` with Shift or Alt too | a copy request (with Shift it copied, without it `0x03`) | a key in D52's form (`CSI 2;6~`, `CSI 2;7~`…) |
+| `Shift+Insert`, exactly, text on the clipboard | the paste | the paste — unchanged |
+| `Shift+Insert`, exactly, no text on the clipboard | `CSI 2;2~` to the program (D33's fall-through) | nothing at all, the rule `bytes` already applies to `Ctrl+Shift+V` |
+| `Shift+Insert` with Ctrl or Alt too | a paste request (or a copy, with Ctrl, because the copy arm is tested first) | a key in D52's form |
+
+**Why these.** They are the defaults of the terminals people use on Windows: Windows Terminal binds
+`ctrl+insert` to copy and `shift+insert` to paste and leaves `shift+delete` to the program, and
+WezTerm binds the same two. A Windows user presses them expecting copy and paste; a terminal there
+that sent `CSI 2;5~` for Ctrl+Insert would look broken. Nobody turns Shift+Delete into a cut inside a
+terminal, because there is nothing to cut.
+
+**Where each half lives.** The vendored `egui-winit` (**D33**) gains its third change: its Windows
+arms for Shift+Delete and Ctrl+Insert are removed, and its Shift+Insert arm requires Shift **without**
+Ctrl or Alt. Removing an arm releases every chord it caught, so each one was followed to where it
+lands now (the table). The copy for Ctrl+Insert is decided **in the keyboard pass**, from the key,
+because a copy request carries no key: there Ctrl+Insert and Ctrl+C are the same event, and Ctrl+C
+must stay `0x03`. That door sits **after** the keymap, so a `key.<action> = ctrl+insert` somebody
+wrote still wins. Which platform the pass is on is a parameter, so the Linux suite tests the Windows
+answer as well as its own.
+
+**The rest of the window keeps the chords it had.** Every text field (Settings, renaming a pane,
+Files' search) and the drawer's code viewer copy and cut only on a copy or cut request, so delivering
+two keys instead would have taken Ctrl+Insert and Shift+Delete away from them — found in this
+decision's review, and the owner chose to keep them. So before egui reads a batch, the window puts
+the request **right behind** each exact Ctrl+Insert and Shift+Delete key, on Windows only
+(`keyboard::add_requests_behind`). A text field ignores the key — egui leaves Shift+Delete alone on
+Windows precisely because it expects the cut, and has nothing for Insert — and acts on the request.
+A console acts on the key and drops the request behind it, armed from the key itself before the
+keymap, so a chord somebody bound does not leave its request to reach the program as `0x03` or
+`0x18`. The pair is this project's own translation, so unlike the desktop layer it is tested.
+What the fields lose is every chord over the two keys **but the exact one**: upstream copied on any
+Ctrl+Insert, cut on any Shift+Delete and pasted on any Shift+Insert, so Ctrl+Shift+Insert and
+Ctrl+Alt+Insert no longer copy there, Ctrl+Shift+Delete and Alt+Shift+Delete no longer cut — egui's
+field ignores Shift+Delete on Windows whatever else is held — and Alt+Shift+Insert no longer
+pastes (Ctrl+Shift+Insert never pasted: upstream's copy arm caught it first). Each of those is a D52 key for a console, and a request for one of
+them would be a second answer the console would have to drop as well.
+
+**A shortcut bound to `shift+insert` is half a shortcut on Windows**: with text on the clipboard
+the desktop layer still turns that chord into a paste before it is a key, so the binding fires only
+over a clipboard with no text. Said in the configuration guide rather than refused, because the same
+chord is ordinary on the other two platforms.
+
+**AltGr needs no code, and that is a reading, not a run.** `winit` 0.30.13 clears Ctrl and Alt from
+the modifiers while the right Alt is down on a layout that has AltGr
+(`platform_impl/windows/keyboard_layout.rs`, `get_agnostic_mods`), and it fills the key's text with
+the AltGr character; `egui-winit` drops text only while Ctrl is held, so `@` and `{` arrive as text.
+The fake left Ctrl Windows sends with AltGr may produce a passing modifier change, which the right
+Alt's own message clears before the character key. Confirmed by hand on Windows in D53's rows, or
+named there as unverified.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| All three as plain keys on Windows, exactly as on Linux | The two Windows conventions above would be missing on the platform where they are expected |
+| Shift+Delete kept as a cut, silenced | Silence kills a key D52 gives to programs (`kDC` with Shift) for a cut that does not exist |
+| Telling Ctrl+Insert from Ctrl+C in the copy request | The request carries no key: impossible |
+| A `Copy` action in the keymap with a Windows factory chord | Copy is a switch, not an action (**D26**): the desktop resolves Ctrl+Shift+C before it is a key, so such an action could only ever be bound to Insert chords, one platform's — a rebindable copy that is not rebindable |
+| Delivering Shift+Insert as a key and pasting from the keyboard pass | The pass cannot read the clipboard; the paste branch of `egui-winit` is the only reader, and the paste door already tells Shift apart |
+| Accepting that text fields lose Ctrl+Insert and Shift+Delete on Windows | Offered at the review; the owner chose to keep them |
+| Producing the key and its request inside the vendored layer | A fourth change to somebody else's code, out of reach of every test (D53); the input hook is this project's own and the suite drives the same function the console uses to drop the request |
+| The ticket's rule «on Windows, Ctrl+Alt with text means the text wins» | Not needed for the AltGr key (above), and wrong for left Ctrl + left Alt on a layout without AltGr: `winit` fills the text with the key without Ctrl, so `Ctrl+Alt+A` on a US layout would type `a`. Ctrl+Alt as an AltGr substitute is left out, recorded |
+| The same chords as copy and paste on Linux and macOS | Changes two platforms nobody asked about, and widens D53's hand check to them |
