@@ -65,7 +65,7 @@ pub(crate) mod control;
 pub mod diagnostics_log;
 mod pane_view;
 mod resume;
-use panel::pane::{identity_of, panel_or_none};
+use panel::pane::panel_or_none;
 mod board;
 pub mod fonts;
 mod git_process;
@@ -5980,6 +5980,8 @@ mod tests {
                 connection,
                 what,
                 answer: answering,
+                #[cfg(windows)]
+                release: None,
             });
         with_metrics(|metrics| window.answer_the_windows_requests(ctx, whole_window, metrics));
         answer
@@ -6513,12 +6515,16 @@ mod tests {
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
+            #[cfg(windows)]
+            release: None,
         });
         control.enqueue_for_tests(panel_control::Delivery {
             origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6603,6 +6609,8 @@ mod tests {
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
+            #[cfg(windows)]
+            release: None,
         });
         control.enqueue_for_tests(panel_control::Delivery {
             origin: panel_control::PublicationOrigin::Unknown,
@@ -6613,6 +6621,8 @@ mod tests {
                     .expect("the new panel"),
             },
             answer: publishing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6720,6 +6730,8 @@ mod tests {
             connection,
             what: panel_control::What::Closed,
             answer: closing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -7754,9 +7766,13 @@ mod tests {
     #[cfg(unix)]
     fn the_program_sees_no_variable_that_is_not_declared() {
         let panel = PanelDir::create().expect("create a panel directory");
-        let (_pty, channel) =
-            Pty::spawn_with_env("env", &[], INITIAL_GRID, &identity_of(Some(&panel)))
-                .expect("launch env");
+        let (_pty, channel) = Pty::spawn_with_env(
+            "env",
+            &[],
+            INITIAL_GRID,
+            &panel::pane::identity_of(Some(&panel)),
+        )
+        .expect("launch env");
 
         let output = drain_until_closed(&channel);
         let of_the_child: std::collections::HashMap<&str, &str> = output
@@ -7846,7 +7862,7 @@ mod tests {
     /// console with the identity of the mother.
     #[test]
     fn a_console_with_no_directory_orders_both_variables_removed() {
-        let identity = identity_of(None);
+        let identity = panel::pane::identity_of(None);
 
         assert_eq!(
             identity,

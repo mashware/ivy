@@ -456,7 +456,10 @@ impl Registry {
     }
 }
 
+// Unix only: every route write goes through `atomic_write`, which refuses on Windows. Restoring
+// Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     fn registry() -> (PathBuf, Registry) {
@@ -702,10 +705,6 @@ mod tests {
         assert_eq!(lock_route(&route).unwrap().identity.epoch, "new");
         fs::remove_dir_all(home).unwrap();
     }
-    crate::windows_unix_omission!(
-        symlink_and_missing_routes_are_rejected,
-        "unix-only: requires Unix symlink semantics"
-    );
     #[cfg(unix)]
     #[test]
     fn symlink_and_missing_routes_are_rejected() {
@@ -719,4 +718,50 @@ mod tests {
         assert!(lock_route(&route).is_err());
         fs::remove_dir_all(home).unwrap();
     }
+}
+
+// The same tests, declared on Windows as omitted so the Windows test report can account for them.
+#[cfg(test)]
+#[cfg(windows)]
+mod tests {
+    crate::windows_unix_omission!(
+        binding_and_old_revocation,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        failed_mapping_commit_restores_the_previous_record_and_removes_temporary_file,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        interrupted_unrelated_record_does_not_poison_a_new_binding,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        cancellation_does_not_wait_for_inflight_guard_and_fresh_epoch_reuses_route,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        public_proof_is_immutable_across_bind_and_revoke,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        orphan_active_after_interruption_is_found_without_a_thread_mapping,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        binding_another_conversation_revokes_only_the_same_pane,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        failed_replacement_restores_the_displaced_pane,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        binding_waits_until_inflight_route_guard_is_released,
+        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+    );
+    crate::windows_unix_omission!(
+        symlink_and_missing_routes_are_rejected,
+        "unix-only: requires Unix symlink semantics"
+    );
 }

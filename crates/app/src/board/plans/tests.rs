@@ -78,6 +78,8 @@ fn worker_answers_from_committed_state_and_names_dropped_words() {
         set(r#"{"milestones":[{"title":"M","items":[{"text":"T","mark":"magic"}]}]}"#),
         tx,
         &ctx,
+        #[cfg(windows)]
+        None,
     );
     assert!(
         matches!(rx.recv_timeout(Duration::from_secs(3)).unwrap(),Answer::Text(s) if s.contains("published for Sample")&&s.contains("magic")&&s.contains("not saved"))
@@ -89,6 +91,8 @@ fn worker_answers_from_committed_state_and_names_dropped_words() {
         What::PlanRetire,
         tx,
         &ctx,
+        #[cfg(windows)]
+        None,
     );
     assert!(matches!(rx.recv().unwrap(), Answer::Refused(_)));
     assert!(store.published(&identity().key).is_some());
@@ -122,4 +126,90 @@ fn unknown_version_is_preserved_and_measurement_never_overwrites() {
     assert!(measured.save(&identity, "{}", SystemTime::now()).is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_control_plan_snapshots_follow_commit_retire_and_revoke_off_frame() {
+    let mut store = Store::at(None, false, eframe::egui::Context::default());
+    let identity = identity();
+    let (first_reader, first_publisher) = panel_control::windows_services::PlanSnapshot::new();
+    let (second_reader, second_publisher) = panel_control::windows_services::PlanSnapshot::new();
+    store.install_snapshot(11, Ok(identity.clone()), first_publisher.clone());
+    store.install_snapshot(12, Ok(identity.clone()), second_publisher.clone());
+    for reader in [&first_reader, &second_reader] {
+        assert!(matches!(
+            reader.read(),
+            Ok(panel_control::Reply::Text(text)) if text == "no plan published for Sample"
+        ));
+    }
+
+    let document = r#"{"title":"Live","milestones":[]}"#;
+    let ctx = eframe::egui::Context::default();
+    let (answer, received) = mpsc::sync_channel(1);
+    store.request(Ok(identity.clone()), set(document), answer, &ctx, None);
+    assert!(matches!(received.recv().unwrap(), Answer::Text(_)));
+    for reader in [&first_reader, &second_reader] {
+        assert_eq!(
+            reader.read().unwrap(),
+            panel_control::Reply::Document(document.to_owned())
+        );
+    }
+
+    let (answer, received) = mpsc::sync_channel(1);
+    store.request(Ok(identity), What::PlanRetire, answer, &ctx, None);
+    assert!(matches!(received.recv().unwrap(), Answer::Text(_)));
+    for reader in [&first_reader, &second_reader] {
+        assert!(matches!(
+            reader.read(),
+            Ok(panel_control::Reply::Text(text)) if text == "no plan published for Sample"
+        ));
+    }
+
+    first_publisher.revoke();
+    store.retain_snapshots(&[12]);
+    assert_eq!(store.snapshots.lock().unwrap().len(), 1);
+    assert_eq!(first_reader.read().unwrap_err(), "this pane is gone");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_control_plan_snapshot_registration_cannot_miss_a_concurrent_commit() {
+    let store = Arc::new(Store::default());
+    let identity = identity();
+    let (reader, publisher) = panel_control::windows_services::PlanSnapshot::new();
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let registering = {
+        let store = Arc::clone(&store);
+        let identity = identity.clone();
+        let publisher = publisher.clone();
+        let barrier = Arc::clone(&barrier);
+        std::thread::spawn(move || {
+            barrier.wait();
+            store.install_snapshot(21, Ok(identity), publisher);
+        })
+    };
+    let committing = {
+        let bank = store.bank.clone();
+        let snapshots = store.snapshots.clone();
+        let identity = identity.clone();
+        let barrier = Arc::clone(&barrier);
+        std::thread::spawn(move || {
+            barrier.wait();
+            let mut disk = disk::Disk::new(None, false);
+            apply(
+                &bank,
+                &mut disk,
+                &identity,
+                set(r#"{"title":"Raced","milestones":[]}"#),
+            );
+            publish_matching_snapshots(&bank, &snapshots, &identity.key);
+        })
+    };
+    registering.join().unwrap();
+    committing.join().unwrap();
+    assert_eq!(
+        reader.read().unwrap(),
+        panel_control::Reply::Document(r#"{"title":"Raced","milestones":[]}"#.to_owned())
+    );
 }

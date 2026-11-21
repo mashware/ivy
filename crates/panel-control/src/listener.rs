@@ -17,8 +17,11 @@ use std::sync::mpsc::{RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crate::endpoint::Stream;
+#[cfg(unix)]
 use interprocess::TryClone;
-use interprocess::local_socket::{Stream, prelude::*};
+#[cfg(unix)]
+use interprocess::local_socket::traits::Stream as _;
 use panel_contract::{Dropped, Panel, Patch};
 
 use crate::diagnostic_peer::DiagnosticPeer;
@@ -31,8 +34,19 @@ struct Services {
     reader: Option<ReadDocument>,
     session: Option<SessionHandler>,
     publisher: Option<PublicationServices>,
+    #[cfg(unix)]
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
     inspector: Option<PublicationInspector>,
+    #[cfg(windows)]
+    connection_workers: Option<Arc<std::sync::Mutex<Vec<JoinHandle<()>>>>>,
+    #[cfg(windows)]
+    releases: Option<crate::windows_services::ReleaseRegistry>,
+    #[cfg(windows)]
+    document_snapshot: Option<crate::windows_services::DocumentReader>,
+    #[cfg(windows)]
+    plan_snapshot: Option<crate::windows_services::PlanReader>,
+    #[cfg(windows)]
+    test_hooks: Option<Arc<TestHooks>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -85,6 +99,25 @@ const STUMBLES_ALLOWED: u32 = 10;
 /// matter.
 const MAX_CONNECTIONS: usize = 8;
 
+#[cfg(windows)]
+thread_local! {
+    static WINDOWS_RELEASES: std::cell::RefCell<Option<crate::windows_services::ReleaseRegistry>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(windows)]
+#[derive(Default)]
+#[allow(dead_code)] // Test-only fault injection is absent from production call sites.
+struct TestHooks {
+    panic_acceptor: AtomicBool,
+    panic_worker: AtomicBool,
+    fail_worker_spawn: AtomicBool,
+    acceptor_entered: AtomicBool,
+    worker_entered: AtomicBool,
+    acceptor_panicked: AtomicBool,
+    worker_panicked: AtomicBool,
+    registration_entered: AtomicBool,
+    registration_gate: std::sync::Mutex<Option<Arc<std::sync::Barrier>>>,
+}
+
 /// A connection, as the window knows it. Opaque, per pane, never reused.
 pub type Connection = u64;
 
@@ -132,6 +165,17 @@ pub struct Delivery {
     /// applied, and the reply it read says so honestly — that the window did not answer in time,
     /// never that nothing was published.
     pub answer: SyncSender<Answer>,
+    /// Keeps the connection release slot pending through this delivery and any deferred UI work.
+    #[cfg(windows)]
+    pub release: Option<crate::windows_services::ReleaseToken>,
+}
+
+impl Delivery {
+    /// Marks the admitted UI work complete after it was applied or discarded.
+    #[cfg(windows)]
+    pub fn complete(&mut self) {
+        drop(self.release.take());
+    }
 }
 
 /// The things a connection ever says.
@@ -215,6 +259,7 @@ pub enum Answer {
 
 /// A pane's listening channel. Ends when it is dropped.
 pub struct Channel {
+    #[cfg(unix)]
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
     stop: Arc<AtomicBool>,
     /// How many threads this channel still has alive, acceptor included.
@@ -230,6 +275,8 @@ pub struct Channel {
     /// It owns one end of a private descriptor pair rather than the endpoint's pathname: deleting a
     /// pane's directory cannot make the wake unreachable, and a full backlog cannot delay it.
     stopper: Option<endpoint::AcceptorStopper>,
+    #[cfg(windows)]
+    windows_services: Option<crate::windows_services::WindowsServices>,
 }
 
 impl Channel {
@@ -238,6 +285,7 @@ impl Channel {
     /// `wake` is what tells the window there is something to pick up. It is a closure and not the
     /// interface framework's context for the reason this crate exists at all: the framework is going
     /// to be replaced (D3) and nothing about accepting a connection depends on it.
+    #[cfg(unix)]
     pub fn open(
         dir: &Path,
         id: &str,
@@ -248,6 +296,7 @@ impl Channel {
     }
 
     /// Binds a pane whose document reads are answered without a window pass.
+    #[cfg(unix)]
     pub fn open_with_reader(
         dir: &Path,
         id: &str,
@@ -259,6 +308,7 @@ impl Channel {
     }
 
     /// Adds optional off-frame services while retaining the existing panel ownership protocol.
+    #[cfg(unix)]
     pub fn open_with_services(
         dir: &Path,
         id: &str,
@@ -279,6 +329,7 @@ impl Channel {
     }
 
     /// Adds an independent panel authorization service, available regardless of session recovery.
+    #[cfg(unix)]
     pub fn open_with_authorization_services(
         dir: &Path,
         id: &str,
@@ -303,6 +354,7 @@ impl Channel {
     /// Installs a diagnostic-only peer classifier before the endpoint begins accepting connections.
     // Keep the established service entry points compatible while adding one independent callback.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(unix)]
     pub fn open_with_publication_inspector(
         dir: &Path,
         id: &str,
@@ -317,8 +369,19 @@ impl Channel {
             reader: read_document,
             session: session_handler,
             publisher,
+            #[cfg(unix)]
             plan_reader: Arc::default(),
             inspector,
+            #[cfg(windows)]
+            connection_workers: None,
+            #[cfg(windows)]
+            releases: None,
+            #[cfg(windows)]
+            document_snapshot: None,
+            #[cfg(windows)]
+            plan_snapshot: None,
+            #[cfg(windows)]
+            test_hooks: None,
         };
         let plan_reader = services.plan_reader.clone();
         let listener = endpoint::bind(dir, id)?;
@@ -350,22 +413,141 @@ impl Channel {
             })?;
 
         Ok(Self {
+            #[cfg(unix)]
             plan_reader,
             stop,
             alive,
             acceptor: Some(acceptor),
             stopper: Some(stopper),
+            #[cfg(windows)]
+            windows_services: None,
+        })
+    }
+
+    /// Starts a callback-free Windows channel backed by bounded snapshots and a native UI wake.
+    #[cfg(windows)]
+    pub fn open_windows(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        windows: crate::windows_services::WindowsServices,
+    ) -> io::Result<Self> {
+        Self::open_windows_inner(dir, id, to_the_window, windows, None)
+    }
+
+    /// Stops accepting and joins this channel's owned workers before callers bank final metrics.
+    /// Safe to call more than once; `Drop` performs the same shutdown if omitted.
+    #[cfg(windows)]
+    pub fn shutdown(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(services) = self.windows_services.take() {
+            services.revoke();
+        }
+        drop(self.stopper.take());
+        if let Some(acceptor) = self.acceptor.take() {
+            // Bounded: stop was signalled above; I/O drains cancellation and window answers have
+            // ANSWER_DEADLINE. The acceptor joins those bounded workers before it returns.
+            let _ = acceptor.join();
+        }
+    }
+
+    #[cfg(test)]
+    #[cfg(windows)]
+    fn open_windows_with_test_hooks(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        windows: crate::windows_services::WindowsServices,
+        hooks: Arc<TestHooks>,
+    ) -> io::Result<Self> {
+        Self::open_windows_inner(dir, id, to_the_window, windows, Some(hooks))
+    }
+
+    #[cfg(windows)]
+    fn open_windows_inner(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        windows: crate::windows_services::WindowsServices,
+        test_hooks: Option<Arc<TestHooks>>,
+    ) -> io::Result<Self> {
+        let listener = endpoint::bind(dir, id)?;
+        let (stopper, acceptor) = endpoint::acceptor(listener)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let alive = Arc::new(AtomicUsize::new(1));
+        let workers = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let document = windows.document.clone();
+        let plan = windows.plan.clone();
+        let wake_capability = windows.wake.clone();
+        let services = Services {
+            reader: None,
+            session: None,
+            publisher: None,
+            inspector: None,
+            connection_workers: Some(Arc::clone(&workers)),
+            releases: Some(windows.release_registry()),
+            document_snapshot: Some(document),
+            plan_snapshot: Some(plan),
+            test_hooks,
+        };
+        let acceptor_thread = std::thread::Builder::new()
+            .name(format!("panel-control {id}"))
+            .spawn({
+                let stop = Arc::clone(&stop);
+                let alive = Arc::clone(&alive);
+                let id = id.to_owned();
+                let wake_id = id.clone();
+                let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    if let Err(problem) = wake_capability.post() {
+                        eprintln!(
+                            "console {wake_id}: could not wake the control window ({problem})"
+                        );
+                    }
+                });
+                let worker_registry = Arc::clone(&workers);
+                move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        accept_until_stopped(
+                            &id,
+                            &acceptor,
+                            &stop,
+                            &alive,
+                            &to_the_window,
+                            &services,
+                            &wake,
+                        )
+                    }));
+                    let handles = std::mem::take(
+                        &mut *worker_registry.lock().unwrap_or_else(|p| p.into_inner()),
+                    );
+                    for handle in handles {
+                        // Bounded: workers use cancellable I/O and finite window-answer waits;
+                        // channel shutdown signals their shared stop event.
+                        let _ = handle.join();
+                    }
+                    if result.is_err() {
+                        eprintln!("console {id}: its control acceptor stopped after a panic");
+                    }
+                }
+            })?;
+        Ok(Self {
+            stop,
+            alive,
+            acceptor: Some(acceptor_thread),
+            stopper: Some(stopper),
+            windows_services: Some(windows),
         })
     }
 
     /// Updates the pane-scoped capability after project discovery changes.
+    #[cfg(unix)]
     pub fn set_plan_reader(&self, reader: ReadPlan) {
         *self.plan_reader.lock().unwrap() = Some(reader);
     }
 
     /// How many of this channel's threads are still running.
     #[cfg(test)]
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg(unix)]
     pub(crate) fn alive(&self) -> usize {
         self.alive.load(Ordering::Relaxed)
     }
@@ -393,12 +575,17 @@ impl Drop for Channel {
     /// error). Losing the release instead would freeze the pane's panel for as long as the window
     /// stayed minimised, which is worse than a thread that waits for the pass that ends the hold.
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        // **Closing the private wake descriptor comes before the handle is dropped**, and it is what
-        // ends the acceptor: it cannot fail, resolve a filesystem name another field may already
-        // have removed, or wait for room in the endpoint's connection backlog.
-        self.stopper = None;
-        drop(self.acceptor.take());
+        #[cfg(windows)]
+        self.shutdown();
+        #[cfg(unix)]
+        {
+            self.stop.store(true, Ordering::Relaxed);
+            // **Closing the private wake descriptor comes before the handle is dropped**, and it is what
+            // ends the acceptor: it cannot fail, resolve a filesystem name another field may already
+            // have removed, or wait for room in the endpoint's connection backlog.
+            drop(self.stopper.take());
+            drop(self.acceptor.take());
+        }
     }
 }
 
@@ -412,6 +599,16 @@ fn accept_until_stopped(
     services: &Services,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
+    let _alive_guard = AliveGuard(Arc::clone(alive));
+    #[cfg(windows)]
+    if let Some(hooks) = &services.test_hooks {
+        hooks.acceptor_entered.store(true, Ordering::Release);
+        #[cfg(test)]
+        if hooks.panic_acceptor.swap(false, Ordering::AcqRel) {
+            hooks.acceptor_panicked.store(true, Ordering::Release);
+            panic!("injected acceptor panic");
+        }
+    }
     let next = AtomicU64::new(0);
     let mut stumbles = 0_u32;
 
@@ -464,6 +661,11 @@ fn accept_until_stopped(
                 // and only a run of them gives up.
                 stumbles += 1;
                 if stumbles <= STUMBLES_ALLOWED {
+                    #[cfg(windows)]
+                    if acceptor.wait_for_stop(ACCEPT_RETRY).unwrap_or(true) {
+                        break;
+                    }
+                    #[cfg(unix)]
                     std::thread::sleep(ACCEPT_RETRY);
                     continue;
                 }
@@ -480,8 +682,6 @@ fn accept_until_stopped(
             }
         }
     }
-
-    alive.fetch_sub(1, Ordering::Relaxed);
 }
 
 /// Gives a connection its thread, unless this pane already has as many as it serves.
@@ -510,57 +710,165 @@ fn serve(
         return;
     }
 
+    #[cfg(windows)]
+    if let Some(releases) = &services.releases
+        && !releases.reserve(connection)
+    {
+        let mut stream = stream;
+        let _ = stream.set_send_timeout(Some(crate::wire::REPLY_DEADLINE));
+        let _ = write_reply(
+            &mut stream,
+            &Reply::Failed("this pane is already serving as many connections as it serves".into()),
+        );
+        return;
+    }
+
     let peer = (services.session.is_some() || services.publisher.is_some())
         .then_some(())
         .map(|_| Peer::capture(&stream).map_err(|_| "verified socket peer unavailable".to_owned()));
     alive.fetch_add(1, Ordering::Relaxed);
     let mut refusable = stream.try_clone().ok();
-    let spawned = std::thread::Builder::new()
-        .name(format!("panel-control connection {connection}"))
-        .spawn({
-            let stop = Arc::clone(stop);
-            let alive = Arc::clone(alive);
-            let to_the_window = to_the_window.clone();
-            let services = services.clone();
-            let wake = Arc::clone(wake);
-            move || {
-                // Capture and classify before this worker parses any request bytes.
-                let origin =
-                    services
-                        .inspector
-                        .as_ref()
-                        .map_or(PublicationOrigin::Unknown, |inspect| {
-                            DiagnosticPeer::capture(&stream)
-                                .map_or(PublicationOrigin::Unknown, |peer| inspect(&peer))
-                        });
-                converse(
-                    stream,
-                    connection,
-                    &stop,
-                    &to_the_window,
-                    &services,
-                    peer,
-                    origin,
-                    &wake,
-                );
-                alive.fetch_sub(1, Ordering::Relaxed);
-            }
-        });
+    #[cfg(windows)]
+    let fail_spawn = services.test_hooks.as_ref().is_some_and(|hooks| {
+        #[cfg(test)]
+        {
+            hooks.fail_worker_spawn.swap(false, Ordering::AcqRel)
+        }
+        #[cfg(not(test))]
+        {
+            let _ = hooks;
+            false
+        }
+    });
+    #[cfg(not(windows))]
+    let fail_spawn = false;
+    let spawned = if fail_spawn {
+        Err(io::Error::other("injected worker spawn failure"))
+    } else {
+        std::thread::Builder::new()
+            .name(format!("panel-control connection {connection}"))
+            .spawn({
+                let stop = Arc::clone(stop);
+                let alive = Arc::clone(alive);
+                let to_the_window = to_the_window.clone();
+                let services = services.clone();
+                let wake = Arc::clone(wake);
+                move || {
+                    let _alive_guard = AliveGuard(Arc::clone(&alive));
+                    #[cfg(windows)]
+                    let _close_guard = WorkerCloseGuard {
+                        connection,
+                        releases: services.releases.clone(),
+                        wake: Arc::clone(&wake),
+                    };
+                    #[cfg(windows)]
+                    if let Some(hooks) = &services.test_hooks {
+                        hooks.worker_entered.store(true, Ordering::Release);
+                        #[cfg(test)]
+                        if hooks.panic_worker.swap(false, Ordering::AcqRel) {
+                            hooks.worker_panicked.store(true, Ordering::Release);
+                            panic!("injected worker panic");
+                        }
+                    }
+                    // Capture and classify before this worker parses any request bytes.
+                    let origin =
+                        services
+                            .inspector
+                            .as_ref()
+                            .map_or(PublicationOrigin::Unknown, |inspect| {
+                                DiagnosticPeer::capture(&stream)
+                                    .map_or(PublicationOrigin::Unknown, |peer| inspect(&peer))
+                            });
+                    converse(
+                        stream,
+                        connection,
+                        &stop,
+                        &to_the_window,
+                        &services,
+                        peer,
+                        origin,
+                        &wake,
+                    );
+                }
+            })
+    };
 
     // **A thread that could not be started is answered, not dropped.** The path above — the
     // connection cap — writes a refusal, and a caller cannot tell «the machine is out of threads»
     // from «my socket was accepted and then ignored» unless this one does too.
-    if let Err(failure) = spawned {
-        alive.fetch_sub(1, Ordering::Relaxed);
-        eprintln!("a pane's control channel could not serve a connection ({failure})");
-        if let Some(stream) = refusable.as_mut() {
-            let _ = stream.set_send_timeout(Some(crate::wire::REPLY_DEADLINE));
-            let _ = write_reply(
-                stream,
-                &Reply::Failed(format!(
-                    "this pane could not serve the connection ({failure})"
-                )),
-            );
+    #[cfg(windows)]
+    if let Some(hooks) = &services.test_hooks
+        && let Some(gate) = hooks
+            .registration_gate
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    {
+        hooks.registration_entered.store(true, Ordering::Release);
+        // Bounded: this channel-local test hook is paired by the registration-race fixture;
+        // production construction always supplies None and cannot enter this branch.
+        gate.wait();
+    }
+    match spawned {
+        Ok(handle) => {
+            #[cfg(windows)]
+            if let Some(workers) = &services.connection_workers {
+                let mut workers = workers.lock().unwrap_or_else(|p| p.into_inner());
+                let mut remaining = Vec::with_capacity(workers.len() + 1);
+                for old in workers.drain(..) {
+                    if old.is_finished() {
+                        // Bounded: is_finished above observes this worker has already returned.
+                        let _ = old.join();
+                    } else {
+                        remaining.push(old);
+                    }
+                }
+                remaining.push(handle);
+                *workers = remaining;
+            }
+            #[cfg(unix)]
+            drop(handle);
+        }
+        Err(failure) => {
+            alive.fetch_sub(1, Ordering::Relaxed);
+            #[cfg(windows)]
+            if let Some(releases) = &services.releases {
+                releases.mark_closed(connection);
+                wake();
+            }
+            eprintln!("a pane's control channel could not serve a connection ({failure})");
+            if let Some(stream) = refusable.as_mut() {
+                let _ = stream.set_send_timeout(Some(crate::wire::REPLY_DEADLINE));
+                let _ = write_reply(
+                    stream,
+                    &Reply::Failed(format!(
+                        "this pane could not serve the connection ({failure})"
+                    )),
+                );
+            }
+        }
+    }
+}
+
+struct AliveGuard(Arc<AtomicUsize>);
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(windows)]
+struct WorkerCloseGuard {
+    connection: Connection,
+    releases: Option<crate::windows_services::ReleaseRegistry>,
+    wake: Arc<dyn Fn() + Send + Sync>,
+}
+#[cfg(windows)]
+impl Drop for WorkerCloseGuard {
+    fn drop(&mut self) {
+        if let Some(releases) = &self.releases {
+            releases.mark_closed(self.connection);
+            (self.wake)();
         }
     }
 }
@@ -586,6 +894,17 @@ fn converse(
     origin: PublicationOrigin,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
+    #[cfg(windows)]
+    let _release_context = {
+        WINDOWS_RELEASES.with(|current| *current.borrow_mut() = services.releases.clone());
+        struct ClearReleaseContext;
+        impl Drop for ClearReleaseContext {
+            fn drop(&mut self) {
+                WINDOWS_RELEASES.with(|current| *current.borrow_mut() = None);
+            }
+        }
+        ClearReleaseContext
+    };
     let mut stream = stream;
     // **A connection whose socket will not take the deadline is refused out loud, not dropped.**
     // Returning here left the producer reading "the pane closed the channel without answering" with
@@ -634,6 +953,9 @@ fn converse(
                 }
                 continue;
             }
+            // The Windows pipe refuses every transfer once its stop event is set; that is the
+            // channel closing, not a read failure worth naming.
+            Err(_) if stop.load(Ordering::Relaxed) => break,
             // **How a read failed is named, never guessed.** **D38** made the pseudoterminal report
             // its `ErrorKind` *and* the operating system's number for precisely this class, and a
             // channel that ends with the failure thrown away puts the next person back to guessing.
@@ -711,26 +1033,64 @@ fn converse(
             {
                 (service.prepare_holder)();
             }
+            #[cfg(windows)]
+            let snapshot_reply = match &incoming {
+                Incoming::Request(Request::PanelGet) => {
+                    Some(match services.document_snapshot.as_ref() {
+                        Some(reader) => reader
+                            .read()
+                            .map(Reply::Document)
+                            .unwrap_or_else(Reply::Failed),
+                        None => Reply::Failed("this pane is gone".into()),
+                    })
+                }
+                Incoming::Request(Request::PlanGet) => {
+                    Some(match services.plan_snapshot.as_ref() {
+                        Some(reader) => reader.read().unwrap_or_else(Reply::Failed),
+                        None => Reply::Failed("this pane is gone".into()),
+                    })
+                }
+                _ => None,
+            };
+            #[cfg(unix)]
+            let snapshot_reply = None;
+            #[cfg(unix)]
             let plan_reader = if matches!(incoming, Incoming::Request(Request::PlanGet)) {
                 services.plan_reader.lock().unwrap().clone()
             } else {
                 None
             };
-            let (reply, last) = match plan_reader {
-                Some(read) => (read(), false),
-                None => answer(
+            let (reply, last) = if let Some(reply) = snapshot_reply {
+                (reply, false)
+            } else {
+                #[cfg(unix)]
+                if let Some(read) = plan_reader {
+                    (read(), false)
+                } else {
+                    answer(
+                        incoming,
+                        connection,
+                        to_the_window,
+                        &services.reader,
+                        services
+                            .publisher
+                            .is_some()
+                            .then(|| peer.as_ref().and_then(|p| p.as_ref().ok()).cloned())
+                            .flatten(),
+                        origin,
+                        wake,
+                    )
+                }
+                #[cfg(windows)]
+                answer(
                     incoming,
                     connection,
                     to_the_window,
                     &services.reader,
-                    services
-                        .publisher
-                        .is_some()
-                        .then(|| peer.as_ref().and_then(|p| p.as_ref().ok()).cloned())
-                        .flatten(),
+                    None,
                     origin,
                     wake,
-                ),
+                )
             };
             if write_reply(&mut stream, &reply).is_err() || last {
                 break 'connected;
@@ -744,14 +1104,21 @@ fn converse(
     // **The hold dies with the connection, and this is the only place that says so.** Without it a
     // crashed agent would freeze its pane's panel for ever and the file would never be read again.
     if used_panel_protocol || (!saw_session && !saw_publish) {
-        let (answering, _unheard) = sync_channel(1);
-        let _ = to_the_window.send(Delivery {
-            connection,
-            what: What::Closed,
-            origin,
-            answer: answering,
-        });
-        wake();
+        #[cfg(unix)]
+        {
+            let (answering, _unheard) = sync_channel(1);
+            let _ = to_the_window.send(Delivery {
+                connection,
+                what: What::Closed,
+                origin,
+                answer: answering,
+                #[cfg(windows)]
+                release: None,
+            });
+            wake();
+        }
+        // Windows closes are recorded in the fixed release registry by the owning worker after
+        // this function returns. They never compete for space with publication deliveries.
     }
 }
 
@@ -1055,11 +1422,24 @@ fn ask_the_window(
     // window is not draining — a minimised window runs no pass. The producer is told the window is
     // not taking anything right now; it is not owed an applied document, and saying so beats growing
     // the queue without limit.
+    #[cfg(windows)]
+    let release = WINDOWS_RELEASES.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .map(|registry| registry.admit(connection))
+    });
+    #[cfg(windows)]
+    if release.as_ref().is_some_and(Option::is_none) {
+        return temporary_failure(wants, "the window is not draining its channel");
+    }
     match to_the_window.try_send(Delivery {
         connection,
         what,
         origin,
         answer: answering,
+        #[cfg(windows)]
+        release: release.flatten(),
     }) {
         Ok(()) => {}
         Err(TrySendError::Full(_)) => {
@@ -1366,6 +1746,8 @@ mod tests {
                 what: What::Closed,
                 origin: PublicationOrigin::Unknown,
                 answer,
+                #[cfg(windows)]
+                release: None,
             })
             .unwrap();
         let _channel = Channel::open_with_reader(
@@ -1452,6 +1834,8 @@ mod tests {
                 what: What::Closed,
                 origin: PublicationOrigin::Unknown,
                 answer: answering,
+                #[cfg(windows)]
+                release: None,
             })
             .expect("fill the queue");
 
@@ -1490,6 +1874,8 @@ mod tests {
                 what: What::Closed,
                 origin: PublicationOrigin::Unknown,
                 answer: answering,
+                #[cfg(windows)]
+                release: None,
             })
             .expect("fill the window queue");
         let woken = Arc::new(AtomicUsize::new(0));
@@ -2257,5 +2643,310 @@ mod tests {
             MAX_CONNECTIONS + 1,
             "the refused connection got a thread anyway"
         );
+    }
+}
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_lifecycle_tests {
+    use super::*;
+    use panel_contract::PanelDir;
+    use std::sync::mpsc::Receiver;
+    use std::time::Instant;
+
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
+        endpoint::connect_authenticated(dir, id, std::process::id())
+    }
+
+    struct Pane {
+        dir: PanelDir,
+        channel: Option<Channel>,
+        inbox: Receiver<Delivery>,
+        sender: SyncSender<Delivery>,
+        releases: crate::windows_services::ReleaseRegistry,
+        document: crate::windows_services::DocumentReader,
+        _window: crate::windows_services::tests::TestWindow,
+    }
+
+    fn pane(capacity: usize) -> Pane {
+        pane_with_hooks(capacity, None)
+    }
+
+    fn pane_with_hooks(capacity: usize, hooks: Option<Arc<TestHooks>>) -> Pane {
+        let dir = PanelDir::create().unwrap();
+        let (sender, inbox) = sync_channel(capacity);
+        let window = crate::windows_services::tests::test_message_window();
+        let (services, _document, _plan) =
+            crate::windows_services::WindowsServices::new(window.hwnd()).unwrap();
+        let releases = services.release_registry();
+        let document = services.document.clone();
+        let sender_copy = sender.clone();
+        let channel = match hooks {
+            Some(hooks) => {
+                Channel::open_windows_with_test_hooks(dir.path(), dir.id(), sender, services, hooks)
+                    .unwrap()
+            }
+            None => Channel::open_windows(dir.path(), dir.id(), sender, services).unwrap(),
+        };
+        Pane {
+            dir,
+            channel: Some(channel),
+            inbox,
+            sender: sender_copy,
+            releases,
+            document,
+            _window: window,
+        }
+    }
+
+    fn request(stream: &mut Stream, request: &str) {
+        stream.write_all(request.as_bytes()).unwrap();
+    }
+
+    fn line(stream: &mut Stream) -> String {
+        let mut bytes = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match stream.read(&mut byte) {
+                Ok(0) => break,
+                Ok(_) if byte[0] == b'\n' => break,
+                Ok(_) => bytes.push(byte[0]),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => std::thread::yield_now(),
+                Err(error) => panic!("read response failed: {error}"),
+            }
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn held_snapshot_returns_busy_and_drop_joins_idle_worker() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let mut pane = pane(4);
+        let _held = pane.document.lock_for_test();
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
+        request(&mut client, "{\"tool\":\"panel_get\"}\n");
+        let reply = line(&mut client);
+        assert!(reply.contains("snapshot is busy"), "{reply}");
+        let alive = Arc::clone(&pane.channel.as_ref().unwrap().alive);
+        let started = Instant::now();
+        drop(pane.channel.take());
+        assert!(started.elapsed() < ANSWER_DEADLINE + crate::wire::REPLY_DEADLINE + RECV_TIMEOUT);
+        assert_eq!(
+            alive.load(Ordering::Acquire),
+            0,
+            "drop returned with a worker alive"
+        );
+    }
+
+    #[test]
+    fn full_inbox_keeps_close_pending_until_delivery_completes() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let mut pane = pane(1);
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
+        request(
+            &mut client,
+            "{\"tool\":\"panel_set\",\"source\":\"test\",\"document\":{\"lines\":[]}}\n",
+        );
+        let mut delivery = pane.inbox.recv_timeout(Duration::from_secs(2)).unwrap();
+        let id = delivery.connection;
+        delivery.answer.send(Answer::Taken).unwrap();
+        let _ = line(&mut client);
+        let (answer, _) = sync_channel(1);
+        pane.sender
+            .try_send(Delivery {
+                connection: u64::MAX,
+                what: What::Closed,
+                origin: PublicationOrigin::Unknown,
+                answer,
+                release: None,
+            })
+            .expect("keep the app inbox full during disconnect");
+        drop(client);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if pane.releases.is_closed_pending(id) {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(
+            pane.releases.is_closed_pending(id),
+            "worker did not record close"
+        );
+        assert!(
+            pane.releases.take_closed_ready().is_empty(),
+            "close overtook admitted work"
+        );
+        delivery.complete();
+        assert_eq!(pane.releases.take_closed_ready(), vec![id]);
+        drop(pane.channel.take());
+    }
+
+    #[test]
+    fn drop_joins_worker_while_ui_queue_is_not_dispatched() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let mut pane = pane(1);
+        let alive = Arc::clone(&pane.channel.as_ref().unwrap().alive);
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
+        request(
+            &mut client,
+            "{\"tool\":\"panel_set\",\"source\":\"test\",\"document\":{\"lines\":[]}}\n",
+        );
+        let delivery = pane.inbox.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Leave the delivery unanswered, matching a UI thread stopped in native dispatch. The
+        // finite answer deadline is part of the specified drop envelope.
+        let started = Instant::now();
+        drop(pane.channel.take());
+        assert!(started.elapsed() <= ANSWER_DEADLINE + crate::wire::REPLY_DEADLINE + RECV_TIMEOUT);
+        assert_eq!(alive.load(Ordering::Acquire), 0);
+        drop(delivery);
+        drop(client);
+    }
+
+    #[test]
+    fn committed_document_and_plan_read_without_ui_dispatch() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let dir = PanelDir::create().unwrap();
+        let (sender, inbox) = sync_channel(1);
+        let window = crate::windows_services::tests::test_message_window();
+        let (services, document, plan) =
+            crate::windows_services::WindowsServices::new(window.hwnd()).unwrap();
+        document
+            .publish(r#"{"lines":["committed"]}"#.into())
+            .unwrap();
+        plan.publish_document(r#"{"plans":[]}"#.into()).unwrap();
+        let channel = Channel::open_windows(dir.path(), dir.id(), sender, services).unwrap();
+        let mut client = connect(dir.path(), dir.id()).unwrap();
+        request(&mut client, "{\"tool\":\"panel_get\"}\n");
+        assert!(line(&mut client).contains("committed"));
+        request(&mut client, "{\"tool\":\"plan_get\"}\n");
+        assert!(line(&mut client).contains("plans"));
+        assert!(
+            inbox.try_recv().is_err(),
+            "snapshot reads entered the UI inbox"
+        );
+        drop(channel);
+    }
+
+    #[test]
+    fn timed_out_split_delivery_stays_pending_until_late_ui_completion() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let mut pane = pane(4);
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
+        request(
+            &mut client,
+            "{\"tool\":\"split_open\",\"side\":\"right\"}\n",
+        );
+        let delivery = pane.inbox.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(delivery.what, What::Open { .. }));
+        let id = delivery.connection;
+        let mut deferred = vec![delivery];
+        let timeout_reply = line(&mut client);
+        assert!(timeout_reply.contains("five seconds"), "{timeout_reply}");
+        request(&mut client, "{\"tool\":\"split_read\",\"pane\":\"p\"}\n");
+        assert!(line(&mut client).contains("not draining"));
+        drop(client);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !pane.releases.is_closed_pending(id) {
+            std::thread::yield_now();
+        }
+        assert!(pane.releases.take_closed_ready().is_empty());
+        deferred.pop().unwrap().complete();
+        assert_eq!(pane.releases.take_closed_ready(), vec![id]);
+        drop(pane.channel.take());
+    }
+
+    #[test]
+    fn stop_racing_connections_returns_with_no_registered_workers() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let mut pane = pane(8);
+        let alive = Arc::clone(&pane.channel.as_ref().unwrap().alive);
+        let start = Arc::new(std::sync::Barrier::new(5));
+        let mut connectors = Vec::new();
+        for _ in 0..4 {
+            let dir = pane.dir.path().to_owned();
+            let id = pane.dir.id().to_owned();
+            let start = Arc::clone(&start);
+            connectors.push(std::thread::spawn(move || {
+                let mut stream = connect(&dir, &id).ok();
+                start.wait();
+                if let Some(stream) = stream.as_mut() {
+                    let _ = stream.write_all(b"{\"tool\":\"panel_get\"}");
+                }
+            }));
+        }
+        start.wait();
+        drop(pane.channel.take());
+        for connector in connectors {
+            connector.join().unwrap();
+        }
+        assert_eq!(alive.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn stop_waits_for_worker_registration_in_progress() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let hooks = Arc::new(TestHooks::default());
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        *hooks.registration_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        let mut pane = pane_with_hooks(2, Some(hooks.clone()));
+        let alive = Arc::clone(&pane.channel.as_ref().unwrap().alive);
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
+        request(&mut client, "{\"tool\":\"panel_get\"}\n");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !hooks.registration_entered.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(hooks.registration_entered.load(Ordering::Acquire));
+        let channel = pane.channel.take().unwrap();
+        let dropping = std::thread::spawn(move || drop(channel));
+        // The acceptor is held before its worker handle enters the owned registry. Release it only
+        // after Drop has started, proving shutdown joins the in-flight registration path.
+        gate.wait();
+        dropping.join().unwrap();
+        assert_eq!(alive.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn panic_and_spawn_failure_paths_still_join_and_close_slots() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let acceptor_hooks = Arc::new(TestHooks::default());
+        acceptor_hooks.panic_acceptor.store(true, Ordering::Release);
+        let mut panicked_acceptor = pane_with_hooks(1, Some(Arc::clone(&acceptor_hooks)));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !acceptor_hooks.acceptor_panicked.load(Ordering::Acquire) && Instant::now() < deadline
+        {
+            std::thread::yield_now();
+        }
+        assert!(acceptor_hooks.acceptor_panicked.load(Ordering::Acquire));
+        let acceptor_alive = Arc::clone(&panicked_acceptor.channel.as_ref().unwrap().alive);
+        drop(panicked_acceptor.channel.take());
+        assert_eq!(acceptor_alive.load(Ordering::Acquire), 0);
+
+        let spawn_hooks = Arc::new(TestHooks::default());
+        spawn_hooks.fail_worker_spawn.store(true, Ordering::Release);
+        let mut spawn_failed = pane_with_hooks(1, Some(spawn_hooks));
+        let mut client = connect(spawn_failed.dir.path(), spawn_failed.dir.id()).unwrap();
+        request(&mut client, "{\"tool\":\"panel_get\"}\n");
+        assert!(line(&mut client).contains("could not serve the connection"));
+        let spawned_alive = Arc::clone(&spawn_failed.channel.as_ref().unwrap().alive);
+        drop(spawn_failed.channel.take());
+        assert_eq!(spawned_alive.load(Ordering::Acquire), 0);
+
+        let worker_hooks = Arc::new(TestHooks::default());
+        worker_hooks.panic_worker.store(true, Ordering::Release);
+        let mut panicked_worker = pane_with_hooks(1, Some(Arc::clone(&worker_hooks)));
+        let worker_alive = Arc::clone(&panicked_worker.channel.as_ref().unwrap().alive);
+        let mut client = connect(panicked_worker.dir.path(), panicked_worker.dir.id()).unwrap();
+        request(&mut client, "{\"tool\":\"panel_get\"}\n");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !worker_hooks.worker_panicked.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(worker_hooks.worker_panicked.load(Ordering::Acquire));
+        drop(panicked_worker.channel.take());
+        assert_eq!(worker_alive.load(Ordering::Acquire), 0);
     }
 }

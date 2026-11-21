@@ -14,7 +14,8 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod codex_tests;
 
 #[cfg(all(test, windows))]
@@ -28,6 +29,7 @@ pub(crate) fn native_window(
     persistence: session::Persistence,
     measuring: bool,
 ) -> term_core::Result<Window> {
+    control::remember_native_window(cc);
     chrome::prepare(&cc.egui_ctx);
     let mut window = Window::opening(
         &cc.egui_ctx,
@@ -613,7 +615,7 @@ fn launch(
     let args = integration
         .as_ref()
         .map_or(args, |prepared| prepared.args());
-    let mut identity: Vec<_> = identity_of(panel.as_ref()).into_iter().collect();
+    let mut identity = crate::panel::pane::launch_identity(panel.as_ref());
     let helper = crate::resume::helper_path();
     identity.push((
         "IVY_SESSION_HELPER",

@@ -42,6 +42,13 @@ fn exact_ids_are_client_typed_and_never_shell_text() {
     );
 }
 
+// Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
+// Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+crate::windows_unix_omission!(
+    literal_requests_round_trip_and_unknown_authority_is_refused,
+    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+);
+#[cfg(unix)]
 #[test]
 fn literal_requests_round_trip_and_unknown_authority_is_refused() {
     let requests = [
@@ -92,6 +99,13 @@ fn literal_requests_round_trip_and_unknown_authority_is_refused() {
     }
 }
 
+// Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
+// Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+crate::windows_unix_omission!(
+    metadata_fields_and_complete_request_are_bounded,
+    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+);
+#[cfg(unix)]
 #[test]
 fn metadata_fields_and_complete_request_are_bounded() {
     for bad in ["relative", "/tmp/\ncommand", "/tmp/\0nul"] {
@@ -120,6 +134,13 @@ fn metadata_fields_and_complete_request_are_bounded() {
     );
 }
 
+// Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
+// Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+crate::windows_unix_omission!(
+    hook_discards_content_and_update_refuses_it,
+    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+);
+#[cfg(unix)]
 #[test]
 fn hook_discards_content_and_update_refuses_it() {
     let hook = serde_json::json!({

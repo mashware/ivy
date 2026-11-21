@@ -184,7 +184,9 @@ env_vars = ["PANEL_ID", "PANEL_DIR"]
 
 If an Ivy bridge entry already exists under another name, update that table and preserve its
 command and other settings instead of adding a duplicate. `env_vars` forwards **variable names**
-from the launching environment; never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
+from the launching environment; on Windows also add `PANEL_SERVER_PID` to `env_vars`. Never save
+these per-console values in `env`. The bridge verifies the expected Windows app PID before sending
+requests to its private named pipe.
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`

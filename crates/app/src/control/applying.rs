@@ -21,8 +21,9 @@ impl PaneControl {
         signals: &mut crate::agent_signals::Signals,
         now: SystemTime,
     ) {
-        while let Ok(delivery) = self.inbox.try_recv() {
-            match delivery.what {
+        while let Ok(mut delivery) = self.inbox.try_recv() {
+            let what = std::mem::replace(&mut delivery.what, What::Closed);
+            match what {
                 What::Overlay {
                     panel,
                     holder,
@@ -38,6 +39,8 @@ impl PaneControl {
                         self.did.overlays_refused += 1;
                         crate::panel::overlay::refused_at_apply(state);
                     }
+                    #[cfg(windows)]
+                    delivery.complete();
                 }
 
                 What::PublishAttested {
@@ -65,6 +68,8 @@ impl PaneControl {
                             Answer::Refused(why)
                         }
                     };
+                    #[cfg(windows)]
+                    delivery.complete();
                     let _ = delivery.answer.send(answer);
                 }
 
@@ -72,6 +77,8 @@ impl PaneControl {
                     let answer = signals
                         .receive(delivery.connection, snapshot, std::time::Instant::now())
                         .map_or_else(Answer::Refused, |_| Answer::Taken);
+                    #[cfg(windows)]
+                    delivery.complete();
                     let _ = delivery.answer.send(answer);
                 }
                 What::Publish { source, panel } => {
@@ -92,6 +99,8 @@ impl PaneControl {
                             Answer::Refused(why)
                         }
                     };
+                    #[cfg(windows)]
+                    delivery.complete();
                     // The send cannot block — the answer channel takes one value — and it fails only
                     // when the caller is already gone, which changes nothing about what is on screen.
                     let _ = delivery.answer.send(answer);
@@ -107,6 +116,8 @@ impl PaneControl {
                             Answer::Refused(why)
                         }
                     };
+                    #[cfg(windows)]
+                    delivery.complete();
                     let _ = delivery.answer.send(answer);
                 }
                 // **The patch lands beside the publication and not beside the reads**, because it
@@ -128,6 +139,8 @@ impl PaneControl {
                             Answer::Refused(why)
                         }
                     };
+                    #[cfg(windows)]
+                    delivery.complete();
                     let _ = delivery.answer.send(answer);
                 }
                 What::Closed => {
@@ -139,20 +152,46 @@ impl PaneControl {
                 // focus and the revocation live — and the window is woken for it, because the drain
                 // of this very pass has already run: without that, a request arriving while the
                 // window is at rest would be answered by no pass at all.
-                What::Retire => {
+                deferred @ What::Retire => {
+                    delivery.what = deferred;
                     self.defer_retirement(delivery);
                     break;
                 }
-                What::Open { .. }
+                deferred @ (What::Open { .. }
                 | What::Read { .. }
                 | What::Close { .. }
                 | What::PlanSet { .. }
                 | What::PlanGet
-                | What::PlanRetire => {
+                | What::PlanRetire) => {
+                    delivery.what = deferred;
                     self.waiting_on_the_window.push(delivery);
                     (self.wake)();
                 }
             }
+        }
+        #[cfg(windows)]
+        self.apply_ready_windows_closes(state, signals);
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn apply_ready_windows_closes(
+        &mut self,
+        state: &mut PanelState,
+        signals: &mut crate::agent_signals::Signals,
+    ) {
+        for connection in self.windows_releases.take_closed_ready() {
+            signals.closed(connection, std::time::Instant::now());
+            let (answer, _) = sync_channel(1);
+            self.apply_closed(
+                state,
+                Delivery {
+                    connection,
+                    what: What::Closed,
+                    origin: panel_control::PublicationOrigin::Unknown,
+                    answer,
+                    release: None,
+                },
+            );
         }
     }
 }

@@ -249,9 +249,7 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
         && (pane.restoration.fresh_shell_required || pane.pty.exit_success().is_some())
     {
         let wake = pane.restoration.wake.as_ref().map(Arc::clone);
-        let mut identity: Vec<_> = crate::identity_of(pane.panel.as_ref())
-            .into_iter()
-            .collect();
+        let mut identity = crate::panel::pane::launch_identity(pane.panel.as_ref());
         let helper = helper_path();
         identity.push((
             "IVY_SESSION_HELPER",
