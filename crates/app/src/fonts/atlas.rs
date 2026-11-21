@@ -385,8 +385,8 @@ fn rasterize(
 /// record would come out as a white silhouette, and in a monochrome symbol face (most of the families
 /// the system calls emoji) it would win over the color face behind it: the defect **D24** closed.
 ///
-/// **It is placed on its advance and the face's line — never on its ink**: the advance across, ascent
-/// to descent down. Fitted by its ink, every emoji of a face would get a scale and a baseline of its
+/// **It is placed on its advance and the face's vertical [`extent`] — never on its ink**: the advance
+/// across, the extent down. Fitted by its ink, every emoji of a face would get a scale and a baseline of its
 /// own. And it is drawn directly at that size, which `glyph_run` does with its glyph cache off — its
 /// default — and without hinting, which a colour glyph never takes and whose set-up for the whole
 /// font would otherwise be paid, and timed as drawing, on every glyph.
@@ -412,7 +412,8 @@ fn colr_of(
     let advance = font
         .glyph_metrics(skrifa::instance::Size::unscaled(), location)
         .advance_width(glyph)?;
-    let line_height = metrics.ascent - metrics.descent;
+    let (ascent, descent) = extent(font, &metrics);
+    let line_height = ascent - descent;
     // A glyph with no advance is a mark drawn over its neighbour, not an emoji: there is no box to
     // fit it to, and dividing by it would hand the library an infinite size.
     if advance <= 0.0 || line_height <= 0.0 {
@@ -446,7 +447,7 @@ fn colr_of(
         .fill_glyphs(std::iter::once(vello_cpu::Glyph {
             id: glyph.to_u32(),
             x: 0.0,
-            y: metrics.ascent * factor,
+            y: ascent * factor,
         }));
     context.flush();
     let mut pixmap = vello_cpu::Pixmap::new(width_px, tall_px);
@@ -460,6 +461,25 @@ fn colr_of(
         [width as usize, tall as usize],
         pixmap.data_as_u8_slice(),
     ))
+}
+
+/// How far above and below the baseline the box of a face's colour glyphs reaches, in font units
+/// (the descent negative).
+///
+/// **The line is not enough.** `Segoe UI Emoji` declares a line flatter than its emoji — measured on
+/// Windows CI, its advance is 1.43 times its line — so a face placed on its line came out cut at the
+/// top or the bottom. The `OS/2` table's Windows extent is the one a face promises to keep its ink
+/// inside, because Windows clips at it; the box takes whichever of the two reaches further, so a
+/// face whose line already holds its ink keeps it.
+fn extent(font: &skrifa::FontRef<'_>, metrics: &skrifa::metrics::Metrics) -> (f32, f32) {
+    use skrifa::raw::TableProvider as _;
+    match font.os2() {
+        Ok(os2) => (
+            metrics.ascent.max(f32::from(os2.us_win_ascent())),
+            metrics.descent.min(-f32::from(os2.us_win_descent())),
+        ),
+        Err(_) => (metrics.ascent, metrics.descent),
+    }
 }
 
 /// A painter that draws nothing: walking a glyph's graph with it says whether the graph can be
@@ -569,11 +589,13 @@ mod tests {
         // asserted «not empty» would pass a white silhouette, which is what the library draws
         // when it is handed a glyph and no colour.
         let blob = colr_fixture();
-        let image = drawn(&blob, 84, 100, 100).expect("a COLR glyph with no bitmap gave no image");
+        // A 120-pixel slot puts the 1200 units of the box at a tenth of a pixel each, the scale
+        // the probes below were read at.
+        let image = drawn(&blob, 84, 120, 100).expect("a COLR glyph with no bitmap gave no image");
         assert_eq!(
             image.size,
-            [100, 95],
-            "not fitted on its advance (1000) and ascent to descent (950)"
+            [100, 120],
+            "not fitted on its advance (1000) and its Windows extent (950 up, 250 down)"
         );
         assert_near(
             &image,
@@ -591,14 +613,16 @@ mod tests {
     }
 
     #[test]
-    fn a_colr_glyph_takes_its_advance_and_line_fitted_to_the_slot_and_not_its_ink() {
-        // The box is 1000 × 950 units (advance by ascent to descent); a 17-pixel cell two columns
-        // of 9 wide fits it at 17/950 per unit, so 18 × 17. Fitted by its ink — a cross far narrower
+    fn a_colr_glyph_takes_its_advance_and_extent_fitted_to_the_slot_and_not_its_ink() {
+        // The box is 1000 × 1200 units: the advance across, and down the `OS/2` Windows extent (950
+        // up, 250 down), which reaches below the face's line (950 up, nothing down). A 17-pixel cell
+        // two columns of 9 wide fits it at 17/1200 per unit, so 14 × 17. On the line alone it came
+        // out 18 × 17 — the box that cut `Segoe UI Emoji`. Fitted by its ink — a cross far narrower
         // than its advance — it would come out another size, and every emoji of the face a size of
         // its own.
         let blob = colr_fixture();
         let image = drawn(&blob, 84, 17, 18).expect("a COLR glyph with no bitmap gave no image");
-        assert_eq!(image.size, [18, 17]);
+        assert_eq!(image.size, [14, 17]);
     }
 
     #[test]
@@ -714,12 +738,14 @@ mod tests {
         }
     }
 
-    /// The fixture's descent is zero, so on Linux nothing proves the drawing is placed on the line
-    /// rather than shifted by it. The font Windows uses has a real descent: an emoji placed wrong
-    /// comes out cut at the top or the bottom of its box.
+    /// The font Windows asks for emoji, which no Linux host carries: drawn on its line alone, its
+    /// emoji came out cut at the top or the bottom of their box. A drawing that reaches any edge of
+    /// its box is taken as cut. The message carries the face's numbers, because Windows CI is the
+    /// only place they can be read.
     #[cfg(windows)]
     #[test]
     fn segoe_ui_emoji_is_drawn_whole_inside_its_box() {
+        use skrifa::raw::TableProvider as _;
         let blob = fontique::Blob::new(std::sync::Arc::new(segoe_ui_emoji()));
         let font = skrifa::FontRef::from_index(blob.data(), 0).expect("Segoe UI Emoji opens");
         let glyph = font
@@ -732,11 +758,48 @@ mod tests {
             "Segoe UI Emoji was expected to draw from outlines"
         );
         let [width, height] = drawn.image.size;
-        let row_inked = |y: usize| (0..width).any(|x| drawn.image.pixels[y * width + x].a() > 0);
-        assert!((0..height).any(row_inked), "nothing was drawn");
+        let inked = |x: usize, y: usize| drawn.image.pixels[y * width + x].a() > 0;
+        let rows: Vec<usize> = (0..height)
+            .filter(|&y| (0..width).any(|x| inked(x, y)))
+            .collect();
+        let columns: Vec<usize> = (0..width)
+            .filter(|&x| (0..height).any(|y| inked(x, y)))
+            .collect();
+        assert!(!rows.is_empty(), "nothing was drawn");
+        let location = skrifa::instance::LocationRef::default();
+        let metrics = font.metrics(skrifa::instance::Size::unscaled(), location);
+        let advance = font
+            .glyph_metrics(skrifa::instance::Size::unscaled(), location)
+            .advance_width(glyph);
+        let hhea = font
+            .hhea()
+            .map(|t| (t.ascender().to_i16(), t.descender().to_i16()));
+        let os2 = font.os2().map(|t| {
+            (
+                (t.s_typo_ascender(), t.s_typo_descender()),
+                (t.us_win_ascent(), t.us_win_descent()),
+            )
+        });
+        let head = font
+            .head()
+            .map(|t| (t.units_per_em(), t.x_min(), t.y_min(), t.x_max(), t.y_max()));
+        let numbers = format!(
+            "box {width}x{height}, ink rows {:?}..={:?}, ink columns {:?}..={:?}; line {} / {}, \
+             advance {advance:?}, hhea {hhea:?}, OS/2 typo and win {os2:?}, head {head:?}",
+            rows.first(),
+            rows.last(),
+            columns.first(),
+            columns.last(),
+            metrics.ascent,
+            metrics.descent,
+        );
         assert!(
-            !row_inked(0) && !row_inked(height - 1),
-            "the drawing touches the top or the bottom of its box: it is cut, not placed"
+            !rows.contains(&0) && !rows.contains(&(height - 1)),
+            "the drawing touches the top or the bottom of its box: it is cut, not placed. {numbers}"
+        );
+        assert!(
+            !columns.contains(&0) && !columns.contains(&(width - 1)),
+            "the drawing touches the left or the right of its box: it is cut, not placed. {numbers}"
         );
     }
 }
