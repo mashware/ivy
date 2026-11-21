@@ -556,7 +556,8 @@
     "binary": "app/app:lib",
     "name": "viewer::interaction_tests::control_click_on_an_image_path_opens_it_pinned_to_its_console",
     "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
+    "issue": "https://github.com/mashware/ivy/issues/186",
+    "intermittent": true
   },
   {
     "binary": "app/app:lib",
@@ -665,5 +666,18 @@
     "name": "diagnostics_log::sink::tests::a_file_that_cannot_be_moved_aside_starts_again_and_says_why",
     "reason": "a full log that cannot be moved aside keeps its old content on Windows",
     "issue": "https://github.com/mashware/ivy/issues/203"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::search_blink_deadline_covers_both_halves_and_disarms_when_closed",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188",
+    "intermittent": true
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "settings::editor::view::tests::the_startup_page_names_the_log_file_and_shows_it_in_its_folder",
+    "reason": "the log folder is revealed with a verbatim \\\\?\\ prefix the test does not expect",
+    "issue": "https://github.com/mashware/ivy/issues/186"
   }
 ]
