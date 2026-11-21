@@ -496,6 +496,11 @@ mod native_tests {
         };
     }
 
+    crate::windows_unix_omission!(
+        fixture_read_failure_preserves_child_traceback_and_stage,
+        "unix-only: launches /usr/bin/python3 in a POSIX PTY to retain a real child traceback"
+    );
+
     windows_unix_omission!(native_claude_outside_desktop_path_admits_hook_and_clears_wait);
     windows_unix_omission!(same_client_helper_is_admitted_without_waiting_for_window_apply);
     windows_unix_omission!(nested_client_is_rejected_but_generic_descendant_hook_is_allowed);
