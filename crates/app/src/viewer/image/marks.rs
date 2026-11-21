@@ -24,13 +24,23 @@ pub(crate) enum Tool {
 }
 
 /// A mark, in pixels of the original image. Only a marker carries a note: it is the one with a
-/// number for the note to be read under.
+/// number for the note to be read under. Its `serial` names its note's field, so the field's
+/// focus and undo history follow the marker and not its place in the list (#197): keyed on the
+/// place, deleting marker 1 handed marker 2 the first one's history, and a Ctrl+Z inside it
+/// brought the deleted note's text back.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Shape {
-    Arrow { from: egui::Pos2, to: egui::Pos2 },
+    Arrow {
+        from: egui::Pos2,
+        to: egui::Pos2,
+    },
     Ellipse(egui::Rect),
     Rectangle(egui::Rect),
-    Marker { at: egui::Pos2, note: String },
+    Marker {
+        serial: u64,
+        at: egui::Pos2,
+        note: String,
+    },
 }
 
 /// The proportions of a mark for an image of a given size, in its pixels: the copy draws them as
@@ -130,6 +140,11 @@ pub(crate) struct Marks {
     pub(crate) general: String,
     pub(crate) tool: Tool,
     stroke: Option<Stroke>,
+    /// The last serial a marker of this image was given. Never wound back by an undo or a Clear,
+    /// because egui keeps a field's state by its id after the field is gone: a serial given twice
+    /// would hand the new marker's field the old one's undo history. Another image starts again
+    /// from nothing, since its fields' ids carry the opening they belong to.
+    placed: u64,
 }
 
 impl Marks {
@@ -160,14 +175,18 @@ impl Marks {
         }
     }
 
-    /// Each marker's number, from 1 in the order they were placed, and its place in the list.
-    pub(crate) fn numbered(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+    /// Each marker's number, from 1 in the order they were placed, its place in the list and its
+    /// serial.
+    pub(crate) fn numbered(&self) -> impl Iterator<Item = (usize, usize, u64)> + '_ {
         self.list
             .iter()
             .enumerate()
-            .filter(|(_, mark)| matches!(mark, Shape::Marker { .. }))
+            .filter_map(|(index, mark)| match mark {
+                Shape::Marker { serial, .. } => Some((index, *serial)),
+                _ => None,
+            })
             .enumerate()
-            .map(|(number, (index, _))| (number + 1, index))
+            .map(|(number, (index, serial))| (number + 1, index, serial))
     }
 
     /// The note of the marker at `index` of the list.
@@ -225,9 +244,19 @@ impl Marks {
         if !pointer.button_down(egui::PointerButton::Primary) {
             let stroke = self.stroke.take().expect("a stroke was being drawn");
             if let Some(shape) = finish(self.tool, &stroke) {
-                self.list.push(shape);
+                self.keep(shape);
             }
         }
+    }
+
+    /// Adds a finished shape, giving a marker the next serial. Given here and not in `finish`,
+    /// which also draws the shape being dragged, every frame.
+    pub(super) fn keep(&mut self, mut shape: Shape) {
+        if let Shape::Marker { serial, .. } = &mut shape {
+            self.placed += 1;
+            *serial = self.placed;
+        }
+        self.list.push(shape);
     }
 
     /// Paints every mark, and the one being drawn, over the image where it is this frame.
@@ -298,7 +327,8 @@ fn rect_on_screen(rect: egui::Rect, placement: Placement) -> egui::Rect {
     egui::Rect::from_two_pos(placement.to_screen(rect.min), placement.to_screen(rect.max))
 }
 
-/// The shape a stroke leaves with `tool`, or none for a slip. A marker goes where the press was.
+/// The shape a stroke leaves with `tool`, or none for a slip. A marker goes where the press was,
+/// with no serial yet.
 fn finish(tool: Tool, stroke: &Stroke) -> Option<Shape> {
     let rect = egui::Rect::from_two_pos(stroke.from, stroke.to);
     let boxed = rect.width() == 0.0 || rect.height() == 0.0;
@@ -308,6 +338,7 @@ fn finish(tool: Tool, stroke: &Stroke) -> Option<Shape> {
         Tool::Marker => {
             let at = stroke.from;
             return Some(Shape::Marker {
+                serial: 0,
                 at,
                 note: String::new(),
             });
@@ -329,6 +360,7 @@ mod tests {
 
     fn marker(at: (f32, f32), note: &str) -> Shape {
         Shape::Marker {
+            serial: at.0 as u64,
             at: egui::pos2(at.0, at.1),
             note: note.into(),
         }
@@ -352,14 +384,31 @@ mod tests {
         };
         assert_eq!(
             marks.numbered().collect::<Vec<_>>(),
-            [(1, 0), (2, 2), (3, 3)]
+            [(1, 0, 1), (2, 2, 2), (3, 3, 3)]
         );
         marks.delete(2);
-        assert_eq!(marks.numbered().collect::<Vec<_>>(), [(1, 0), (2, 2)]);
+        assert_eq!(marks.numbered().collect::<Vec<_>>(), [(1, 0, 1), (2, 2, 3)]);
         assert_eq!(marks.notes(), ["first", "third"]);
         marks.undo();
         assert_eq!(marks.notes(), ["first"]);
         assert_eq!(marks.marks().len(), 2);
+    }
+
+    /// A marker's serial is never given again on its image: not after an undo takes the last
+    /// marker back, nor after a Clear.
+    #[test]
+    fn a_markers_serial_never_comes_back() {
+        let placed = |marks: &mut Marks| {
+            marks.keep(marker((0.0, 0.0), ""));
+            marks.numbered().last().expect("a marker was placed").2
+        };
+        let mut marks = Marks::default();
+        let mut seen = vec![placed(&mut marks), placed(&mut marks)];
+        marks.undo();
+        seen.push(placed(&mut marks));
+        marks.clear();
+        seen.push(placed(&mut marks));
+        assert_eq!(seen, [1, 2, 3, 4]);
     }
 
     /// Each tool leaves its own shape from the pixels pressed and let go; a marker goes where the
@@ -388,6 +437,7 @@ mod tests {
         assert_eq!(
             finish(Tool::Marker, &stroke),
             Some(Shape::Marker {
+                serial: 0,
                 at: stroke.from,
                 note: String::new()
             })

@@ -180,9 +180,9 @@ the release. Mark missing evidence explicitly; do not turn CI success into deskt
 
 This table defines the evidence still to collect, not completed tests. The release notes or work
 validation artifact must record the actual results. macOS and Windows downloads are not supplied
-by the Linux delivery. The Windows control channel and MCP are unavailable until F2.7 implements
-and proves its native listener; merely packaging `panel-mcp` does not enable it. The portability
-milestone remains open independently of installer work.
+by the Linux delivery. Windows MCP uses its private named-pipe listener; native transport tests run
+in the Windows CI job. Real-desktop painting, second-user denial and network rejection still require
+the documented Windows trials before release readiness.
 
 ## Arch Linux (x86_64, rolling)
 
@@ -298,8 +298,8 @@ Start. No Rust compiler is required. There is no PATH modification or default-te
 Close Ivy before installing a newer version into the same location. Remove it through Windows
 Settings → Apps → Installed apps → Ivy → Uninstall. Preferences and saved layouts are preserved;
 the installer never owns the `ivy` user-data directory. Restoring a layout launches fresh
-processes rather than resuming old programs. The Windows MCP/control listener still requires its
-separate portability delivery; the bundled bridge alone does not enable MCP on Windows.
+processes rather than resuming old programs. Windows MCP clients must inherit `PANEL_ID`,
+`PANEL_DIR` and `PANEL_SERVER_PID` from the intended console; do not persist these values.
 
 The manual package workflow uses `windows-2025` with the pinned Rust toolchain and the runner's
 Inno Setup 6 compiler. The Microsoft C runtime is linked statically to avoid requiring a separate

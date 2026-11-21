@@ -28,6 +28,7 @@ macro_rules! windows_unix_omission {
 }
 
 use std::ffi::OsStr;
+#[cfg(not(windows))]
 use std::fs::DirBuilder;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -36,6 +37,8 @@ mod dropped;
 mod panel;
 mod patch;
 pub mod plan;
+#[cfg(windows)]
+pub mod windows_directory;
 
 pub use dropped::Dropped;
 pub use panel::{
@@ -181,21 +184,24 @@ fn remove(path: &Path) -> Option<io::Error> {
 /// creation mode that does accept intermediate segments also does not complain when the path is
 /// already there — it would adopt a directory this crate did not make.
 fn create_dir(path: &Path) -> io::Result<()> {
-    let builder = DirBuilder::new();
-    // Without this the mode comes from the session's umask —measured: `0775` with this machine's—,
-    // and a file that tells what the user is up to is going to live there. Under the user's runtime
-    // directory it would not be reachable, because it is already theirs and theirs alone; but the
-    // fallback can be a temporary shared by everyone.
-    #[cfg(unix)]
-    let result = {
-        use std::os::unix::fs::DirBuilderExt;
-        let mut builder = builder;
-        builder.mode(0o700);
+    #[cfg(windows)]
+    {
+        windows_directory::create(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut builder = DirBuilder::new();
+        // Without this the mode comes from the session's umask —measured: `0775` with this
+        // machine's—, and a file that tells what the user is up to is going to live there. Under the
+        // user's runtime directory it would not be reachable, because it is already theirs and theirs
+        // alone; but the fallback can be a temporary shared by everyone.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
         builder.create(path)
-    };
-    #[cfg(not(unix))]
-    let result = builder.create(path);
-    result
+    }
 }
 
 /// Eight hexadecimal digits.

@@ -138,7 +138,7 @@ is in the README. These settings belong to Codex, not Ivy's configuration file.
 
 If an Ivy bridge entry already exists under another name, update that table and preserve its
 command and other settings instead of adding a duplicate. `env_vars` forwards **variable names**
-from the launching environment; never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
+from the launching environment; on Windows also forward `PANEL_SERVER_PID`. Never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
@@ -492,6 +492,13 @@ would never work:
 ivy: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
 ```
 
+**On Windows two more chords are the terminal's** (D115): `Ctrl+Insert` copies the marked text and
+`Shift+Insert` pastes, as in Windows Terminal. `key.copy = none` switches off `Ctrl+Insert` as well,
+and the program then receives it as `CSI 2;5~`. `Shift+Delete` is not a cut there: it reaches the
+program, as on Linux and macOS. A shortcut you bind to `ctrl+insert` wins over the copy; one bound to
+`shift+insert` only fires when the clipboard holds no text, because with text the desktop turns that
+chord into a paste before it is a key.
+
 ## What happens if you get it wrong
 
 **One badly written line does not take the file down.** It is ignored, you are told which one it is
@@ -723,17 +730,22 @@ still being read, opening another says so instead of starting a second read.
 
 A plain left drag on the image draws with the tool chosen above it — Arrow, Ellipse, Rectangle or
 Marker, where a click places a numbered marker. Each marker has a note in the column beside the
-image, after the same numbered disc, and the image a general note; a drawer too narrow for both
-puts that column under the image. Undo (or Ctrl+Z, Cmd+Z on macOS, while no note is being
-written), the × beside a marker's note and Clear take marks back. **Send to <console> and press
-Enter**, at the foot of the column, writes a copy of the image with the marks into that console's
-own folder (`PANEL_DIR`) under the first free name `annotated-<n>.png`, then types the line shown
-under the image into that console and presses Enter: the copy's path and the notes. In a plain shell that line runs as a command, so read it
-before sending. From the click on Send until the line is typed, the marks and notes cannot be
-changed. The original file is never changed, and the copies are removed when that console
-closes. While marks are not sent, the image stays: opening another image or document, or closing
-its tab, says so. Only empty authorities,
-localhost and the verified local hostname are accepted as local file links.
+image, after the same numbered disc, and the image a general note; a drawer too narrow for both puts
+that column under the image. Undo (or Ctrl+Z, Cmd+Z on macOS, while no note is being written), the ×
+beside a marker's note and Clear take marks back. **Send to <console> and press Enter**, at the foot
+of the column, writes a copy of the image with the marks into that console's own folder
+(`PANEL_DIR`) under the first free name `annotated-<n>.png`, then types the line shown under the
+image into that console and presses Enter: the copy's path and the notes. In a plain shell that line
+runs as a command, so read it before sending. From the click on Send until the line is typed, the
+marks and notes cannot be changed, but **Cancel**, beside «Sending…» while the copy is written,
+takes the Send back: the marks and notes stay and can be changed again, nothing is typed, and the
+copy is removed once it is finished. Until then Send is greyed out and reads «Still finishing the
+previous copy…». On a drawer too short for the column, a notice there is cut to one line and shown
+whole on hover; shorter still, that line stays and the Send button is cut under it, or left out
+where too little of it would show, the notice then saying on hover «Enlarge the drawer to send». The
+original file is never changed, and the copies are removed when that console closes. While marks are
+not sent, the image stays: opening another image or document, or closing its tab, says so. Only
+empty authorities, localhost and the verified local hostname are accepted as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize
 controls. Its context menu offers the same action when the header is narrow. It opens the clicked

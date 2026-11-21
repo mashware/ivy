@@ -146,6 +146,136 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "control::tests::a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_delivered_document_ages_from_the_moment_it_arrived",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_document_read_back_is_counted_with_the_size_it_was_paid_at",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_document_that_arrived_by_file_is_read_back_by_a_producer_that_never_published",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_file_written_while_the_panel_was_held_is_read_when_the_hold_ends",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_key_that_names_nothing_refuses_the_patch_and_the_document_a_producer_sees_is_unchanged",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_is_counted_apart_from_a_publication_and_with_the_size_it_left_behind",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_near_the_ceiling_applies_and_is_counted_at_that_size",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_needs_the_hold_a_publication_takes",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_reaching_a_panel_whose_holder_let_go_is_told_to_publish_first",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_whose_result_is_over_the_ceiling_is_refused_and_changes_nothing",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_producer_that_addresses_nothing_can_still_reach_the_ends_and_nothing_else",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_publication_after_patches_leaves_nothing_of_the_patched_state",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_publication_wakes_the_window",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_read_while_no_pass_runs_sees_the_last_commit_not_the_queued_write",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_request_that_waits_for_the_window_wakes_it",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_second_source_is_refused_by_the_name_of_the_one_holding_it",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_split_request_waits_for_the_window_instead_of_being_applied",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::finishing_the_report_waits_for_admitted_callbacks_and_closes_admission",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::the_three_numbers_the_report_publishes_count_what_they_say_they_count",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::the_window_accumulator_keeps_a_completion_and_refusal_after_pane_close",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::three_edits_in_one_request_land_and_leave_the_rest_of_the_panel_alone",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::what_an_agent_publishes_is_on_the_panel_and_the_file_was_never_written",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::what_is_read_back_carries_nothing_the_application_added",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::when_the_connection_closes_the_hold_ends_and_what_it_said_stays",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::while_it_is_held_a_file_publication_is_not_read",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "explorer::interaction_tests::a_press_on_the_floating_list_over_a_console_never_reaches_its_program",
     "reason": "unix-only: uses POSIX stty and a child input recorder to verify the floating-list press is swallowed"
   },
@@ -330,6 +460,11 @@
     "binary": "app/app:lib",
     "name": "panel::overlay::native_tests::unheld_and_script_held_refusals_keep_their_contract",
     "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::tests::apply_refuses_stale_or_revoked_authority_and_reports_each_once",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
   },
   {
     "binary": "app/app:lib",
@@ -1576,6 +1711,126 @@
     "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
   },
   {
+    "binary": "panel-control/panel-mcp:bin",
+    "name": "tests::idle_revocation_disconnects_the_producer_without_another_tool_call",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel-mcp:bin",
+    "name": "tests::route_reassociation_moves_an_existing_bridge_between_real_panes",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_document_comes_back_in_the_order_the_pane_sent_it",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_document_that_is_not_json_never_leaves_the_producer",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_document_written_across_several_lines_still_arrives_as_one_request",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_producer_is_told_what_fell_away_and_nothing_when_nothing_did",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_producer_publishes_and_reads_what_the_window_decided",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_producer_retires_and_reads_the_auxiliary_console_outcome",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_source_carrying_quotes_does_not_break_the_request",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::an_open_with_no_addressable_identity_comes_back_as_an_open",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::ops_that_are_not_json_never_leave_the_producer",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::the_split_verbs_travel_and_their_payloads_come_back",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_relay::tests::empty_config_requires_complete_inventory_before_accepting_resume",
+    "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_relay::tests::exit_cancels_epoch_without_waiting_for_a_held_route",
+    "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_relay::tests::loaded_resume_success_is_held_until_the_running_mcp_proves_its_route",
+    "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::binding_and_old_revocation",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::binding_another_conversation_revokes_only_the_same_pane",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::binding_waits_until_inflight_route_guard_is_released",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::cancellation_does_not_wait_for_inflight_guard_and_fresh_epoch_reuses_route",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::failed_mapping_commit_restores_the_previous_record_and_removes_temporary_file",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::failed_replacement_restores_the_displaced_pane",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::interrupted_unrelated_record_does_not_poison_a_new_binding",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::orphan_active_after_interruption_is_found_without_a_thread_mapping",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::public_proof_is_immutable_across_bind_and_revoke",
+    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
+  },
+  {
     "binary": "panel-control/panel_control:lib",
     "name": "codex_route::tests::symlink_and_missing_routes_are_rejected",
     "reason": "unix-only: requires Unix symlink semantics"
@@ -1729,6 +1984,21 @@
     "binary": "panel-control/panel_control:lib",
     "name": "listener::tests::what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written",
     "reason": "unix-only: requires Unix-domain socket transport from producer to window inbox"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::hook_discards_content_and_update_refuses_it",
+    "reason": "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::literal_requests_round_trip_and_unknown_authority_is_refused",
+    "reason": "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::metadata_fields_and_complete_request_are_bounded",
+    "reason": "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
   },
   {
     "binary": "panel-control/panel_control:lib",

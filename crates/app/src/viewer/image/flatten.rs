@@ -283,6 +283,7 @@ mod tests {
         let marks = [
             Shape::Rectangle(rect),
             Shape::Marker {
+                serial: 1,
                 at: egui::pos2(600.0, 400.0),
                 note: "here".into(),
             },
@@ -355,6 +356,7 @@ mod tests {
     #[test]
     fn a_markers_number_is_its_place_among_the_markers() {
         let marker = |x: f32| Shape::Marker {
+            serial: 1,
             at: egui::pos2(x, 300.0),
             note: String::new(),
         };
@@ -416,6 +418,42 @@ mod tests {
             "{said}"
         );
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A write that fails once its file is created, as the encoder does for an image with no
+    /// pixels, removes the half-written copy through `abandon` and says only why it failed.
+    #[test]
+    fn a_write_that_fails_midway_leaves_no_copy() {
+        let folder = std::env::temp_dir().join(format!("ivy-midway-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("annotated-1.png");
+        let said = write_new(&path, &image::RgbaImage::new(0, 0)).unwrap_err();
+        let opened = format!("The copy could not be created at {}", path.display());
+        assert!(
+            !said.starts_with(&opened),
+            "the file was never created: {said}"
+        );
+        let written = format!("The copy could not be written at {}: ", path.display());
+        assert!(said.starts_with(&written), "{said}");
+        assert!(!said.contains("half-written"), "{said}");
+        assert!(!path.exists(), "the half-written copy stayed");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A copy already gone when its write is given up on is not worth a word: only why the write
+    /// failed is said.
+    #[test]
+    fn a_copy_already_gone_says_only_why_the_write_failed() {
+        let gone = std::env::temp_dir().join(format!("ivy-gone-{}.png", std::process::id()));
+        let _ = std::fs::remove_file(&gone);
+        assert_eq!(
+            abandon(&gone, "disk full"),
+            format!(
+                "The copy could not be written at {}: disk full",
+                gone.display()
+            )
+        );
     }
 
     /// A copy is never written over an existing file, and what is written decodes to the copy.

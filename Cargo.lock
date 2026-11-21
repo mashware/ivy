@@ -2418,6 +2418,7 @@ version = "0.1.0-alpha.14"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2432,6 +2433,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tungstenite",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -45,6 +45,8 @@ pub(crate) mod pane;
 pub(crate) mod summary;
 use buttons::buttons_drawn;
 pub(crate) use document::Reader as DocumentReader;
+#[cfg(windows)]
+pub(crate) use document::install_windows_document_publisher;
 use driving::RetirementState;
 pub(crate) use driving::{Holder, Released, Retirement};
 use links::{LaidOutLink, PaintedLink};
@@ -222,6 +224,8 @@ impl PartialOrd for AttentionState {
 /// so hides a broken producer behind a plausible summary from an hour ago.
 #[derive(Default)]
 pub struct PanelState {
+    #[cfg(windows)]
+    windows_document: Option<panel_control::windows_services::DocumentPublisher>,
     last_good: Option<Arc<Panel>>,
     /// Observation belongs to the document, so disconnect does not erase it.
     published_by: panel_control::PublicationOrigin,

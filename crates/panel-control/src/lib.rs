@@ -52,6 +52,8 @@ pub mod diagnostic_peer;
 pub mod endpoint;
 pub mod listener;
 pub mod session;
+#[cfg(windows)]
+pub mod windows_services;
 pub mod wire;
 
 pub use client::{Answered, Producer};
@@ -59,5 +61,10 @@ pub use diagnostic_peer::DiagnosticPeer;
 pub use listener::{
     Answer, Channel, Connection, Delivery, OverlayAuthority, PublicationInspector,
     PublicationOrigin, PublishHandler, ReadDocument, What,
+};
+#[cfg(windows)]
+pub use windows_services::{
+    DocumentPublisher, DocumentReader, DocumentSnapshot, PlanPublisher, PlanReader, PlanSnapshot,
+    ReleaseRegistry, ReleaseToken, SnapshotReadMetrics, WindowsServices, WindowsWake,
 };
 pub use wire::{Activity, AgentSnapshot, MAX_REQUEST, Reply, Request, Side};

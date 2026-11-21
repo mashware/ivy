@@ -63,17 +63,16 @@ them takes it back**: from then on the handle answers with the reason and never 
 `split_open` launched keeps reading what the person types after that, and the promise an agent author
 is given is «the app stops handing you that buffer; the program you opened does not».
 
-**The transport is a per-pane endpoint inside that pane's `0700` directory** — a Unix socket on
-POSIX; on Windows, a named pipe that is **not bound until its security descriptor can be asserted**,
-which is F2.7's. It carries newline-delimited JSON, and the MCP vocabulary is a binary that speaks it
-rather than the channel itself.
+**The transport is a per-pane endpoint** — a Unix socket inside the pane's `0700` directory on
+POSIX, and a user-and-SYSTEM-only named pipe on Windows. It carries newline-delimited JSON, and
+the MCP vocabulary is a binary that speaks it rather than the channel itself.
 
 `PANEL_ID` and `PANEL_DIR` are one address pair, not credentials. Every consumer uses the same
-strict identity rule: a non-empty UTF-8 identifier and an absolute directory. The bridge's
-`initialize` instructions additionally require metadata to identify `PANEL_DIR/control.sock` as a
-socket. This is a presence check only; it neither connects nor proves that a server is alive. Shared
-Unix runtime-directory selection is exposed as `panel_contract::base_dir()` so shell integration
-uses the same absolute fallback and diagnostic.
+strict identity rule: a non-empty UTF-8 identifier and an absolute directory. Windows additionally
+requires the expected app PID in `PANEL_SERVER_PID` and verifies the server before sending bytes.
+The bridge's `initialize` instructions require an existing pane directory and supported identity;
+they neither connect nor prove that a server is alive. Shared Unix runtime-directory selection is
+exposed as `panel_contract::base_dir()` so shell integration uses the same fallback and diagnostic.
 
 **Security rule:** an agent reaches **its own pane**, and the consoles it opened itself, and no other.
 For `panel_set` the rule is kept by a mechanism and not by a check: **the pane a call acts on is the

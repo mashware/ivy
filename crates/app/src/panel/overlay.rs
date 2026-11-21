@@ -1,4 +1,7 @@
 //! A hook may repaint only the live client invocation that owns the current hold.
+// The Windows control channel does not carry hook publication yet (client attestation exists only
+// on Linux and macOS), so there the admission half of this module is built and never called.
+#![cfg_attr(windows, allow(dead_code))]
 
 use panel_contract::{Attention, Panel};
 use panel_control::{Connection, Delivery, Reply, What, session::Peer};
@@ -241,6 +244,8 @@ fn admit(
             authority: proof,
         },
         answer,
+        #[cfg(windows)]
+        release: None,
     }) {
         Ok(()) => {
             wake();
@@ -393,7 +398,12 @@ mod tests {
         assert_eq!(state.document().unwrap(), before);
     }
 
+    crate::windows_unix_omission!(
+        apply_refuses_stale_or_revoked_authority_and_reports_each_once,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     #[test]
+    #[cfg(unix)]
     fn apply_refuses_stale_or_revoked_authority_and_reports_each_once() {
         #[derive(Debug)]
         struct Current(bool);
@@ -430,6 +440,8 @@ mod tests {
                     authority: Arc::new(Current(live)),
                 },
                 answer,
+                #[cfg(windows)]
+                release: None,
             });
         }
         control.apply(&mut state, &mut Default::default(), SystemTime::now());

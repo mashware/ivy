@@ -21,7 +21,7 @@ use std::time::SystemTime;
 
 use eframe::egui;
 use panel_contract::PanelDir;
-use panel_control::{Answer, Channel, Delivery, ReadDocument, Side as WireSide, What};
+use panel_control::{Answer, Channel, Delivery, Side as WireSide, What};
 
 use crate::measure::Control;
 use crate::painter::CellMetrics;
@@ -32,9 +32,12 @@ use crate::{Pane, Window};
 mod applying;
 mod channel;
 mod retiring;
+pub(crate) use channel::control_hwnd;
 pub(crate) use channel::open_with_authority;
 #[cfg(test)]
+#[cfg(unix)]
 pub(crate) use channel::open_with_sessions;
+pub(crate) use channel::remember_native_window;
 
 /// How many deliveries a pane's inbox may hold before a publication is refused.
 ///
@@ -77,9 +80,11 @@ impl Default for ReadActivity {
     }
 }
 
+#[cfg(not(windows))]
 struct ActiveRead(ReadActivity);
 
 impl ReadActivity {
+    #[cfg(not(windows))]
     fn begin(&self) -> Option<ActiveRead> {
         let mut state = self
             .0
@@ -139,6 +144,7 @@ impl ReadActivity {
     }
 }
 
+#[cfg(not(windows))]
 impl ActiveRead {
     fn succeeded(&self, bytes: usize) {
         let mut state = self
@@ -162,6 +168,7 @@ impl ActiveRead {
     }
 }
 
+#[cfg(not(windows))]
 impl Drop for ActiveRead {
     fn drop(&mut self) {
         let mut state = self
@@ -233,7 +240,12 @@ impl WindowActivity {
     }
 }
 
-fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) -> ReadDocument {
+// Windows reads the committed snapshot instead (`windows_services`), so only the socket uses it.
+#[cfg(not(windows))]
+fn measured_reader(
+    reader: crate::panel::DocumentReader,
+    reads: ReadActivity,
+) -> panel_control::ReadDocument {
     Arc::new(move || {
         let Some(active) = reads.begin() else {
             return Err("this pane is gone".to_owned());
@@ -292,6 +304,12 @@ pub struct PaneControl {
     did: Control,
     /// Read work may complete after this pane is closed, so its tally has an owner outside the pane.
     reads: ReadActivity,
+    #[cfg(windows)]
+    windows_document: panel_control::windows_services::DocumentPublisher,
+    #[cfg(windows)]
+    windows_plan: panel_control::windows_services::PlanPublisher,
+    #[cfg(windows)]
+    windows_releases: panel_control::windows_services::ReleaseRegistry,
 }
 
 impl PaneControl {
@@ -301,6 +319,7 @@ impl PaneControl {
     /// did before this milestone, which is the same decision a pane whose directory could not be
     /// created already gets.
     #[cfg(test)]
+    #[cfg(unix)]
     pub fn open(
         dir: &PanelDir,
         reader: crate::panel::DocumentReader,
@@ -317,6 +336,16 @@ impl PaneControl {
     /// window cannot do from inside a painting is act on the tree, so these wait for it there.
     pub fn take_waiting_on_the_window(&mut self) -> Vec<Delivery> {
         std::mem::take(&mut self.waiting_on_the_window)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn install_windows_document(&self, state: &mut PanelState) {
+        crate::panel::install_windows_document_publisher(state, self.windows_document.clone());
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn windows_plan_publisher(&self) -> panel_control::windows_services::PlanPublisher {
+        self.windows_plan.clone()
     }
 
     #[cfg(test)]
@@ -336,16 +365,43 @@ impl PaneControl {
     }
 }
 
+#[cfg(windows)]
+fn apply_ready_control_closes(pane: &mut Pane) {
+    if let Some(control) = pane.control.as_mut() {
+        control.apply_ready_windows_closes(&mut pane.panel_state, &mut pane.signals);
+    }
+}
+
 impl PaneControl {
+    fn with_snapshot_metrics(&self, did: Control) -> Control {
+        #[cfg(windows)]
+        let did = {
+            let mut did = did;
+            let snapshots = self.windows_document.read_metrics();
+            did.read_back += snapshots.read_back as usize;
+            did.read_refused += snapshots.read_refused as usize;
+            did.largest_serialized = did.largest_serialized.max(snapshots.largest_serialized);
+            did
+        };
+        did
+    }
+
     /// What this pane's channel has done, for the report.
     #[cfg(test)]
     pub fn did(&self) -> Control {
-        self.did.and(self.reads.did())
+        self.with_snapshot_metrics(self.did.and(self.reads.did()))
     }
 
     /// Counters whose work cannot finish after this pane is dropped.
     pub(crate) fn did_in_the_window(&self) -> Control {
-        self.did
+        self.with_snapshot_metrics(self.did)
+    }
+
+    /// Stops Windows readers before their counters are banked on a closing pane.
+    pub(crate) fn stop_and_did_in_the_window(&mut self) -> Control {
+        #[cfg(windows)]
+        self._channel.shutdown();
+        self.did_in_the_window()
     }
 }
 
@@ -723,10 +779,12 @@ fn answer_windows_requests(
     }
 
     for (origin, delivery) in waiting {
-        let Some(delivery) = crate::board::plans::dispatch(window, origin, delivery, ctx) else {
+        let Some(mut delivery) = crate::board::plans::dispatch(window, origin, delivery, ctx)
+        else {
             continue;
         };
-        let answer = match delivery.what {
+        let what = std::mem::replace(&mut delivery.what, What::Closed);
+        let answer = match what {
             What::Open {
                 side,
                 program,
@@ -759,6 +817,8 @@ fn answer_windows_requests(
                 window
                     .opened_by_agents
                     .forget_the_connection(origin, delivery.connection);
+                #[cfg(windows)]
+                delivery.complete();
                 // Nothing waits on a release —the thread that sends it is on its way out— so
                 // there is nobody to answer and nothing to say.
                 continue;
@@ -773,7 +833,13 @@ fn answer_windows_requests(
             | What::PlanGet
             | What::PlanRetire => Answer::Refused("that request is not the window's".to_owned()),
         };
+        #[cfg(windows)]
+        delivery.complete();
         let _ = delivery.answer.send(answer);
+    }
+    #[cfg(windows)]
+    for pane in window.all_panes_mut() {
+        apply_ready_control_closes(pane);
     }
     if window.control.has_retired() {
         ctx.request_repaint();
@@ -782,6 +848,7 @@ fn answer_windows_requests(
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use panel_control::{Answered, Producer};
@@ -1027,7 +1094,7 @@ mod tests {
     #[test]
     #[ignore = "manual release-mode latency measurement"]
     fn measure_off_frame_document_reads() {
-        fn reader_for(document: &str) -> (PanelState, ReadDocument, usize) {
+        fn reader_for(document: &str) -> (PanelState, panel_control::ReadDocument, usize) {
             let mut state = PanelState::default();
             let panel =
                 panel_contract::parse_document(document).expect("the measured panel parses");
@@ -1039,7 +1106,7 @@ mod tests {
             (state, reader, bytes)
         }
 
-        fn serial(rounds: u32, reader: &ReadDocument) -> Duration {
+        fn serial(rounds: u32, reader: &panel_control::ReadDocument) -> Duration {
             let started = Instant::now();
             for _ in 0..rounds {
                 std::hint::black_box(reader().expect("the measured read succeeds"));
@@ -1623,7 +1690,22 @@ mod tests {
             .write_all(b"{\"tool\":\"split_open\",\"side\":\"right\"}\n")
             .expect("ask for a split");
 
-        pane.frames_for(Duration::from_millis(200));
+        let delivery = pane
+            .control
+            .inbox
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the listener admits the split request");
+        assert!(
+            matches!(&delivery.what, What::Open { .. }),
+            "the listener queued the wrong request: {:?}",
+            delivery.what
+        );
+        pane.control.enqueue_for_tests(delivery);
+        pane.control.apply(
+            &mut pane.state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
 
         let waiting = pane.control.take_waiting_on_the_window();
         assert_eq!(
@@ -2153,4 +2235,122 @@ mod tests {
             vec!["one", "two", "three"]
         );
     }
+}
+
+// The same tests, declared on Windows so its test report accounts for each one.
+#[cfg(test)]
+#[cfg(windows)]
+mod tests {
+    crate::windows_unix_omission!(
+        a_document_that_arrived_by_file_is_read_back_by_a_producer_that_never_published,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        what_is_read_back_carries_nothing_the_application_added,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_document_read_back_is_counted_with_the_size_it_was_paid_at,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        the_window_accumulator_keeps_a_completion_and_refusal_after_pane_close,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        finishing_the_report_waits_for_admitted_callbacks_and_closes_admission,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_read_while_no_pass_runs_sees_the_last_commit_not_the_queued_write,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        what_an_agent_publishes_is_on_the_panel_and_the_file_was_never_written,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_second_source_is_refused_by_the_name_of_the_one_holding_it,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_file_written_while_the_panel_was_held_is_read_when_the_hold_ends,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        when_the_connection_closes_the_hold_ends_and_what_it_said_stays,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        while_it_is_held_a_file_publication_is_not_read,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_publication_wakes_the_window,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        the_three_numbers_the_report_publishes_count_what_they_say_they_count,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_delivered_document_ages_from_the_moment_it_arrived,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_split_request_waits_for_the_window_instead_of_being_applied,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_request_that_waits_for_the_window_wakes_it,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        three_edits_in_one_request_land_and_leave_the_rest_of_the_panel_alone,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_key_that_names_nothing_refuses_the_patch_and_the_document_a_producer_sees_is_unchanged,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_publication_after_patches_leaves_nothing_of_the_patched_state,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_whose_result_is_over_the_ceiling_is_refused_and_changes_nothing,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_near_the_ceiling_applies_and_is_counted_at_that_size,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_needs_the_hold_a_publication_takes,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_reaching_a_panel_whose_holder_let_go_is_told_to_publish_first,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_is_counted_apart_from_a_publication_and_with_the_size_it_left_behind,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_producer_that_addresses_nothing_can_still_reach_the_ends_and_nothing_else,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+
+    #[test]
+    #[ignore = "manual release-mode latency measurement"]
+    fn measure_off_frame_document_reads() {}
+
+    #[test]
+    #[ignore = "manual release-mode latency measurement"]
+    fn measure_a_patch_at_the_ceiling() {}
 }

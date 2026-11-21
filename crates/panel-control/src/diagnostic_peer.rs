@@ -1,7 +1,7 @@
 //! Socket identity used only to label publications for diagnostics.
 //! This witness is deliberately independent of session authorization.
 
-use interprocess::local_socket::Stream;
+use crate::endpoint::Stream;
 use std::io;
 
 #[cfg(unix)]

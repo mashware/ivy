@@ -5726,6 +5726,8 @@ purpose** — is the same function's Windows arm, `shift && Delete`, which has t
 Shift+Delete and Ctrl+Shift+Delete into a cut before they are keys, so on Windows they would reach the
 program as `0x18` instead of D52's `CSI 3;2~`/`CSI 3;6~`. Nothing here can observe it; F2.7 decides it
 on the platform, and the guard pins that arm as upstream's so the change is a visible decision.
+**Decided in D115**: the arm is gone, as is `is_copy_command`'s Windows Ctrl+Insert arm, and
+`is_paste_command`'s Shift+Insert arm requires Shift alone.
 
 **What was discarded.** Handling `Event::Cut` with Shift in `keyboard.rs` as a lookup of the chord,
 with no change to the copy. It keeps the copy at one change, and it pays for it with state of its own:
@@ -5738,7 +5740,8 @@ information the copy throws away. Chosen by the user at the fix's gate.
 before hashing the rest — the paste branch and `is_cut_command` — and pins the new arm and upstream's
 other two. The residual's constant was computed from the tree before the change, by a script that
 first reproduced the old constant exactly. The behaviour itself is out of reach of any test, for the
-reason above, so it is checked by hand (D53).
+reason above, so it is checked by hand (D53). Since D115 it cuts **four** places — the paste branch
+and the three clipboard predicates — and pins each predicate whole.
 
 ## D34 — The step between cells is a whole number of pixels
 
@@ -7570,7 +7573,9 @@ request: a copy is `0x03`, an interrupt, and a cut is `0x18` — `nano` exits on
 still becomes a key is the paste over a clipboard with no text, because D33's patch lets it fall
 through, and that one does go out as `CSI 2;2~`. None of this is new with this decision — it held
 while these keys had no bytes of their own — and none of it can be seen from Linux, where the suite
-runs.
+runs. **Decided in D115**: Shift+Delete is a key on Windows too, Ctrl+Insert copies and Shift+Insert
+pastes only when they are exactly those chords, and every other chord over the two keys takes the
+form above.
 
 **5. The four arrows follow the same two rules, and the wheel sends them in the program's mode.**
 Bare, an arrow is `CSI A..D` normally and `SS3 A..D` under DECCKM (`kcuu1`…`kcub1`); with any
@@ -7664,11 +7669,23 @@ so F2.7 names the observer it uses on each of them.
   `key_bytes` lets Shift through with Ctrl, so it reaches the program as `0x03` — the terminal's
   copy chord interrupting instead of copying. F2.7 rewrites the paste and copy rows for that
   platform rather than reading them as failures.
-- **Windows**: the vendored `egui-winit` turns chords over Insert and Delete into clipboard requests
-  before they are keys, and what reaches the program is `0x03` for a copy and `0x18` for a cut
-  (**D52**, last point). The `Shift+Insert` row is expected to fail there today — with text on the
-  clipboard it pastes instead — and `Ctrl+Insert` and `Shift+Delete` would send `0x03` and `0x18`
-  if pressed; those three are the ones F2.7 has to decide.
+- **Windows**: the three chords over Insert and Delete are decided in **D115**, and the list there
+  is the one below plus these rows, which replace the `Shift+Insert` one:
+
+  | Chord | Situation | The program receives |
+  |---|---|---|
+  | `Shift+Delete` | `nano` open; then `cat -v` | `nano` stays open; `cat -v` prints `^[[3;2~` and no `^X` behind it |
+  | `Ctrl+Insert` | text marked, `cat -v` running | nothing, and `cat` still running; the marked text is on the clipboard |
+  | `Ctrl+Shift+Insert` | `cat -v` | `^[[2;6~` |
+  | `Shift+Insert` | text on the clipboard | the text, pasted |
+  | `Shift+Insert` | an image on the clipboard | nothing at all |
+  | `AltGr+2`, `AltGr+´` | Spanish layout, a shell prompt | `@`, `{` |
+  | `AltGr+Q`, `AltGr+7` | German layout, a shell prompt | `@`, `{` |
+  | `Ctrl+Insert`, then `Shift+Delete` | text selected in a Settings field | copied; then cut |
+  | `Ctrl+Insert` | lines selected in the drawer's code viewer | copied |
+
+  The observer there is a console whose program echoes what it receives — `cat -v` inside Git Bash or
+  WSL, or `nano`/the prompt itself where only the effect is read.
 
 **What was discarded, and why.**
 
@@ -11427,7 +11444,12 @@ image. Undo (its button, or Ctrl+Z — Cmd+Z on macOS — with no other modifier
 holds the keys and no text field has the keyboard), a delete per marker and Clear take them back;
 deleting a marker renumbers the ones after it with their notes. A drag shorter than four screen
 points leaves nothing: an image pixel means nothing on a 4 000-pixel screenshot fitted to 500
-points. **«Send to <console> and press Enter»** then:
+points. A marker's note field is named by its image's opening and a serial the marker gets when
+placed, never given again on that image — not after an undo or a Clear — because egui keeps a
+field's focus and undo history by its id: named by its place, deleting marker 1 handed marker 2
+the first one's history, and a Ctrl+Z there brought the deleted note back (#197). Another image
+starts its serials again, since the opening already tells its fields apart.
+**«Send to <console> and press Enter»** then:
 
 - **writes a copy into that console's `PANEL_DIR`**, the original's width × height with the marks
   drawn antialiased by tiny-skia and the markers' numbers from the bundled Geist outlines, named
@@ -11435,19 +11457,25 @@ points. **«Send to <console> and press Enter»** then:
   included. It is created with `create_new` on a worker, and on Unix with mode 0600 (elsewhere the
   platform's default permissions); the original file is never written.
 - **types one line into that console**: `Annotated screenshot: <copy> · 1: <note> · 2: <note> ·
-  Note: <general>`, empty parts left out, every control character turned into a space. That text
-  is painted under the image and its notes before the click, from the same function that composes
-  what is sent — inside the paste markers when the console asks for them — together with «It is
-  added to whatever is already typed at that console's prompt, and Enter runs it.» The paste is
-  composed for the paste mode the console has when it is sent, after the copy is closed. The notes
-  sit in a fixed column beside the image, so the image keeps its height however many markers there
-  are, and go under it only where the drawer is too narrow for both; the line takes a band of its
-  own under both, the full width, because a copy's path wraps into many lines in a column.
+  Note: <general>`, empty parts left out, every control character turned into a space. That text is
+  painted under the image and its notes before the click, from the same function that composes what
+  is sent — inside the paste markers when the console asks for them — together with «It is added to
+  whatever is already typed at that console's prompt, and Enter runs it.» The paste is composed for
+  the paste mode the console has when it is sent, after the copy is closed. The notes sit in a fixed
+  column beside the image, so the image keeps its height however many markers there are, and go
+  under it only where the drawer is too narrow for both; the line takes a band of its own under
+  both, the full width, because a copy's path wraps into many lines in a column. Neither paints
+  outside the drawer's body: on a drawer too short for the toolbar, a wrapped notice and the button,
+  the image gives up its height first, then the notice is cut to one line, shown whole on hover,
+  above a button that keeps its full height; where not even that line fits above the button, the
+  line takes the column's head and the button is cut under it — not laid out at all where less than
+  12 points of it would show, a strip nobody can read or aim at, the notice then adding «Enlarge the
+  drawer to send» on hover — and never laid over the toolbar: a refusal clipped away says nothing at
+  all, while a taller drawer gives the button back (#197).
 - **presses Enter in a write of its own, on a later frame.** People driving Claude Code from tmux
-  report that text and Enter sent together are read as part of the paste; a
-  separate write a frame later is what a person's Enter is, for an agent and a shell alike. A
-  frame egui runs twice still keeps the Enter for the next frame. The Git review's insertion keeps
-  writing no Enter.
+  report that text and Enter sent together are read as part of the paste; a separate write a frame
+  later is what a person's Enter is, for an agent and a shell alike. A frame egui runs twice still
+  keeps the Enter for the next frame. The Git review's insertion keeps writing no Enter.
 
 **Only the copy's path goes in the line, never the path the program printed.** The copy's name is
 the app's own (`[a-z0-9-]` and `.png` in a directory the app created); the original's is whatever a
@@ -11460,10 +11488,21 @@ before choosing to send, the D42 precedent.
 window's input pass, before the copy is started — the image replaced, the console gone, no
 `PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
 keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
-or an earlier one freed) — and a refused Send writes no file.
-**From the click to the Enter the marks and notes are frozen**: the copy is drawn from them a frame
-after the click, and a delivered Send clears them, so an edit made meanwhile would be wiped unsent;
-a Ctrl+Z in the very pass of the click is refused too, and so is a second Send. **While the copy is
+or an earlier one freed) — and a refused Send writes no file. **From the click to the Enter the
+marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
+Send clears them, so an edit made meanwhile would be wiped unsent; a Ctrl+Z in the very pass of the
+click is refused too, and so is a second Send. **Until the line is typed, a Cancel beside «Sending…»
+takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
+already writing is parked — a write cannot be interrupted — and polled from the window's input pass
+until it ends, when its copy is removed, and with it the folder of a console that closed meanwhile.
+While a worker is parked, Send is greyed out and reads «Still finishing the previous copy…» — on the
+button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
+before any other check, so two workers never race for one name; the decoder's abandoned read is the
+same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
+goes to standard error as well, and waits for the next drawer that lays the notes out, because the
+image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
+and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that
@@ -11482,8 +11521,8 @@ and leaves both. A file the console's program left there is not touched and keep
 copy written for a console that closed before it could be delivered is removed with the directory
 it left, and so is that directory when the write failed; `PanelDir` had told standard error the
 directory remains, so its removal is told there too. `tests/shape.rs` pins the field order. A
-worker that never returns keeps the drawer locked: accepted for now, because `PANEL_DIR` lives
-under `$XDG_RUNTIME_DIR`, a tmpfs, where one exists, and recorded as a follow-up.
+worker that never returns no longer locks the drawer: Cancel parks it, and only a new Send waits
+for it.
 
 Discarded: pins with normalised coordinates and no copy, because a model reads a circle drawn on
 the pixels reliably and «pin 2 at 0.43, 0.71» poorly; a hand-written line rasteriser and digit
@@ -11496,7 +11535,12 @@ later Send to that console; renaming the copy when a name is taken after the lin
 would send a line different from the one shown; teaching
 `PanelDir::remove` the app's file names, which puts app knowledge into the contract crate (the
 store's card «the contract removes what the contract puts there» argues for it, and is set aside
-here because the copies are the app's, not the contract's); escaping the notes for a shell; and
+here because the copies are the app's, not the contract's); escaping the notes for a shell;
+a deadline after which a stuck write is given up, and a Cancel offered only after some seconds,
+because a slow disk is not a stuck one and no constant tells them apart — the person does;
+re-keying or clearing egui's field state when a marker is deleted, which the serial makes needless
+and which would not cover an undo or a Clear; carrying the serial on from one image to the next,
+which protects nothing the opening in the id does not; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.
 
@@ -11570,3 +11614,76 @@ there is no frame cost to declare (D13).
   runs only the tests it names.
 - Helper programs (`panel-mcp`, `ivy-session`, `ivy-codex`) keep their standard error with whoever
   launched them.
+
+## D115 — On Windows, Ctrl+Insert copies, Shift+Insert pastes, and Shift+Delete belongs to the program
+
+**Decided.** The three chords that **D52** and **D53** left «for F2.7 to decide» are decided, for
+Windows only; Linux and macOS keep exactly what D52 gives them.
+
+| Chord | Before, on Windows | Now, on Windows |
+|---|---|---|
+| `Shift+Delete` (any other modifiers too) | a cut request with no modifiers → `0x18` to the program; `nano` exits | a key: `CSI 3;2~` (`CSI 3;m~` with others), as on Linux and macOS |
+| `Ctrl+Insert`, exactly | a copy request → `0x03`, an interrupt | copies the marked text, through the same switch as `Ctrl+Shift+C` (`key.copy`); with copy switched off it reaches the program as `CSI 2;5~` |
+| `Ctrl+Insert` with Shift or Alt too | a copy request (with Shift it copied, without it `0x03`) | a key in D52's form (`CSI 2;6~`, `CSI 2;7~`…) |
+| `Shift+Insert`, exactly, text on the clipboard | the paste | the paste — unchanged |
+| `Shift+Insert`, exactly, no text on the clipboard | `CSI 2;2~` to the program (D33's fall-through) | nothing at all, the rule `bytes` already applies to `Ctrl+Shift+V` |
+| `Shift+Insert` with Ctrl or Alt too | a paste request (or a copy, with Ctrl, because the copy arm is tested first) | a key in D52's form |
+
+**Why these.** They are the defaults of the terminals people use on Windows: Windows Terminal binds
+`ctrl+insert` to copy and `shift+insert` to paste and leaves `shift+delete` to the program, and
+WezTerm binds the same two. A Windows user presses them expecting copy and paste; a terminal there
+that sent `CSI 2;5~` for Ctrl+Insert would look broken. Nobody turns Shift+Delete into a cut inside a
+terminal, because there is nothing to cut.
+
+**Where each half lives.** The vendored `egui-winit` (**D33**) gains its third change: its Windows
+arms for Shift+Delete and Ctrl+Insert are removed, and its Shift+Insert arm requires Shift **without**
+Ctrl or Alt. Removing an arm releases every chord it caught, so each one was followed to where it
+lands now (the table). The copy for Ctrl+Insert is decided **in the keyboard pass**, from the key,
+because a copy request carries no key: there Ctrl+Insert and Ctrl+C are the same event, and Ctrl+C
+must stay `0x03`. That door sits **after** the keymap, so a `key.<action> = ctrl+insert` somebody
+wrote still wins. Which platform the pass is on is a parameter, so the Linux suite tests the Windows
+answer as well as its own.
+
+**The rest of the window keeps the chords it had.** Every text field (Settings, renaming a pane,
+Files' search) and the drawer's code viewer copy and cut only on a copy or cut request, so delivering
+two keys instead would have taken Ctrl+Insert and Shift+Delete away from them — found in this
+decision's review, and the owner chose to keep them. So before egui reads a batch, the window puts
+the request **right behind** each exact Ctrl+Insert and Shift+Delete key, on Windows only
+(`keyboard::add_requests_behind`). A text field ignores the key — egui leaves Shift+Delete alone on
+Windows precisely because it expects the cut, and has nothing for Insert — and acts on the request.
+A console acts on the key and drops the request behind it, armed from the key itself before the
+keymap, so a chord somebody bound does not leave its request to reach the program as `0x03` or
+`0x18`. The pair is this project's own translation, so unlike the desktop layer it is tested.
+What the fields lose is every chord over the two keys **but the exact one**: upstream copied on any
+Ctrl+Insert, cut on any Shift+Delete and pasted on any Shift+Insert, so Ctrl+Shift+Insert and
+Ctrl+Alt+Insert no longer copy there, Ctrl+Shift+Delete and Alt+Shift+Delete no longer cut — egui's
+field ignores Shift+Delete on Windows whatever else is held — and Alt+Shift+Insert no longer
+pastes (Ctrl+Shift+Insert never pasted: upstream's copy arm caught it first). Each of those is a D52 key for a console, and a request for one of
+them would be a second answer the console would have to drop as well.
+
+**A shortcut bound to `shift+insert` is half a shortcut on Windows**: with text on the clipboard
+the desktop layer still turns that chord into a paste before it is a key, so the binding fires only
+over a clipboard with no text. Said in the configuration guide rather than refused, because the same
+chord is ordinary on the other two platforms.
+
+**AltGr needs no code, and that is a reading, not a run.** `winit` 0.30.13 clears Ctrl and Alt from
+the modifiers while the right Alt is down on a layout that has AltGr
+(`platform_impl/windows/keyboard_layout.rs`, `get_agnostic_mods`), and it fills the key's text with
+the AltGr character; `egui-winit` drops text only while Ctrl is held, so `@` and `{` arrive as text.
+The fake left Ctrl Windows sends with AltGr may produce a passing modifier change, which the right
+Alt's own message clears before the character key. Confirmed by hand on Windows in D53's rows, or
+named there as unverified.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| All three as plain keys on Windows, exactly as on Linux | The two Windows conventions above would be missing on the platform where they are expected |
+| Shift+Delete kept as a cut, silenced | Silence kills a key D52 gives to programs (`kDC` with Shift) for a cut that does not exist |
+| Telling Ctrl+Insert from Ctrl+C in the copy request | The request carries no key: impossible |
+| A `Copy` action in the keymap with a Windows factory chord | Copy is a switch, not an action (**D26**): the desktop resolves Ctrl+Shift+C before it is a key, so such an action could only ever be bound to Insert chords, one platform's — a rebindable copy that is not rebindable |
+| Delivering Shift+Insert as a key and pasting from the keyboard pass | The pass cannot read the clipboard; the paste branch of `egui-winit` is the only reader, and the paste door already tells Shift apart |
+| Accepting that text fields lose Ctrl+Insert and Shift+Delete on Windows | Offered at the review; the owner chose to keep them |
+| Producing the key and its request inside the vendored layer | A fourth change to somebody else's code, out of reach of every test (D53); the input hook is this project's own and the suite drives the same function the console uses to drop the request |
+| The ticket's rule «on Windows, Ctrl+Alt with text means the text wins» | Not needed for the AltGr key (above), and wrong for left Ctrl + left Alt on a layout without AltGr: `winit` fills the text with the key without Ctrl, so `Ctrl+Alt+A` on a US layout would type `a`. Ctrl+Alt as an AltGr substitute is left out, recorded |
+| The same chords as copy and paste on Linux and macOS | Changes two platforms nobody asked about, and widens D53's hand check to them |

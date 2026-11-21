@@ -97,8 +97,8 @@ impl Window {
         let its_control: Vec<_> = self.tabs[leaving]
             .panes_mut()
             .into_iter()
-            .filter_map(|pane| pane.control.as_ref())
-            .map(crate::control::PaneControl::did_in_the_window)
+            .filter_map(|pane| pane.control.as_mut())
+            .map(crate::control::PaneControl::stop_and_did_in_the_window)
             .collect();
         for did in its_control {
             self.bank_control(did);
@@ -181,8 +181,8 @@ impl Window {
         // live set the report walks.
         if let Some(did) = leaving
             .control
-            .as_ref()
-            .map(crate::control::PaneControl::did_in_the_window)
+            .as_mut()
+            .map(crate::control::PaneControl::stop_and_did_in_the_window)
         {
             self.bank_control(did);
         }
@@ -246,8 +246,8 @@ impl Window {
         let its_cost = what_this_frame_left(&mut leaving);
         if let Some(did) = leaving
             .control
-            .as_ref()
-            .map(crate::control::PaneControl::did_in_the_window)
+            .as_mut()
+            .map(crate::control::PaneControl::stop_and_did_in_the_window)
         {
             self.bank_control(did);
         }
@@ -290,8 +290,8 @@ impl Window {
             pending_cost += what_this_frame_left(&mut leaving);
             if let Some(did) = leaving
                 .control
-                .as_ref()
-                .map(crate::control::PaneControl::did_in_the_window)
+                .as_mut()
+                .map(crate::control::PaneControl::stop_and_did_in_the_window)
             {
                 self.bank_control(did);
             }

@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use interprocess::local_socket::Stream;
+use crate::endpoint::Stream;
 
 /// An unforgeable connected-process witness. Payload fields can never construct one.
 #[derive(Debug, Clone)]
