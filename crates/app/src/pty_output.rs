@@ -1322,7 +1322,16 @@ mod tests {
                 .len()
                 == 1
         }));
-        assert!(2 < QUEUE_CEILING, "the fixture must stay below the ceiling");
+        let queued = pty_output
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .bytes
+            .len();
+        assert!(
+            queued + 1 < QUEUE_CEILING,
+            "the fixture must stay below the ceiling"
+        );
 
         drop(pty_output);
         // Keep the sender alive: channel closure must not rescue a missing stop check. A single
