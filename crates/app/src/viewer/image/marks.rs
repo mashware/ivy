@@ -140,26 +140,14 @@ pub(crate) struct Marks {
     pub(crate) general: String,
     pub(crate) tool: Tool,
     stroke: Option<Stroke>,
-    /// The last serial a marker was given. Never wound back, by an undo, a Clear or a new image,
+    /// The last serial a marker of this image was given. Never wound back by an undo or a Clear,
     /// because egui keeps a field's state by its id after the field is gone: a serial given twice
-    /// would hand the new marker's field the old one's undo history.
+    /// would hand the new marker's field the old one's undo history. Another image starts again
+    /// from nothing, since its fields' ids carry the opening they belong to.
     placed: u64,
 }
 
 impl Marks {
-    /// Empty marks for another image, going on from the last serial given, `placed`.
-    pub(crate) fn after(placed: u64) -> Self {
-        Self {
-            placed,
-            ..Self::default()
-        }
-    }
-
-    /// The last serial a marker was given.
-    pub(crate) fn placed(&self) -> u64 {
-        self.placed
-    }
-
     /// Whether there is nothing to send and nothing that would be lost.
     pub(crate) fn is_empty(&self) -> bool {
         self.list.is_empty() && self.general.trim().is_empty()
@@ -406,8 +394,8 @@ mod tests {
         assert_eq!(marks.marks().len(), 2);
     }
 
-    /// A marker's serial is never given again: not after an undo takes the last marker back, nor
-    /// after a Clear, nor to the first marker of the next image.
+    /// A marker's serial is never given again on its image: not after an undo takes the last
+    /// marker back, nor after a Clear.
     #[test]
     fn a_markers_serial_never_comes_back() {
         let placed = |marks: &mut Marks| {
@@ -420,10 +408,7 @@ mod tests {
         seen.push(placed(&mut marks));
         marks.clear();
         seen.push(placed(&mut marks));
-        let mut next = Marks::after(marks.placed());
-        seen.push(placed(&mut next));
-        assert_eq!(seen, [1, 2, 3, 4, 5]);
-        assert_eq!(placed(&mut Marks::after(0)), 1);
+        assert_eq!(seen, [1, 2, 3, 4]);
     }
 
     /// Each tool leaves its own shape from the pixels pressed and let go; a marker goes where the

@@ -11412,10 +11412,11 @@ image. Undo (its button, or Ctrl+Z — Cmd+Z on macOS — with no other modifier
 holds the keys and no text field has the keyboard), a delete per marker and Clear take them back;
 deleting a marker renumbers the ones after it with their notes. A drag shorter than four screen
 points leaves nothing: an image pixel means nothing on a 4 000-pixel screenshot fitted to 500
-points. A marker's note field is named by a serial the marker gets when placed, never given again
-— not after an undo, a Clear or on the next image — because egui keeps a field's focus and undo
-history by its id: named by its place, deleting marker 1 handed marker 2 the first one's history,
-and a Ctrl+Z there brought the deleted note back (#197).
+points. A marker's note field is named by its image's opening and a serial the marker gets when
+placed, never given again on that image — not after an undo or a Clear — because egui keeps a
+field's focus and undo history by its id: named by its place, deleting marker 1 handed marker 2
+the first one's history, and a Ctrl+Z there brought the deleted note back (#197). Another image
+starts its serials again, since the opening already tells its fields apart.
 **«Send to <console> and press Enter»** then:
 
 - **writes a copy into that console's `PANEL_DIR`**, the original's width × height with the marks
@@ -11499,6 +11500,7 @@ here because the copies are the app's, not the contract's); escaping the notes f
 a deadline after which a stuck write is given up, and a Cancel offered only after some seconds,
 because a slow disk is not a stuck one and no constant tells them apart — the person does;
 re-keying or clearing egui's field state when a marker is deleted, which the serial makes needless
-and which would not cover an undo, a Clear or a new image; and
+and which would not cover an undo or a Clear; carrying the serial on from one image to the next,
+which protects nothing the opening in the id does not; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.

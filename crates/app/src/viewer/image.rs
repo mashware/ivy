@@ -41,9 +41,6 @@ pub(crate) struct Viewer {
     send: send::Sending,
     /// How many images were opened, which names each opening: see [`send::Request::document`].
     opened: u64,
-    /// The last marker serial an image forgotten here gave, which the next image's marks go on
-    /// from: see `Marks::placed`.
-    placed: u64,
 }
 
 struct Opened {
@@ -82,7 +79,6 @@ impl Viewer {
     /// path is one whose console's directory is unknown: it is refused and says so.
     pub(super) fn open(&mut self, origin: Source, path: PathBuf) {
         self.clear();
-        let marks = marks::Marks::after(self.placed);
         self.notice = None;
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
@@ -98,17 +94,13 @@ impl Viewer {
             scale: None,
             offset: egui::Vec2::ZERO,
             view: None,
-            marks,
+            marks: marks::Marks::default(),
         });
     }
 
     /// Forgets the image, keeping an unfinished decode's handle.
     pub(super) fn clear(&mut self) {
         self.panning = None;
-        self.placed = self
-            .document
-            .as_ref()
-            .map_or(self.placed, |d| d.marks.placed());
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -540,30 +532,6 @@ mod tests {
         let now = viewer.original().unwrap();
         assert!(Arc::ptr_eq(&first, now));
         assert_eq!(now.dimensions(), (40, 20));
-    }
-
-    /// The first marker on the next image opened goes on from the serials the last one gave,
-    /// whether it was opened over that image or after it was closed.
-    #[test]
-    fn the_next_image_goes_on_from_the_last_ones_serials() {
-        let mut viewer = Viewer::default();
-        let placed = |viewer: &mut Viewer| {
-            viewer.open(source(), PathBuf::from("/a/shot.png"));
-            let marks = &mut viewer.document.as_mut().unwrap().marks;
-            marks.keep(marks::Shape::Marker {
-                serial: 0,
-                at: egui::Pos2::ZERO,
-                note: String::new(),
-            });
-            marks.numbered().last().unwrap().2
-        };
-        assert_eq!([placed(&mut viewer), placed(&mut viewer)], [1, 2]);
-        viewer.clear();
-        assert_eq!(
-            placed(&mut viewer),
-            3,
-            "closing the image wound the serial back"
-        );
     }
 
     /// The largest texture the test GPU takes, smaller than the wide fixtures' 2400 pixels.
