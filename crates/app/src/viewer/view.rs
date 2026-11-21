@@ -3,6 +3,9 @@ use super::{Kind, State};
 use eframe::egui::{self, FontId};
 use std::path::Path;
 
+/// The radius of the body's bottom corners, inside the drawer's one-point frame.
+pub(super) const BODY_CORNER: u8 = crate::theme::metrics::RADIUS_CARD - 1;
+
 pub(super) fn show(
     state: &mut State,
     parent: &mut egui::Ui,
@@ -10,7 +13,11 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    (tabs, title): (&super::drawer::Tabs, &super::drawer::Title),
+    (tabs, title, image): (
+        &super::drawer::Tabs,
+        &super::drawer::Title,
+        Option<&mut super::image::Viewer>,
+    ),
 ) {
     let namespace = if state.kind.is_document() {
         "markdown-viewer"
@@ -106,13 +113,16 @@ pub(super) fn show(
                 body_ui.painter().rect_filled(
                     body,
                     egui::CornerRadius {
-                        sw: crate::theme::metrics::RADIUS_CARD - 1,
-                        se: crate::theme::metrics::RADIUS_CARD - 1,
+                        sw: BODY_CORNER,
+                        se: BODY_CORNER,
                         ..Default::default()
                     },
                     roles.base,
                 );
-                body_content(state, &mut body_ui, theme, unavailable);
+                match image {
+                    Some(image) => image.show(&mut body_ui, theme, state.space),
+                    None => body_content(state, &mut body_ui, theme, unavailable),
+                }
             });
         });
 }
@@ -443,7 +453,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
-                        (&tabs(true), &title()),
+                        (&tabs(true), &title(), None),
                     )
                 },
             );
@@ -507,7 +517,7 @@ mod tests {
                             theme,
                             true,
                             false,
-                            (&tabs(false), &title()),
+                            (&tabs(false), &title(), None),
                         )
                     },
                 );
@@ -573,7 +583,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         true,
                         false,
-                        (&tabs(false), &gone),
+                        (&tabs(false), &gone, None),
                     )
                 },
             )

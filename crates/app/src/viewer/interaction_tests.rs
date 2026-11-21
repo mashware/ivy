@@ -341,6 +341,95 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     }
 }
 
+/// Ctrl+click on a screenshot path a console printed opens it in the drawer, pinned to that
+/// console rather than to the focused one, without revealing it in Files.
+#[test]
+fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
+    let mut nonce = [0; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let path = std::env::temp_dir().join(format!("viewer-image-{:x}", u64::from_ne_bytes(nonce)));
+    fs::create_dir(&path).unwrap();
+    let _directory = Directory(path.clone());
+    let shot = path.join("Screen Shot.PNG");
+    ::image::RgbaImage::new(64, 32)
+        .save_with_format(&shot, ::image::ImageFormat::Png)
+        .unwrap();
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    frame(&mut window, &ctx, vec![]);
+    frame(&mut window, &ctx, vec![]);
+    let names: Vec<_> = window.active().panes().iter().map(|p| p.name).collect();
+    assert_eq!(window.active().focus, names[0]);
+    window
+        .active_mut()
+        .pane_called(names[1])
+        .unwrap()
+        .screen
+        .advance(format!("\x1b[2J\x1b[H{}", url::Url::from_file_path(&shot).unwrap()).as_bytes());
+    frame(&mut window, &ctx, vec![]);
+    let metrics =
+        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let painted = window.active().panes()[1].painted_console.as_ref().unwrap();
+    let pos = painted.area.min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
+    assert!(painted.local_at(pos, &metrics, painted.frame).is_some());
+    let chord = egui::Modifiers {
+        ctrl: true,
+        ..Default::default()
+    };
+    let control_click = |window: &mut crate::Window| {
+        for pressed in [true, false] {
+            frame(
+                window,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::ModifiersChanged(chord),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: chord,
+                    },
+                ],
+            );
+        }
+    };
+    // A decode that has not finished refuses the click, and the drawer says which file it reads.
+    let other = path.join("other.png");
+    open_image_target(&mut window, names[0], other.clone()).unwrap();
+    let stalled = window.image.stall();
+    frame(&mut window, &ctx, vec![]);
+    control_click(&mut window);
+    assert_eq!(shown_image(&window), Some((names[1], shot.clone())));
+    let still = format!("Still reading {}…", other.display());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !frame(&mut window, &ctx, vec![])
+        .iter()
+        .any(|(text, _)| *text == still)
+    {
+        assert!(Instant::now() < deadline, "{:?}", window.image.message());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(stalled);
+    control_click(&mut window);
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Document)
+    );
+    assert_eq!(shown_image(&window), Some((names[1], shot)));
+    assert!(!crate::sidebar::files_visible(&window));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !frame(&mut window, &ctx, vec![])
+        .iter()
+        .any(|(text, _)| text == "Screen Shot.PNG")
+        || window.image.message().is_none() && !window.image.loaded()
+    {
+        assert!(Instant::now() < deadline, "{:?}", window.image.message());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(window.image.message(), None);
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn non_repository_console_paints_a_clear_message_after_review_click() {

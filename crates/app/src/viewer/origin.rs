@@ -113,6 +113,7 @@ pub(crate) fn open_document_target(
     if !pin(&mut window.viewer, source) {
         return false;
     }
+    replace_document(window, Keep::Document);
     crate::sidebar::select(window, crate::sidebar::Tool::Document);
     // Files follows the focused console, so the folder a relative path is counted from is the
     // one Files showed when the file was opened, not whatever it shows later.
@@ -132,6 +133,85 @@ pub(crate) fn open_document_target(
         ctx.request_repaint();
     }
     true
+}
+
+/// Forgets what `state` showed, keeping only which tab it is and the window's context.
+pub(super) fn forget(state: &mut super::State) {
+    *state = super::State {
+        context: state.context.take(),
+        tool_markdown: state.tool_markdown,
+        ..super::State::default()
+    };
+}
+
+/// Shows the image in the document tab. The drawer's open, keyboard and gesture flags stay the
+/// document state's, so the image takes input exactly as a document would.
+pub(super) fn show_image(window: &mut Window) {
+    super::select_state(window, true);
+    crate::sidebar::select(window, crate::sidebar::Tool::Document);
+    window.viewer.open = true;
+    window.viewer.keyboard = true;
+    if let Some(ctx) = &window.viewer.context {
+        ctx.request_repaint();
+    }
+}
+
+/// Whether the drawer is on its document tab and that tab holds the image.
+pub(super) fn showing_image(window: &Window) -> bool {
+    window.image.shown() && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document)
+}
+
+/// The console the shown document was opened from.
+pub(super) fn shown_origin(window: &Window) -> Option<&super::Source> {
+    if showing_image(window) {
+        window.image.origin()
+    } else {
+        window.viewer.origin.as_ref()
+    }
+}
+
+/// What stays in the document tab when [`replace_document`] empties it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Keep {
+    Document,
+    Image,
+    Neither,
+}
+
+/// The document tab holds one document: whatever opens there, or closing it, forgets the other.
+/// Every entry goes through here, so the document state and the image cannot both be shown.
+pub(super) fn replace_document(window: &mut Window, keep: Keep) {
+    super::select_state(window, true);
+    if keep != Keep::Document {
+        forget(&mut window.viewer);
+    }
+    if keep != Keep::Image {
+        window.image.clear();
+    }
+}
+
+/// Opens an image in the drawer's document tab, pinned to the console it was printed in. A
+/// relative path is read from that console's directory, as the review reads its repository.
+/// Refused only when that console is gone; every other refusal is painted in the drawer.
+pub(crate) fn open_image_target(
+    window: &mut Window,
+    pane: usize,
+    path: PathBuf,
+) -> Result<(), String> {
+    let Some(source) = source(window, pane) else {
+        return Err("The console this image belongs to has closed.".into());
+    };
+    let path = match &source.cwd {
+        Some(cwd) if path.is_relative() => cwd.join(path),
+        _ => path,
+    };
+    replace_document(window, Keep::Image);
+    window.image.open(source, path);
+    show_image(window);
+    if let Some(ctx) = window.viewer.context.clone() {
+        window.image.poll(&ctx);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -345,6 +425,85 @@ mod tests {
             names
         );
     }
+    /// The image is pinned to the console it was printed in, not to the focused one, and it and a
+    /// Markdown document replace each other in the document tab.
+    #[test]
+    fn an_image_pins_its_console_and_replaces_the_markdown_document() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        assert_eq!(window.active().focus, names[0]);
+        open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
+        open_image_target(&mut window, names[1], PathBuf::from("/shots/screen.png")).unwrap();
+        assert_eq!(window.image.origin().unwrap().pane, names[1]);
+        assert!(window.image.shown());
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Document)
+        );
+        assert!(window.viewer.open && window.viewer.path.is_empty());
+        open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
+        assert!(!window.image.shown() && window.image.origin().is_none());
+        assert_eq!(
+            open_image_target(&mut window, 9999, PathBuf::from("/x.png")),
+            Err("The console this image belongs to has closed.".to_owned())
+        );
+        assert!(!window.image.shown());
+    }
+
+    /// A relative image path is read from the console it was printed in, as its review is; a
+    /// console whose directory is remote has none to read it from, and says so.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_relative_image_path_is_read_from_its_consoles_directory() {
+        use std::time::{Duration, Instant};
+        let mut nonce = [0u8; 8];
+        getrandom::fill(&mut nonce).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("viewer-image-cwd-{}", u64::from_ne_bytes(nonce)));
+        std::fs::create_dir(&path).unwrap();
+        let _folder = Repository(path.clone());
+        ::image::RgbaImage::new(24, 12)
+            .save_with_format(path.join("shot.png"), ::image::ImageFormat::Png)
+            .unwrap();
+        let script = format!("cd '{}' && sleep 30", path.display());
+        let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+        let names: Vec<_> = window.active().panes().iter().map(|p| p.name).collect();
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while source(&mut window, names[0]).and_then(|s| s.cwd).as_ref() != Some(&path) {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        open_image_target(&mut window, names[0], PathBuf::from("shot.png")).unwrap();
+        assert_eq!(
+            crate::viewer::shown_image(&window),
+            Some((names[0], path.join("shot.png")))
+        );
+        while !window.image.loaded() {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+            assert!(Instant::now() < deadline, "{:?}", window.image.message());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        window
+            .pane_called(names[1])
+            .unwrap()
+            .screen
+            .advance(b"\x1b]7;file://elsewhere.invalid/home\x07");
+        assert_eq!(source(&mut window, names[1]).unwrap().cwd, None);
+        open_image_target(&mut window, names[1], PathBuf::from("shot.png")).unwrap();
+        assert!(
+            window
+                .image
+                .message()
+                .is_some_and(|why| why.contains("working directory"))
+        );
+    }
+
     #[test]
     fn changing_console_clears_previous_document() {
         let mut state = State::default();

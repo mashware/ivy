@@ -445,11 +445,16 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         }
         ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
-            if crate::viewer::open_document_target(window, pane, path, None) {
-                ui.ctx().request_repaint();
+            let opened = if crate::viewer::is_image(&path) {
+                crate::viewer::open_image_target(window, pane, path)
+            } else if crate::viewer::open_document_target(window, pane, path, None) {
+                Ok(())
             } else {
-                window.explorer.message =
-                    "Send or clear the review comments before opening another document.".into();
+                Err("Send or clear the review comments before opening another document.".into())
+            };
+            match opened {
+                Ok(()) => ui.ctx().request_repaint(),
+                Err(why) => window.explorer.message = why,
             }
         }
     })();

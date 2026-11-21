@@ -8975,7 +8975,8 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026 and for #93 on 17 November 2026.**
+**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026 and for
+#178 on 20 November 2026.**
 Markdown and Git changes open in a transient surface beside the consoles, together with Files and
 the global Board; since #93 that surface is Files on the left and a drawer below (see the last
 section). The
@@ -9072,7 +9073,8 @@ existing single cancellable worker, with generation/epoch-tagged replies. Querie
 rejects old replies; Escape clears search before closing Files. Matching directories expand within the results, without replacing the search root. Clearing an ordinary query restores that console's tree.
 
 Ctrl+click on a local console path reveals it in Files: directories open directly and files open
-their parent with the file selected and scrolled into view. It uses the clicked console's explicit
+their parent with the file selected and scrolled into view (PNG and JPEG files open in the drawer
+instead; see «Images in the document tab» below). It uses the clicked console's explicit
 local context, never the app's directory or a remote file host. The clicked console becomes the
 active source for its Files state. Metadata and directory reading run on the same worker; missing
 paths remain visible errors, not shell commands. Web links and ordinary selection retain their
@@ -9185,6 +9187,107 @@ for what it did not cause). No frame-cost figure is claimed: the host, viewer an
 keep their named spans, and `scripts/measure-frame.sh` has not been re-run on this geometry. Its
 dock regime is versioned `dock-v2-4-closed/open`; `dock-v1-*` measured the rail, a different
 console grid and a width drag, and the script refuses it rather than relabel it.
+
+### Images in the document tab — 20 November 2026, #178
+
+Agents print the paths of the screenshots they take, and reading one meant leaving the terminal.
+A `.png`, `.jpg` or `.jpeg` path (any letter case) now opens in the drawer's document tab: Ctrl+click
+on it in a console, or activating it in Files. Ctrl+click on an image no longer reveals it in Files,
+which would show a name and not the picture; every other local path is revealed as before. A
+relative path is joined onto that console's directory, as its review is, and refused with a reason
+only when the console has none. Files says «Only Markdown, PNG and JPEG files open in the drawer.»
+for anything else.
+
+- **One document tab, as before.** The image and a Markdown file replace each other there: opening
+  one forgets the other, and closing the tab forgets both, through one replacement every entry
+  uses. The image is pinned to the console it was printed in, not to the focused one, and the strip
+  shows that console's project or folder.
+- **Decoded once.** The file is read and decoded on the viewer's worker when it is opened and
+  never again: switching to Changes and back, or closing and reopening the drawer, shows the same
+  picture, and a program that overwrites the same screenshot name does not change what is on
+  screen. Markdown's one-second refresh does not apply.
+- **One read at a time.** A read stuck on an unresponsive filesystem cannot be cancelled, so
+  replacing or closing an image whose decode has not finished keeps its handle, and another open
+  while it runs is refused with «Still reading <path>…» in the drawer. Repeated opens cannot pile
+  up readers, the rule the Markdown state already keeps. Errors name the path they are about.
+- **Bounded before it is decoded.** The path is opened nonblocking on Unix and refused unless it is
+  a regular file, as Markdown's is; at most 32 MiB is read; the format comes from the bytes, and only
+  PNG and JPEG are decoded; the decode may allocate at most 256 MiB (`image::Limits::max_alloc`),
+  counting the RGBA copy the viewer keeps when the file is not already RGBA. Each refusal is a
+  visible message. The GPU gets a copy no side of which exceeds its `max_texture_side`, made after
+  the decode and outside that cap; the original is kept at full resolution.
+- **Seen as a person reads a screenshot.** It fits the drawer's width and is never enlarged past one
+  physical pixel per pixel, so on a display of two pixels per point it is shown at half a point per
+  pixel rather than blurred. The image has a viewport of its own, a scale and an offset the viewer
+  keeps, painted clipped to the drawer's body with no scroll bars: Ctrl+wheel, or Ctrl + two-finger
+  scroll on a touchpad, zooms around the pointer; the wheel and two-finger scroll pan it on each
+  axis where it is larger than the drawer, and Shift+wheel arrives from egui as a horizontal
+  scroll. On an axis where it is smaller and whole inside, the wheel leaves it and only a drag or
+  a zoom moves it there; where a zoom carried it across an edge, the wheel brings it back and,
+  like a pan, never pushes it further out. The wheel is the image's only while the pointer is on it
+  with nothing of a higher layer above, and the part of a turn that moved it is taken, so a menu or
+  popup open over the drawer keeps its own wheel and nothing later in the frame scrolls with the
+  same turn; an axis it does not apply, and the part of a turn an edge stopped, are left for whoever
+  reads the wheel later. Over the blank beside the image
+  the point kept is the image's nearest one, so a zoom there grows the image from its near edge and
+  never carries it out of sight; anchoring the empty point under the pointer, as a canvas does, was
+  discarded because under a fitted screenshot most of the drawer is blank and four notches there
+  pushed the image out. Where the image may sit is one rule per axis. Where it is larger than the
+  drawer, no gap opens between its edge and the drawer's, after a zoom, a pan or a resize. Where it
+  is smaller, a zoom never moves it, so the point under the pointer stays there even when the
+  image crosses the drawer's edge; a pan may only bring it back toward whole inside and never push
+  it further out; a resize of the drawer puts it whole inside. While no zoom was chosen, a resize
+  changes the fit's scale, and the offset is scaled with it before that rule, so the part being
+  read stays at the top of the view. The image is painted as the body's own rounded shape,
+  textured with it and clipped to where the image is, so it takes the body's bottom corners
+  wherever it reaches them; the image's own rect with those corners was discarded because epaint
+  caps a radius at half a rect's shortest side. When a zoom makes an axis larger
+  than the drawer, the first rule applies from that frame on. Pinning a smaller image inside on
+  every change was discarded: a screenshot fitted to width and shorter than the drawer sits at its
+  top, so every zoom pushed its top edge out, the pin brought it back, and the image grew downward
+  from its top edge instead of around the pointer, the symptom the owner reported. Centring a
+  smaller image on open was discarded too: it moves the screenshot away from where a person starts
+  reading and still pins it once a zoom reaches an edge. winit 0.30.13 emits `PinchGesture` only on
+  macOS and iOS, so pinch zoom is a macOS-only behaviour until F2.7 verifies it there. egui reports
+  Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as pointer activity over
+  it to keep the gesture. The drawer stays not modal: nothing dims. With a mouse, Space + left drag
+  and a middle-button drag move the image, with a grab hand while they do. A plain left drag does
+  not pan, because the next step draws marks with it. Space + drag is Figma's convention and the
+  middle button needs no key. Whether a drag pans is decided when its button goes down, by where
+  it went down: on the image with nothing of a higher layer above that point, wherever the pointer
+  is by the end of that frame. It lasts until that button is released: a press of another button meanwhile neither stops the pan nor
+  takes it over, and a pan is forgotten when another image opens, when the image is closed, and
+  after any frame the image was not painted, so a release that happened while it was hidden cannot
+  leave a pan behind. On a touch screen the image zooms with two fingers and does not pan:
+  egui-winit turns a touch into touch events, and the one gesture it turns into a wheel event is
+  winit's `PanGesture`, which winit 0.30.13 emits only on iOS. On Linux, macOS and Windows two
+  fingers therefore give egui's multi-touch zoom, which the zoom reads, and no scroll; a one-finger
+  touch drag arrives as the primary button, which is the plain left drag the marks take. No
+  touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
+  the keys, which is after opening the image or clicking the drawer, or at any time while the
+  drawer is maximized, since a maximized drawer reads every key without a click. It is worked out
+  again every frame and forgotten whenever the drawer does not take the keys, so a Space typed into
+  a console still reaches its program and never pans, also when the drawer comes back with that
+  Space still held. On GNOME with "disable touchpad while typing" on, which is the default, holding
+  Space blocks touchpad clicks, so with a touchpad the image is moved with two fingers and zoomed
+  with Ctrl + two fingers.
+- **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
+  after the pass, on the first frame after the decode arrives, so that upload lands in the framework
+  remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
+
+Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
+forces the Markdown kind and a kind change clears that state, which would erase the image on the
+way back from Changes; a third `viewer::State`, because the two that exist are swapped with a
+single boolean (the image keeps a state of its own instead); a separate image surface beside the drawer, because it would bring a second geometry and a
+second set of input rules for what D72 already gives one place; refreshing the image from disk,
+because what was opened would change under the person reading it; a separate side limit, because
+the allocation cap already refuses the headers that would need one; GIF, WebP and SVG, because
+screenshots are PNG or JPEG; driving the image through an egui `ScrollArea`, which was the first
+version: its offset only runs from zero to the content's far edge, so holding a zoom around the
+pointer meant laying blank space before and after the image, and that broke it four ways — a
+trailing blank left stale when the drawer grew, scroll-bar drags remapped against content that
+shrank every frame so the thumb ran ahead and jumped, guessing where egui puts its bars to keep a
+pan off them, and its own drag-to-scroll joining the pan after a touch.
 
 ## D73 — Connection help is global and reports observed publication
 
