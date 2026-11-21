@@ -582,6 +582,11 @@ struct Pane {
     pty_output: PtyOutput,
     /// Startup assets stay alive until the console's shell no longer needs them.
     _shell_integration: Option<shell_integration::Prepared>,
+    /// The annotated screenshots Send wrote into [`Self::panel`]'s directory, removed when the
+    /// console closes. **Declared before `panel` on purpose**: fields drop in declaration order, and
+    /// the directory is removed without recursion, so the copies have to be gone first or every
+    /// such close leaves the directory behind and says so.
+    annotated: viewer::image::send::Written,
     /// The directory where this console's program publishes its state, and the identifier it is
     /// known by. It is deleted when the console is dropped, because the type deletes it when it
     /// dies.
@@ -6740,6 +6745,7 @@ mod tests {
             pty: pty.into(),
             pty_output: PtyOutput::new(output, || {}),
             _shell_integration: None,
+            annotated: Default::default(),
             panel: None,
             control: None,
             panel_state: panel::PanelState::default(),

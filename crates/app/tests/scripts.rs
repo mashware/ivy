@@ -463,6 +463,22 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/image/viewport.rs"),
     ),
     (
+        "app/src/viewer/image/send.rs",
+        include_str!("../src/viewer/image/send.rs"),
+    ),
+    (
+        "app/src/viewer/image/flatten.rs",
+        include_str!("../src/viewer/image/flatten.rs"),
+    ),
+    (
+        "app/src/viewer/image/marks.rs",
+        include_str!("../src/viewer/image/marks.rs"),
+    ),
+    (
+        "app/src/viewer/image/tools.rs",
+        include_str!("../src/viewer/image/tools.rs"),
+    ),
+    (
         "app/src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
     ),

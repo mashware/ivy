@@ -358,6 +358,9 @@ fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
         return;
     }
     if markdown {
+        if origin::keeps_marks(window) {
+            return;
+        }
         origin::replace_document(window, origin::Keep::Neither);
     } else {
         origin::forget(state);
@@ -569,6 +572,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     if let Some(events) = window.viewer.events.take() {
         ctx.input_mut(|input| input.events = events);
     }
+    image::send::aim(window);
     let tabs = drawer::tabs(window);
     let title = title(window, unavailable);
     view::show(
@@ -616,7 +620,9 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
 #[cfg(test)]
 pub(crate) use code_header::document_relative_path;
 pub(crate) use image::is_image;
-pub(crate) use origin::{open_diff_for_pane, open_document_target, open_image_target};
+pub(crate) use origin::{
+    NotOpened, kept_document, open_diff_for_pane, open_document_target, open_image_target,
+};
 
 #[cfg(test)]
 mod interaction_tests;

@@ -279,6 +279,22 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/image/viewport.rs"),
     ),
     (
+        "src/viewer/image/send.rs",
+        include_str!("../src/viewer/image/send.rs"),
+    ),
+    (
+        "src/viewer/image/flatten.rs",
+        include_str!("../src/viewer/image/flatten.rs"),
+    ),
+    (
+        "src/viewer/image/marks.rs",
+        include_str!("../src/viewer/image/marks.rs"),
+    ),
+    (
+        "src/viewer/image/tools.rs",
+        include_str!("../src/viewer/image/tools.rs"),
+    ),
+    (
         "src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
     ),
@@ -1450,6 +1466,41 @@ fn the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver() {
         "`Pane` declares its bridge before its pseudoterminal, so the bridge is dropped first and \
          its receiver goes away while the stop flag is still down: every ordinary close would be \
          recorded as «nobody was listening». Declare `pty` first"
+    );
+}
+
+/// A pane declares the annotated copies Send wrote **before** the directory they were written into.
+///
+/// `PanelDir` removes its directory without recursion, on purpose: the content belongs to the
+/// console's program, and a recursive delete would turn a badly built path into data loss. So the
+/// copies have to be gone when it drops, and Rust drops fields in declaration order. Declared after
+/// it, every close of a console that received a copy would leave its directory behind and print
+/// that it remains. The effect is covered by `a_closing_console_takes_its_copies_and_then_its_folder`;
+/// this guards the order that effect rests on, as the pin above guards the pseudoterminal's.
+#[test]
+fn the_annotated_copies_are_declared_before_the_directory_that_holds_them() {
+    let source = MODULES
+        .iter()
+        .find(|(name, _)| *name == "src/lib.rs")
+        .map(|(_, source)| *source)
+        .expect("`src/lib.rs` is not in the module list");
+    let fields = source
+        .split_once("struct Pane {")
+        .expect("`struct Pane` is not declared in `src/lib.rs` under that name")
+        .1
+        .split_once("\n}")
+        .expect("`struct Pane` has no closing brace at the start of a line")
+        .0;
+    let copies = fields
+        .find("\n    annotated: viewer::image::send::Written,")
+        .expect("`Pane` no longer declares a field `annotated: viewer::image::send::Written`");
+    let directory = fields
+        .find("\n    panel: Option<PanelDir>,")
+        .expect("`Pane` no longer declares a field `panel: Option<PanelDir>`");
+    assert!(
+        copies < directory,
+        "`Pane` declares its directory before the annotated copies in it, so the directory is \
+         dropped first, finds them there and stays. Declare `annotated` first"
     );
 }
 

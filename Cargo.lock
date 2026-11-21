@@ -139,6 +139,7 @@ dependencies = [
  "serde_json",
  "skrifa",
  "term-core",
+ "tiny-skia",
  "unicode-properties",
  "unicode-segmentation",
  "ureq",

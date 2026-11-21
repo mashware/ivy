@@ -24,7 +24,7 @@ const MONO_MEDIUM: &str = "ivy-mono-medium";
 pub(crate) const UI_ICONS: &str = "ivy-icons";
 const ICON_FACE: &str = "Phosphor";
 
-const FACES: [(&str, &[u8]); 5] = [
+pub(crate) const FACES: [(&str, &[u8]); 5] = [
     (
         "Geist",
         include_bytes!("../../../../resources/fonts/Geist-Regular.ttf"),

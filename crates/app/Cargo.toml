@@ -144,6 +144,13 @@ harfrust = "0.12"
 # `tiff` is absent there.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
+# **To draw the marks into the copy of a screenshot that is sent to a console**, antialiased and at
+# the original's resolution, without a rasteriser of this crate's own. On Linux it adds no package:
+# `sctk-adwaita` already compiles it, with `std` and `simd` — checked with
+# `cargo tree -p app -e features -i tiny-skia`. On macOS and Windows it is new, pure Rust and with no
+# system library. Its own PNG writer stays off: `image` above encodes the copy.
+tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
+
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
 # are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank
 # lowercase letters and its private-use codepoints would meet the interface's and the terminal's text. Pinned
