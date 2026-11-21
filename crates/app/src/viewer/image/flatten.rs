@@ -283,6 +283,7 @@ mod tests {
         let marks = [
             Shape::Rectangle(rect),
             Shape::Marker {
+                serial: 1,
                 at: egui::pos2(600.0, 400.0),
                 note: "here".into(),
             },
@@ -355,6 +356,7 @@ mod tests {
     #[test]
     fn a_markers_number_is_its_place_among_the_markers() {
         let marker = |x: f32| Shape::Marker {
+            serial: 1,
             at: egui::pos2(x, 300.0),
             note: String::new(),
         };

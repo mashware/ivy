@@ -78,6 +78,7 @@ impl Viewer {
     /// Replaces whatever image was shown with `path`, read from `origin`'s console. A relative
     /// path is one whose console's directory is unknown: it is refused and says so.
     pub(super) fn open(&mut self, origin: Source, path: PathBuf) {
+        let marks = marks::Marks::after(self.document.as_ref().map(|d| &d.marks));
         self.clear();
         self.notice = None;
         let load = if path.is_relative() {
@@ -94,7 +95,7 @@ impl Viewer {
             scale: None,
             offset: egui::Vec2::ZERO,
             view: None,
-            marks: marks::Marks::default(),
+            marks,
         });
     }
 
@@ -2636,6 +2637,58 @@ mod tests {
         assert!(!window.viewer.keyboard);
         painted(&mut window, &ctx, vec![undo]);
         assert_eq!(marks_of(&window).notes().len(), 2);
+    }
+
+    /// Deleting marker 1 leaves marker 2's field its own: the keyboard stays in it, and a Ctrl+Z
+    /// there goes back through marker 2's typing, never to the text marker 1's note had. Each note
+    /// is held still for over a second of frames, which is what makes egui's undo keep it.
+    #[test]
+    fn a_deleted_markers_note_never_comes_back_in_the_next_ones_field() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _) = window_with_image(&path);
+        marks_mut(&mut window).tool = marks::Tool::Marker;
+        let image = settle(&mut window, &ctx).intersect(image_view(&window, &ctx));
+        for x in [0.3, 0.7] {
+            click(&mut window, &ctx, image.lerp_inside(egui::vec2(x, 0.3)));
+        }
+        let column = layout(&window, &ctx).column;
+        let first = egui::pos2(column.left() + 100.0, column.top() + 6.0 + 11.0);
+        let write = |window: &mut crate::Window, at: egui::Pos2, text: &str| {
+            press(window, &ctx, at);
+            painted(window, &ctx, vec![egui::Event::Text(text.into())]);
+            for _ in 0..70 {
+                painted(window, &ctx, vec![]);
+            }
+        };
+        write(&mut window, first, "first");
+        let second = place_of(&mut window, &ctx, "What this marker shows");
+        write(&mut window, second, "second");
+        assert_eq!(marks_of(&window).notes(), ["first", "second"]);
+        let focused = ctx.memory(|m| m.focused());
+        let (_, index, _) = marks_of(&window).numbered().next().unwrap();
+        marks_mut(&mut window).delete(index);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            focused,
+            "the keyboard left the note"
+        );
+        press(&mut window, &ctx, first);
+        let undo = egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: ctrl(),
+        };
+        painted(&mut window, &ctx, vec![undo]);
+        assert_eq!(
+            marks_of(&window).notes(),
+            [""],
+            "undo went through another note"
+        );
     }
 
     /// The general note written on an image with no marks keeps the keyboard letter after

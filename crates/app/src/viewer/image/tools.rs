@@ -392,7 +392,7 @@ fn send_button(
 fn list(ui: &mut egui::Ui, marks: &mut Marks, document: u64, roles: &Roles) {
     let numbered: Vec<_> = marks.numbered().collect();
     let mut deleted = None;
-    for (number, index) in numbered {
+    for (number, index, serial) in numbered {
         ui.horizontal(|ui| {
             let (disc, _) =
                 ui.allocate_exact_size(egui::vec2(2.0 * DISC + 2.0, ICON), egui::Sense::hover());
@@ -402,7 +402,7 @@ fn list(ui: &mut egui::Ui, marks: &mut Marks, document: u64, roles: &Roles) {
                 ui.add_sized(
                     [field.max(40.0), ICON],
                     egui::TextEdit::singleline(note)
-                        .id(egui::Id::new(("image-note", document, index)))
+                        .id(egui::Id::new(("image-note", document, serial)))
                         .hint_text("What this marker shows"),
                 );
             }
