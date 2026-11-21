@@ -293,15 +293,21 @@ jobs:
           $Archive = Join-Path $env:RUNNER_TEMP 'mesa.7z'
           Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z' -OutFile $Archive
           if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne 'B2E00615FEABA45942343C265CC8C5F576142CA682C1AC6661922D4B72492877') { throw 'Mesa archive hash mismatch' }
-          7z x $Archive "-o$env:RUNNER_TEMP\mesa" x64 -y | Out-Null
+          7z x $Archive "-o$env:RUNNER_TEMP\mesa" -y | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $Found = @(Get-ChildItem "$env:RUNNER_TEMP\mesa" -Recurse -Filter opengl32.dll | Where-Object { $_.DirectoryName -match '(^|\\)x64$' })
+          if ($Found.Count -ne 1) {
+            Get-ChildItem "$env:RUNNER_TEMP\mesa" -Recurse -Filter *.dll | ForEach-Object { $_.FullName }
+            throw "Expected one 64-bit opengl32.dll in the Mesa archive, found $($Found.Count)"
+          }
+          "MESA_X64=$($Found[0].DirectoryName)" >> $env:GITHUB_ENV
       - name: Check installed payload, launch, replacement and removal
         shell: pwsh
         env:
           IVY_DISPOSABLE_RUNNER: 'yes'
         run: |
           $Installer = (Get-ChildItem dist/*-setup.exe).FullName
-          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -SoftwareOpenGL "$env:RUNNER_TEMP\mesa\x64"
+          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -SoftwareOpenGL $env:MESA_X64
       - name: Upload Windows launch evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
