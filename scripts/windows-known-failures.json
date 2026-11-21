@@ -598,6 +598,13 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::context_clipboard::tests::opening_menu_preserves_unrelated_console_colors",
+    "reason": "the coloured glyph is sometimes not painted yet when the menu opens",
+    "issue": "https://github.com/mashware/ivy/issues/188",
+    "intermittent": true
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::dismissing_the_silence_takes_the_sentence_away_and_undoes_nothing",
     "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
     "issue": "https://github.com/mashware/ivy/issues/187"
