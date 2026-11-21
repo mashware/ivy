@@ -537,6 +537,22 @@ mod tests {
         assert_eq!(narrow.view.top(), narrow.bar.bottom());
     }
 
+    /// Under the image, what the column keeps outside its list comes on top of its rows and its
+    /// margins while all of it stays under half of what is left.
+    #[test]
+    fn under_the_image_the_column_takes_what_it_keeps_and_its_rows() {
+        let kept = 40.0;
+        let narrow = split(body(COLUMN + NARROWEST - 1.0), 2, kept, true);
+        let rest = narrow.footer.unwrap().top() - narrow.bar.bottom();
+        let wanted = kept + 2.0 * MARGIN.y + 2.0 * ROW;
+        assert!(
+            wanted < rest * 0.5,
+            "{wanted} is not under the cap of {rest}"
+        );
+        assert_eq!(narrow.column.height(), wanted);
+        assert_eq!(narrow.view.bottom(), narrow.column.top());
+    }
+
     /// What the column keeps outside its list is kept whole before the image and the line Send
     /// types get any: on a drawer too short for half of it, it takes what the image would have.
     #[test]

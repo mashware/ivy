@@ -2819,7 +2819,7 @@ mod tests {
         for pass in 0..3 {
             let mut output = ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(SCREEN),
+                    screen_rect: Some(SCREEN.union(view)),
                     events: if pass == 2 { events.clone() } else { vec![] },
                     ..Default::default()
                 },
@@ -2924,6 +2924,34 @@ mod tests {
             });
             assert!(whole, "hovering the cut refusal does not show it whole");
         }
+    }
+
+    /// Beside the image, a refusal is laid out at the column's width and painted inside the
+    /// column and its clip, wrapped rather than cut: the drawer has the height for it.
+    #[test]
+    fn beside_the_image_a_refusal_wraps_at_the_columns_width() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(400, 300));
+        viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+        let notice = "This image has marks that were not sent: send them or clear them before \
+                      opening another image or document.";
+        viewer.notice = Some(notice.into());
+        let view = egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(tools::COLUMN + tools::NARROWEST + 100.0, 380.0),
+        );
+        let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+        let (said, clip) = clipped_text(&shapes, |t| t == notice).expect("the notice is painted");
+        let column = egui::Rect::from_min_max(
+            egui::pos2(view.right() - tools::COLUMN, view.top() + tools::TOOLBAR),
+            view.max,
+        );
+        assert!(column.contains_rect(said), "{said:?} outside {column:?}");
+        assert!(
+            clip.expand(0.5).contains_rect(said),
+            "{said:?} clipped by {clip:?}"
+        );
+        assert!(said.height() > 30.0, "{said:?} is not wrapped");
     }
 
     /// Unsent marks keep the image: opening another document or image over it, or closing its
