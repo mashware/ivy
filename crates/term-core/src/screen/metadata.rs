@@ -184,9 +184,44 @@ impl Metadata {
             return;
         }
         if let Ok(text) = String::from_utf8(bytes) {
+            // One stored form for every reader: a Windows drive path is kept as Windows writes it.
+            #[cfg(windows)]
+            let text = match drive_path(&text) {
+                Some(native) => native,
+                // `/C:work` names a directory relative to a drive's current one, which only the
+                // reporting shell knows: it is an unusable report, not a path.
+                None if drive_relative(&text) => return,
+                None => text,
+            };
             self.path = Some(PathBuf::from(text));
         }
     }
+}
+
+/// `/C:/work` — the URI form of a Windows drive path in an OSC 7 report — as `C:\work`, with either
+/// separator after the drive. `None` for anything else: a path with no drive is kept as it came.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn drive_path(text: &str) -> Option<String> {
+    let tail = drive_tail(text)?;
+    if !tail.is_empty() && !tail.starts_with(['/', '\\']) {
+        return None;
+    }
+    let tail = if tail.is_empty() { "/" } else { tail };
+    Some(format!("{}{}", &text[1..3], tail.replace('/', "\\")))
+}
+
+/// `/C:work`: a drive followed by something other than a separator.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn drive_relative(text: &str) -> bool {
+    drive_tail(text).is_some_and(|tail| !tail.is_empty() && !tail.starts_with(['/', '\\']))
+}
+
+/// What follows `/X:` in `text`, when it starts that way.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn drive_tail(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('/')?;
+    let bytes = rest.as_bytes();
+    (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':').then(|| &rest[2..])
 }
 
 fn parse_program(payload: &[u8]) -> Option<Option<super::ProgramSnapshot>> {
@@ -422,13 +457,71 @@ mod tests {
         assert_eq!(d.path(), None);
     }
     #[test]
+    fn a_windows_drive_report_becomes_the_native_path_and_nothing_else_changes() {
+        for (reported, native) in [
+            ("/C:/work", Some(r"C:\work")),
+            ("/c:/a/b c", Some(r"c:\a\b c")),
+            ("/C:", Some(r"C:\")),
+            ("/C:/", Some(r"C:\")),
+            (r"/C:\work\a", Some(r"C:\work\a")),
+            ("/tmp", None),
+            ("/C:work", None),
+            ("/CC:/work", None),
+            ("/1:/work", None),
+            ("/ab", None),
+            ("/ab/c", None),
+            ("C:/work", None),
+            ("/", None),
+        ] {
+            assert_eq!(drive_path(reported).as_deref(), native, "{reported}");
+        }
+        for (reported, relative) in [
+            ("/C:work", true),
+            ("/C:", false),
+            ("/C:/work", false),
+            (r"/C:\work", false),
+            ("/tmp", false),
+        ] {
+            assert_eq!(drive_relative(reported), relative, "{reported}");
+        }
+    }
+
+    /// The report a Windows shell sends is stored as the path Windows opens; elsewhere the same
+    /// bytes are a Unix path and stay as they came.
+    #[test]
+    fn windows_paths_a_drive_report_is_stored_in_the_platform_s_own_form() {
+        let mut d = Metadata::default();
+        d.advance(b"\x1b]7;file:///C:/work/project%20one\x07");
+        let expected = if cfg!(windows) {
+            r"C:\work\project one"
+        } else {
+            "/C:/work/project one"
+        };
+        assert_eq!(d.path(), Some(Path::new(expected)));
+        // A bare drive is its root, never the drive-relative `C:`; `C:work` is relative to a
+        // drive's current directory, which only the reporting shell knows.
+        d.advance(b"\x1b]7;file:///C:\x07");
+        let bare = d.path().map(Path::to_path_buf);
+        d.advance(b"\x1b]7;file:///C:work\x07");
+        let relative = d.path().map(Path::to_path_buf);
+        if cfg!(windows) {
+            assert_eq!(bare.as_deref(), Some(Path::new(r"C:\")));
+            assert!(bare.is_some_and(|path| path.is_absolute()));
+            assert_eq!(relative, None);
+        } else {
+            assert_eq!(bare.as_deref(), Some(Path::new("/C:")));
+            assert_eq!(relative.as_deref(), Some(Path::new("/C:work")));
+        }
+    }
+
+    #[test]
     #[cfg(windows)]
-    fn accepts_windows_session_hostname_but_not_a_different_host() {
+    fn windows_paths_accepts_the_session_hostname_but_not_a_different_host() {
         let name = std::env::var("COMPUTERNAME").expect("Windows session computer name");
         assert!(!name.is_empty());
         let mut d = Metadata::default();
         d.advance(format!("\x1b]7;file://{name}/C:/work\x07").as_bytes());
-        assert_eq!(d.path(), Some(Path::new("/C:/work")));
+        assert_eq!(d.path(), Some(Path::new(r"C:\work")));
         d.advance(b"\x1b]7;file://different-host.invalid/C:/work\x07");
         assert_eq!(d.path(), None);
     }

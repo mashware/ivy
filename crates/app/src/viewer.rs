@@ -5,6 +5,7 @@ mod delivery;
 mod diff;
 mod drawer;
 mod highlight;
+pub(crate) mod image;
 mod load;
 pub(crate) mod markdown;
 mod origin;
@@ -49,6 +50,8 @@ pub(crate) struct State {
     message: String,
     refresh_at: Option<Instant>,
     keyboard: bool,
+    /// Whether the Space held now was pressed while the drawer held the keys.
+    space: bool,
     held: bool,
     blocked_frame: Option<u64>,
     events: Option<Vec<egui::Event>>,
@@ -82,6 +85,7 @@ impl Default for State {
             message: String::new(),
             refresh_at: None,
             keyboard: false,
+            space: false,
             held: false,
             blocked_frame: None,
             events: None,
@@ -253,6 +257,10 @@ pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
 }
 
 pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
+    if markdown && window.image.shown() {
+        origin::show_image(window);
+        return;
+    }
     select_state(window, markdown);
     let tool = if markdown {
         crate::sidebar::Tool::Document
@@ -349,12 +357,11 @@ fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
         state.message = "Send or clear the review comments before closing the review.".into();
         return;
     }
-    let kept = State {
-        context: state.context.take(),
-        tool_markdown: state.tool_markdown,
-        ..State::default()
-    };
-    *state = kept;
+    if markdown {
+        origin::replace_document(window, origin::Keep::Neither);
+    } else {
+        origin::forget(state);
+    }
     let active = crate::sidebar::active(window);
     let closed = if markdown {
         crate::sidebar::Tool::Document
@@ -384,6 +391,7 @@ pub(crate) fn suspend(window: &mut crate::Window) {
         state.open = false;
         state.keyboard = false;
         state.held = false;
+        state.space = false;
         state.refresh_at = None;
         state.events = None;
     }
@@ -398,6 +406,10 @@ pub(crate) fn keys(
     let blocked = blocked || window.chrome.guide_blocked(ui.ctx());
     window.viewer.context = Some(ui.ctx().clone());
     window.viewer_other.context = Some(ui.ctx().clone());
+    if blocked {
+        window.viewer.space = false;
+        window.viewer_other.space = false;
+    }
     let owned = !blocked && before_keys(window, ui, metrics);
     delivery::deliver(window, ui.ctx());
     let requests = if blocked || owned {
@@ -416,8 +428,12 @@ pub(crate) fn before_keys(
 ) -> bool {
     let started = Instant::now();
     let owned = (|| {
+        // Every return below leaves Space not the drawer's unless it is worked out again, so a
+        // Space held across a closed drawer cannot pan when it comes back.
+        let held = window.viewer.space || window.viewer_other.space;
         for state in [&mut window.viewer, &mut window.viewer_other] {
             state.events = None;
+            state.space = false;
         }
         if window.settings_editor.is_open() || window.pane_view.is_modal() {
             return false;
@@ -442,6 +458,9 @@ pub(crate) fn before_keys(
         window.viewer.context = Some(ctx.clone());
         let frame = ctx.cumulative_frame_nr();
         let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+        // Read before a press below hands the keys over: a Space a console was given stays its own.
+        let holds = window.viewer.keyboard || window.sidebar.maximized;
+        window.viewer.space = ctx.input(|i| image::space_is_ours(i, holds, held));
         if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
             window.viewer.keyboard = over;
             window.viewer.held = over;
@@ -450,8 +469,13 @@ pub(crate) fn before_keys(
         if !ctx.input(|i| i.focused && i.pointer.any_down()) {
             window.viewer.held = false;
         }
-        let pointer_activity =
-            ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
+        // egui reports Ctrl+wheel as a zoom and not as a scroll, so the image's zoom gesture
+        // would otherwise leave the drawer without its input.
+        let pointer_activity = ctx.input(|i| {
+            i.pointer.any_pressed()
+                || i.smooth_scroll_delta != egui::Vec2::ZERO
+                || i.zoom_delta() != 1.0
+        });
         let was_open = window.viewer.open;
         let reading_keys = window.sidebar.maximized
             && ctx.input(|i| {
@@ -519,24 +543,27 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     let ctx = ui.ctx().clone();
     window.viewer.context = Some(ctx.clone());
     let started = Instant::now();
-    if window.viewer.kind.is_document()
+    let image = origin::showing_image(window);
+    if !image
+        && window.viewer.kind.is_document()
         && window.viewer.requested.is_some()
         && window.viewer.job.is_none()
         && window.viewer.refresh_at.is_none()
     {
         window.viewer.refresh_at = Some(Instant::now());
     }
-    if window.viewer.requested.is_none()
-        && !window.viewer.path.is_empty()
-        && !window.viewer.editing_path
-    {
-        window.viewer.start(&ctx);
+    if image {
+        window.image.poll(&ctx);
+    } else {
+        if window.viewer.requested.is_none()
+            && !window.viewer.path.is_empty()
+            && !window.viewer.editing_path
+        {
+            window.viewer.start(&ctx);
+        }
+        window.viewer.poll(&ctx);
     }
-    window.viewer.poll(&ctx);
-    let unavailable = window
-        .viewer
-        .origin
-        .as_ref()
+    let unavailable = origin::shown_origin(window)
         .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
     let filtered = ctx.input(|input| input.events.clone());
     if let Some(events) = window.viewer.events.take() {
@@ -551,7 +578,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         window.theme,
         unavailable,
         window.sidebar.maximized,
-        (&tabs, &title),
+        (&tabs, &title, image.then_some(&mut window.image)),
     );
     ctx.input_mut(|input| input.events = filtered);
     code_header::reveal_in_files(window);
@@ -562,7 +589,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
 /// The strip's name for what the drawer shows: the source console's project, or the folder it
 /// reads; the terminal's own title says nothing a person needs here.
 fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
-    let origin = window.viewer.origin.as_ref();
+    let origin = origin::shown_origin(window);
     let project = origin
         .and_then(|origin| window.all_panes().find(|pane| pane.name == origin.pane))
         .and_then(|pane| pane.project.as_ref())
@@ -588,7 +615,8 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
 
 #[cfg(test)]
 pub(crate) use code_header::document_relative_path;
-pub(crate) use origin::{open_diff_for_pane, open_document_target};
+pub(crate) use image::is_image;
+pub(crate) use origin::{open_diff_for_pane, open_document_target, open_image_target};
 
 #[cfg(test)]
 mod interaction_tests;
@@ -599,6 +627,12 @@ mod tests;
 #[cfg(test)]
 pub(crate) fn hide(window: &mut crate::Window) {
     suspend(window);
+}
+/// The image the document tab shows, with the console it is pinned to.
+#[cfg(test)]
+pub(crate) fn shown_image(window: &crate::Window) -> Option<(usize, PathBuf)> {
+    let image = &window.image;
+    Some((image.origin()?.pane, image.path()?.to_owned()))
 }
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {

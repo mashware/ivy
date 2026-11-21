@@ -21,6 +21,11 @@ regex-automata = "0.4"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Waiting on a console's program and ending it on Windows (D111): `portable-pty`'s own `kill`
+# reads `TerminateProcess`'s result the wrong way round. Already in the tree at this version.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 # The Mac's own language and region, for a console launched by an app that inherited no locale.
 # Already in the tree through eframe at this version; only its features are named.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -55,7 +55,15 @@ fn open_local_press(
     let Some((pane, target)) = local else {
         return false;
     };
-    crate::explorer::open_path(window, pane, target.path);
+    // An image has nothing to reveal in Files that the drawer does not show better (D72). Its
+    // refusals are painted in the drawer; one for a console gone leaves the press to routing.
+    if crate::viewer::is_image(&target.path) {
+        if crate::viewer::open_image_target(window, pane, target.path).is_err() {
+            return false;
+        }
+    } else {
+        crate::explorer::open_path(window, pane, target.path);
+    }
     let released = has_primary(&queue[which + 1..], false);
     queue.remove(which);
     window.link_press_in_progress = Some(LinkGesture {
