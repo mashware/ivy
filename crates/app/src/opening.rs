@@ -628,9 +628,11 @@ fn launch(
         identity.extend(prepared.env());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let launch_waker = ctx.clone();
+    let waker = ctx.clone();
+    let wake: std::sync::Arc<dyn Fn() + Send + Sync> =
+        std::sync::Arc::new(move || waker.request_repaint());
     let (mut pty, output) = crate::launch::Process::start(
-        std::sync::Arc::new(move || launch_waker.request_repaint()),
+        std::sync::Arc::clone(&wake),
         reads.clone(),
         crate::launch::Request {
             program,
@@ -647,9 +649,6 @@ fn launch(
     #[cfg(test)]
     crate::tests::completed_operation(crate::tests::OperationWork::Launch);
 
-    let waker = ctx.clone();
-    let wake: std::sync::Arc<dyn Fn() + Send + Sync> =
-        std::sync::Arc::new(move || waker.request_repaint());
     let output_wake = std::sync::Arc::clone(&wake);
     let pty_output = PtyOutput::new(output, move || output_wake());
     let mut restoration = crate::restoration::PaneState {

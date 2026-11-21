@@ -316,7 +316,9 @@ pub(super) enum Asked {
     Cancel,
     /// The answer to the question about a draft at the prompt: send the line, with Enter
     /// («Send anyway») or without («Type without Enter»).
-    Answer { submit: bool },
+    Answer {
+        submit: bool,
+    },
 }
 
 /// What the notes show besides the marks.
@@ -494,13 +496,18 @@ fn answers(
         .allocate_ui_with_layout(size, row, |ui| {
             let cancel = egui::Button::new("Cancel").min_size(egui::vec2(0.0, ANSWER_ROW));
             let cancelled = ui.push_id("image-send-cancel", |ui| ui.add(cancel)).inner;
-            let plain = egui::Button::new("Type without Enter").min_size(egui::vec2(0.0, ANSWER_ROW));
-            let without = ui.push_id("image-send-without-enter", |ui| ui.add(plain)).inner;
+            let plain =
+                egui::Button::new("Type without Enter").min_size(egui::vec2(0.0, ANSWER_ROW));
+            let without = ui
+                .push_id("image-send-without-enter", |ui| ui.add(plain))
+                .inner;
             (without.clicked(), cancelled.clicked())
         })
         .inner;
     let anyway = ui
-        .push_id("image-send-anyway", |ui| send_button(ui, true, label, height, roles))
+        .push_id("image-send-anyway", |ui| {
+            send_button(ui, true, label, height, roles)
+        })
         .inner;
     (anyway, without, cancelled)
 }

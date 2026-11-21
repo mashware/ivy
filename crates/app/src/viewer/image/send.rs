@@ -331,9 +331,7 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
             }
             Phase::Idle
         }
-        Phase::Asked(request) if drafted(window, &request) => {
-            confirm(window, request, None)
-        }
+        Phase::Asked(request) if drafted(window, &request) => confirm(window, request, None),
         Phase::Asked(request) => start(window, request, ctx).unwrap_or_else(|why| {
             window.image.say(format!("{why}; nothing was sent."));
             Phase::Idle

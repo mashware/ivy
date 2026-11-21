@@ -298,8 +298,7 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send =
-            something_to_send.then(|| (origin.label.as_str(), sending.button()));
+        let send = something_to_send.then(|| (origin.label.as_str(), sending.button()));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
@@ -3989,7 +3988,10 @@ mod tests {
         press(&mut window, &ctx, anyway);
         until_written(&mut window, &ctx);
         let typed = [&b"abc"[..], line.as_bytes()].concat();
-        assert_eq!(received.wait_for(typed.len(), Duration::from_secs(5)), typed);
+        assert_eq!(
+            received.wait_for(typed.len(), Duration::from_secs(5)),
+            typed
+        );
         painted(&mut window, &ctx, vec![]);
         let submitted = [&typed[..], b"\r"].concat();
         assert_eq!(
@@ -3997,7 +3999,10 @@ mod tests {
             submitted
         );
         assert!(marks_of(&window).is_empty());
-        assert!(!origin_pane(&mut window).typed, "Enter left the draft recorded");
+        assert!(
+            !origin_pane(&mut window).typed,
+            "Enter left the draft recorded"
+        );
         let _ = std::fs::remove_file(dir.join("annotated-1.png"));
     }
 
@@ -4092,7 +4097,10 @@ mod tests {
             press(&mut window, &ctx, anyway);
             until_written(&mut window, &ctx);
             let typed = [&b"z"[..], line.as_bytes()].concat();
-            assert_eq!(received.wait_for(typed.len(), Duration::from_secs(5)), typed);
+            assert_eq!(
+                received.wait_for(typed.len(), Duration::from_secs(5)),
+                typed
+            );
             assert!(line.contains(&copy.display().to_string()));
             let _ = std::fs::remove_file(&copy);
         }

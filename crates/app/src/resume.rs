@@ -351,6 +351,14 @@ pub(crate) fn write(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<(
     Ok(())
 }
 
+/// Writes the command of a panel button the person pressed, straight to the program as a press
+/// always went: what it sends is theirs as much as a key is.
+pub(crate) fn write_button(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
+    pane.pty.write(bytes)?;
+    wrote(pane, bytes);
+    Ok(())
+}
+
 /// Writes bytes that are not the person's typing, a mouse report, leaving [`wrote`]'s record alone.
 fn put(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
     if pane.restoration.failed {
@@ -396,11 +404,7 @@ mod tests {
             (false, b"one\rtwo", true),
             (true, b"\x1b[200~a\rb\x1b[201~", true),
         ] {
-            assert_eq!(
-                typed_after(before, bytes),
-                after,
-                "{before} then {bytes:?}"
-            );
+            assert_eq!(typed_after(before, bytes), after, "{before} then {bytes:?}");
         }
     }
 
