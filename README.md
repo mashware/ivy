@@ -309,7 +309,7 @@ can delay further listings, but the explorer can still be hidden and consoles re
 | Split right / split below | `Ctrl+Shift+D` / `Ctrl+Shift+B` |
 | Close the focused pane | `Ctrl+Shift+X` |
 | Move a pane | `Ctrl+Shift` + drag |
-| Copy selection / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
+| Copy selection / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` (on Windows also `Ctrl+Insert` / `Shift+Insert`) |
 | Search scrollback | `Ctrl+Shift+F` |
 | Open Overview | `Ctrl+Shift+O` |
 | Scroll a page | `Shift+PageUp` / `Shift+PageDown` |

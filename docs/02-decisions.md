@@ -5726,6 +5726,8 @@ purpose** — is the same function's Windows arm, `shift && Delete`, which has t
 Shift+Delete and Ctrl+Shift+Delete into a cut before they are keys, so on Windows they would reach the
 program as `0x18` instead of D52's `CSI 3;2~`/`CSI 3;6~`. Nothing here can observe it; F2.7 decides it
 on the platform, and the guard pins that arm as upstream's so the change is a visible decision.
+**Decided in D115**: the arm is gone, as is `is_copy_command`'s Windows Ctrl+Insert arm, and
+`is_paste_command`'s Shift+Insert arm requires Shift alone.
 
 **What was discarded.** Handling `Event::Cut` with Shift in `keyboard.rs` as a lookup of the chord,
 with no change to the copy. It keeps the copy at one change, and it pays for it with state of its own:
@@ -5738,7 +5740,8 @@ information the copy throws away. Chosen by the user at the fix's gate.
 before hashing the rest — the paste branch and `is_cut_command` — and pins the new arm and upstream's
 other two. The residual's constant was computed from the tree before the change, by a script that
 first reproduced the old constant exactly. The behaviour itself is out of reach of any test, for the
-reason above, so it is checked by hand (D53).
+reason above, so it is checked by hand (D53). Since D115 it cuts **four** places — the paste branch
+and the three clipboard predicates — and pins each predicate whole.
 
 ## D34 — The step between cells is a whole number of pixels
 
@@ -7656,13 +7659,15 @@ so F2.7 names the observer it uses on each of them.
 
   | Chord | Situation | The program receives |
   |---|---|---|
-  | `Shift+Delete` | `nano` open; then `cat -v` | `nano` stays open; `cat -v` prints `^[[3;2~` |
-  | `Ctrl+Insert` | text marked | nothing; the marked text is on the clipboard |
+  | `Shift+Delete` | `nano` open; then `cat -v` | `nano` stays open; `cat -v` prints `^[[3;2~` and no `^X` behind it |
+  | `Ctrl+Insert` | text marked, `cat -v` running | nothing, and `cat` still running; the marked text is on the clipboard |
   | `Ctrl+Shift+Insert` | `cat -v` | `^[[2;6~` |
   | `Shift+Insert` | text on the clipboard | the text, pasted |
   | `Shift+Insert` | an image on the clipboard | nothing at all |
   | `AltGr+2`, `AltGr+´` | Spanish layout, a shell prompt | `@`, `{` |
   | `AltGr+Q`, `AltGr+7` | German layout, a shell prompt | `@`, `{` |
+  | `Ctrl+Insert`, then `Shift+Delete` | text selected in a Settings field | copied; then cut |
+  | `Ctrl+Insert` | lines selected in the drawer's code viewer | copied |
 
   The observer there is a console whose program echoes what it receives — `cat -v` inside Git Bash or
   WSL, or `nano`/the prompt itself where only the effect is read.
@@ -11597,6 +11602,24 @@ must stay `0x03`. That door sits **after** the keymap, so a `key.<action> = ctrl
 wrote still wins. Which platform the pass is on is a parameter, so the Linux suite tests the Windows
 answer as well as its own.
 
+**The rest of the window keeps the chords it had.** Every text field (Settings, renaming a pane,
+Files' search) and the drawer's code viewer copy and cut only on a copy or cut request, so delivering
+two keys instead would have taken Ctrl+Insert and Shift+Delete away from them — found in this
+decision's review, and the owner chose to keep them. So before egui reads a batch, the window puts
+the request **right behind** each exact Ctrl+Insert and Shift+Delete key, on Windows only
+(`keyboard::add_requests_behind`). A text field ignores the key — egui leaves Shift+Delete alone on
+Windows precisely because it expects the cut, and has nothing for Insert — and acts on the request.
+A console acts on the key and drops the request behind it, armed from the key itself before the
+keymap, so a chord somebody bound does not leave its request to reach the program as `0x03` or
+`0x18`. The pair is this project's own translation, so unlike the desktop layer it is tested.
+What the fields lose is Ctrl+Shift+Insert and Alt+Shift+Insert as pastes, which upstream gave them
+and the narrowed arm no longer does.
+
+**A shortcut bound to `shift+insert` is half a shortcut on Windows**: with text on the clipboard
+the desktop layer still turns that chord into a paste before it is a key, so the binding fires only
+over a clipboard with no text. Said in the configuration guide rather than refused, because the same
+chord is ordinary on the other two platforms.
+
 **AltGr needs no code, and that is a reading, not a run.** `winit` 0.30.13 clears Ctrl and Alt from
 the modifiers while the right Alt is down on a layout that has AltGr
 (`platform_impl/windows/keyboard_layout.rs`, `get_agnostic_mods`), and it fills the key's text with
@@ -11614,5 +11637,7 @@ named there as unverified.
 | Telling Ctrl+Insert from Ctrl+C in the copy request | The request carries no key: impossible |
 | A `Copy` action in the keymap with a Windows factory chord | Copy is a switch, not an action (**D26**): the desktop resolves Ctrl+Shift+C before it is a key, so such an action could only ever be bound to Insert chords, one platform's — a rebindable copy that is not rebindable |
 | Delivering Shift+Insert as a key and pasting from the keyboard pass | The pass cannot read the clipboard; the paste branch of `egui-winit` is the only reader, and the paste door already tells Shift apart |
+| Accepting that text fields lose Ctrl+Insert and Shift+Delete on Windows | Offered at the review; the owner chose to keep them |
+| Producing the key and its request inside the vendored layer | A fourth change to somebody else's code, out of reach of every test (D53); the input hook is this project's own and the suite drives the same function the console uses to drop the request |
 | The ticket's rule «on Windows, Ctrl+Alt with text means the text wins» | Not needed for the AltGr key (above), and wrong for left Ctrl + left Alt on a layout without AltGr: `winit` fills the text with the key without Ctrl, so `Ctrl+Alt+A` on a US layout would type `a`. Ctrl+Alt as an AltGr substitute is left out, recorded |
 | The same chords as copy and paste on Linux and macOS | Changes two platforms nobody asked about, and widens D53's hand check to them |

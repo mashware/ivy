@@ -1025,8 +1025,8 @@ impl State {
                     self.egui_input.events.push(egui::Event::Copy);
                     return;
                 } else if is_paste_command(self.modifiers, active_key) {
-                    // **The first of the two changes this vendored copy carries** (the other is
-                    // in `is_cut_command`). Upstream returns here
+                    // **The first of the changes this vendored copy carries** (the others are in
+                    // `is_cut_command`, `is_copy_command` and `is_paste_command`). Upstream returns here
                     // unconditionally, so a paste chord pressed over a clipboard with no text
                     // reaches the application as nothing at all — not the paste, and not the key
                     // event either. In a terminal emulator that key has an owner other than the
