@@ -262,9 +262,14 @@ impl Viewer {
                 });
             return;
         };
-        // Taken up only by a frame that lays the column out, where the notice is painted.
+        // Taken up only by a frame that lays the column out, where the notice is painted. Joined to
+        // the notice there rather than put in its place: that one may be a refusal or a failed
+        // Send nobody has read yet.
         if let Some(said) = self.send.unshown.take() {
-            self.notice = Some(said);
+            self.notice = Some(match self.notice.take() {
+                Some(current) => format!("{current} {said}"),
+                None => said,
+            });
         }
         let panning = &mut self.panning;
         let notice = self.notice.as_deref();
@@ -2699,6 +2704,68 @@ mod tests {
         );
     }
 
+    /// Marker 1 of the next image, opened over the first or after it was closed, gets a field of
+    /// its own: it starts empty, and a Ctrl+Z there never brings back what marker 1's note held on
+    /// the first image, though that note was held still for over a second of frames, which is what
+    /// makes egui's undo keep it by the field's id.
+    #[test]
+    fn a_note_never_carries_into_the_same_marker_of_the_next_image() {
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let (first, second) = (folder.0.join("a.png"), folder.0.join("b.png"));
+        write_png(&first, 640, 400);
+        write_png(&second, 640, 400);
+        let undo = egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: ctrl(),
+        };
+        for closed in [false, true] {
+            let (mut window, ctx, _) = window_with_image(&first);
+            let name = window.image.origin().unwrap().pane;
+            let mark = |window: &mut crate::Window| {
+                marks_mut(window).tool = marks::Tool::Marker;
+                let image = settle(window, &ctx).intersect(image_view(window, &ctx));
+                click(window, &ctx, image.lerp_inside(egui::vec2(0.5, 0.3)));
+                // The hint is painted only in an empty field.
+                place_of(window, &ctx, "What this marker shows")
+            };
+            let field = mark(&mut window);
+            press(&mut window, &ctx, field);
+            painted(&mut window, &ctx, vec![egui::Event::Text("first".into())]);
+            for _ in 0..70 {
+                painted(&mut window, &ctx, vec![]);
+            }
+            assert_eq!(marks_of(&window).notes(), ["first"]);
+            marks_mut(&mut window).clear();
+            if closed {
+                crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+                assert!(!window.image.shown(), "the image did not close");
+            }
+            crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
+            let started = Instant::now();
+            while image_rect(&painted(&mut window, &ctx, vec![])).is_none() {
+                assert!(started.elapsed() < Duration::from_secs(30));
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let field = mark(&mut window);
+            assert_eq!(marks_of(&window).notes(), [""], "closed: {closed}");
+            press(&mut window, &ctx, field);
+            for event in [egui::Event::Text("x".into()), undo.clone()] {
+                painted(&mut window, &ctx, vec![event]);
+                assert_ne!(
+                    marks_of(&window).notes(),
+                    ["first"],
+                    "the first image's note came back, closed: {closed}"
+                );
+            }
+            // The Ctrl+Z reached the field: it took back the typing.
+            assert_eq!(marks_of(&window).notes(), [""], "closed: {closed}");
+        }
+    }
+
     /// The general note written on an image with no marks keeps the keyboard letter after
     /// letter: its first letter makes something to send, and the button that appears with it, laid
     /// out ahead of the field, does not take the field's focus; nor does its last letter erased.
@@ -3017,6 +3084,73 @@ mod tests {
             viewer.document.as_ref().unwrap().marks.general,
             "the header overlaps"
         );
+    }
+
+    /// What a cancelled Send's worker left to say joins the notice the drawer already shows rather
+    /// than taking its place: a refusal nobody has read yet is painted beside it, and the held
+    /// word is taken up once.
+    #[test]
+    fn a_parked_workers_word_joins_the_notice_instead_of_replacing_it() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(400, 300));
+        let refusal = "The line was typed, but Enter was not pressed: the console closed.";
+        let held = "The cancelled copy's worker reported: disk full.";
+        viewer.notice = Some(refusal.into());
+        viewer.send.unshown = Some(held.into());
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(700.0, 400.0));
+        let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+        let said = texts(&shapes, view).join("\n");
+        assert!(said.contains(refusal), "the refusal was lost: {said}");
+        assert!(said.contains(held), "the worker's word was lost: {said}");
+        assert!(viewer.send.unshown.is_none());
+    }
+
+    /// Between the heights where the Send button shows whole under the notice's line and those
+    /// where it is cut away entirely, it never shows as a strip too thin to read or aim at: under
+    /// `SLIVER` it is not laid out, and the notice says on hover why there is no Send.
+    #[test]
+    fn a_drawer_too_short_for_the_button_drops_it_and_says_why_on_hover() {
+        let notice = "This image has marks that were not sent: send them or clear them before \
+                      opening another image or document.";
+        let mut dropped = None;
+        let mut shown = 0;
+        for height in (60..=100).map(|h| h as f32) {
+            let ctx = egui::Context::default();
+            let mut viewer = ready(image::RgbaImage::new(400, 300));
+            viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+            viewer.notice = Some(notice.into());
+            let view = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(300.0, height));
+            let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+            let Some((button, _)) = clipped_text(&shapes, |t| t.starts_with("Send to ")) else {
+                dropped.get_or_insert((height, ctx, viewer, view));
+                continue;
+            };
+            let frame = shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) if rect.rect.contains_rect(button) => {
+                    Some(rect.rect.intersect(clipped.clip_rect))
+                }
+                _ => None,
+            });
+            let frame = frame.expect("the button has a frame");
+            assert!(
+                frame.height() >= tools::SLIVER - 0.5,
+                "only {} of the button shows at {height}",
+                frame.height()
+            );
+            shown += 1;
+        }
+        assert!(shown > 0, "the button never shows");
+        let (height, ctx, mut viewer, view) = dropped.expect("the button is never dropped");
+        let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+        let [(_, line)] = &visible_texts(&shapes, |t| t == notice)[..] else {
+            panic!("the refusal is not painted once at {height}");
+        };
+        let mut hover = vec![egui::Event::PointerMoved(line.center())];
+        let said = (0..60).any(|_| {
+            let shapes = shown_in(&ctx, &mut viewer, view, std::mem::take(&mut hover));
+            text_rect(&shapes, |t| t == tools::ENLARGE).is_some()
+        });
+        assert!(said, "hovering the refusal does not say why at {height}");
     }
 
     /// Beside the image, a refusal is laid out at the column's width and painted inside the
@@ -3668,6 +3802,47 @@ mod tests {
             [&SENTINEL[..], line.as_bytes()].concat()
         );
         let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A cancelled Send's worker that ends cleanly says Send is ready only where it is: not once
+    /// the marks were cleared meanwhile, nor once the image's console closed, leaving no folder to
+    /// write a copy into. Its copy is gone either way, and the drawer says that much.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_send_says_send_is_ready_only_with_something_to_send() {
+        for case in ["cleared", "closed"] {
+            let received = term_core::received::Received::new("annotated-cancel-ready");
+            let folder = Folder::new();
+            let path = folder.0.join("shot.png");
+            write_png(&path, 640, 400);
+            let (mut window, ctx, _dir) = window_to_send(&path, &received);
+            click_send(&mut window, &ctx);
+            painted(&mut window, &ctx, vec![]);
+            let (copy, sender) = window
+                .image
+                .send
+                .stall()
+                .expect("the copy is being written");
+            let cancel = place_of(&mut window, &ctx, "Cancel");
+            press(&mut window, &ctx, cancel);
+            assert!(window.image.send.parked(), "the worker was not kept");
+            flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+            if case == "cleared" {
+                marks_mut(&mut window).clear();
+            } else {
+                let name = window.image.origin().unwrap().pane;
+                window.close_a_pane_called(name, &ctx).unwrap();
+            }
+            sender.send(Ok(copy.clone())).unwrap();
+            painted(&mut window, &ctx, vec![]);
+            assert!(!window.image.send.parked());
+            assert!(!copy.exists(), "the cancelled copy stayed");
+            assert_eq!(
+                window.image.notice.as_deref(),
+                Some("Send cancelled; nothing was sent. Its copy is gone."),
+                "{case}"
+            );
+        }
     }
 
     /// A cancelled Send whose worker then fails says what the worker reported, which is where a

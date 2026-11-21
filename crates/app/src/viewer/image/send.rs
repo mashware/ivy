@@ -339,13 +339,20 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
         None if !left.is_empty() => format!("The cancelled copy is gone{left}."),
         None => {
             // Send is greyed out while the worker is parked, and the drawer says why: once it
-            // ends cleanly, that is no longer true.
+            // ends cleanly, that is no longer true. Send is said ready only where it would be:
+            // with marks to send and a folder to write their copy into.
+            let ready = window.image.has_marks()
+                && window
+                    .image
+                    .origin()
+                    .is_some_and(|o| copy_path(window, o.pane).is_ok());
             let notice = &mut window.image.notice;
             if notice
                 .as_deref()
                 .is_some_and(|n| n.contains(STILL_FINISHING))
             {
-                *notice = Some(format!("{CANCELLED} Its copy is gone; Send is ready."));
+                let ready = if ready { "; Send is ready" } else { "" };
+                *notice = Some(format!("{CANCELLED} Its copy is gone{ready}."));
             }
             return;
         }

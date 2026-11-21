@@ -11425,25 +11425,25 @@ starts its serials again, since the opening already tells its fields apart.
   included. It is created with `create_new` on a worker, and on Unix with mode 0600 (elsewhere the
   platform's default permissions); the original file is never written.
 - **types one line into that console**: `Annotated screenshot: <copy> · 1: <note> · 2: <note> ·
-  Note: <general>`, empty parts left out, every control character turned into a space. That text
-  is painted under the image and its notes before the click, from the same function that composes
-  what is sent — inside the paste markers when the console asks for them — together with «It is
-  added to whatever is already typed at that console's prompt, and Enter runs it.» The paste is
-  composed for the paste mode the console has when it is sent, after the copy is closed. The notes
-  sit in a fixed column beside the image, so the image keeps its height however many markers there
-  are, and go under it only where the drawer is too narrow for both; the line takes a band of its
-  own under both, the full width, because a copy's path wraps into many lines in a column. Neither
-  paints outside the drawer's body: on a drawer too short for the toolbar, a wrapped notice and
-  the button, the image gives up its height first, then the notice is cut to one line, shown whole
-  on hover, above a button that keeps its full height; where not even that line fits above the
-  button, the line takes the column's head and the button is cut under it, or cut away entirely
-  on the shortest drawer, and never laid over the toolbar: a refusal clipped away says nothing at
+  Note: <general>`, empty parts left out, every control character turned into a space. That text is
+  painted under the image and its notes before the click, from the same function that composes what
+  is sent — inside the paste markers when the console asks for them — together with «It is added to
+  whatever is already typed at that console's prompt, and Enter runs it.» The paste is composed for
+  the paste mode the console has when it is sent, after the copy is closed. The notes sit in a fixed
+  column beside the image, so the image keeps its height however many markers there are, and go
+  under it only where the drawer is too narrow for both; the line takes a band of its own under
+  both, the full width, because a copy's path wraps into many lines in a column. Neither paints
+  outside the drawer's body: on a drawer too short for the toolbar, a wrapped notice and the button,
+  the image gives up its height first, then the notice is cut to one line, shown whole on hover,
+  above a button that keeps its full height; where not even that line fits above the button, the
+  line takes the column's head and the button is cut under it — not laid out at all where less than
+  12 points of it would show, a strip nobody can read or aim at, the notice then adding «Enlarge the
+  drawer to send» on hover — and never laid over the toolbar: a refusal clipped away says nothing at
   all, while a taller drawer gives the button back (#197).
 - **presses Enter in a write of its own, on a later frame.** People driving Claude Code from tmux
-  report that text and Enter sent together are read as part of the paste; a
-  separate write a frame later is what a person's Enter is, for an agent and a shell alike. A
-  frame egui runs twice still keeps the Enter for the next frame. The Git review's insertion keeps
-  writing no Enter.
+  report that text and Enter sent together are read as part of the paste; a separate write a frame
+  later is what a person's Enter is, for an agent and a shell alike. A frame egui runs twice still
+  keeps the Enter for the next frame. The Git review's insertion keeps writing no Enter.
 
 **Only the copy's path goes in the line, never the path the program printed.** The copy's name is
 the app's own (`[a-z0-9-]` and `.png` in a directory the app created); the original's is whatever a
@@ -11456,20 +11456,21 @@ before choosing to send, the D42 precedent.
 window's input pass, before the copy is started — the image replaced, the console gone, no
 `PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
 keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
-or an earlier one freed) — and a refused Send writes no file.
-**From the click to the Enter the marks and notes are frozen**: the copy is drawn from them a frame
-after the click, and a delivered Send clears them, so an edit made meanwhile would be wiped unsent;
-a Ctrl+Z in the very pass of the click is refused too, and so is a second Send. **Until the line
-is typed, a Cancel beside «Sending…» takes the Send back** (#197): the marks and notes stay and
-unfreeze, nothing is typed, and a worker already writing is parked — a write cannot be
-interrupted — and polled from the window's input pass until it ends, when its copy is removed, and
-with it the folder of a console that closed meanwhile. While a worker is parked, Send is greyed
-out and reads «Still finishing the previous copy…» — on the button, because any other notice can
-replace Cancel's — and a Send asked anyway is refused with it before any other check, so two
-workers never race for one
-name; the decoder's abandoned read is the same pattern. What a parked worker leaves to say — a
-failure, a copy or folder it could not remove — goes to standard error as well, and waits for the
-next drawer that lays the notes out, because the image it was for may be closed by then. **While the copy is
+or an earlier one freed) — and a refused Send writes no file. **From the click to the Enter the
+marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
+Send clears them, so an edit made meanwhile would be wiped unsent; a Ctrl+Z in the very pass of the
+click is refused too, and so is a second Send. **Until the line is typed, a Cancel beside «Sending…»
+takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
+already writing is parked — a write cannot be interrupted — and polled from the window's input pass
+until it ends, when its copy is removed, and with it the folder of a console that closed meanwhile.
+While a worker is parked, Send is greyed out and reads «Still finishing the previous copy…» — on the
+button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
+before any other check, so two workers never race for one name; the decoder's abandoned read is the
+same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
+goes to standard error as well, and waits for the next drawer that lays the notes out, because the
+image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
+and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that

@@ -27,6 +27,10 @@ const DISC: f32 = marks::DISC_FLOOR;
 const MARGIN: egui::Vec2 = egui::vec2(8.0, 6.0);
 /// The space under the notice, before the notes.
 const NOTICE_GAP: f32 = 4.0;
+/// The least of the Send button a drawer cut under the notice may show; less is not laid out.
+pub(super) const SLIVER: f32 = 12.0;
+/// What the notice adds on hover when the drawer is too short to show the Send button.
+pub(super) const ENLARGE: &str = "Enlarge the drawer to send";
 
 /// Where each part of the drawer's body goes while an image is marked.
 pub(super) struct Layout {
@@ -119,8 +123,8 @@ pub(super) fn rows(marks: &Marks) -> usize {
 /// room `split` keeps for them is the room they take. The notice wraps whole while the body under
 /// the toolbar, less the column's margins, holds it above the button; shorter, it is cut to one
 /// line with the whole of it on hover. Where not even that line fits above the button, the line
-/// comes first and the button gives up its top: a refusal nobody can read was the defect, as was
-/// a button painted up over the toolbar (#197).
+/// comes first and the button gives up its top, or all of it where less than `SLIVER` would show:
+/// a refusal nobody can read was the defect, as was a button painted up over the toolbar (#197).
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
     send: Option<Arc<egui::Galley>>,
@@ -344,6 +348,11 @@ pub(super) fn notes(
         .notice
         .as_ref()
         .filter(|_| fixed.notice_first(inner.height()));
+    // What is left of the button under the notice's line is too thin to read or aim at: it is not
+    // laid out, and the notice says why there is no Send.
+    let squeezed = first.is_some_and(|notice| {
+        fixed.send.is_some() && inner.height() - notice.size().y - NOTICE_GAP < SLIVER
+    });
     if let Some(notice) = first {
         // Too short for the line above the button: the line takes the column's head, and the
         // button is cut under it.
@@ -354,7 +363,21 @@ pub(super) fn notes(
                 .max_rect(band),
         );
         head.set_clip_rect(band.intersect(column.clip_rect()));
-        head.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
+        let label = egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(!squeezed);
+        let said = head.add(label);
+        if squeezed {
+            said.on_hover_ui(|ui| {
+                if notice.elided {
+                    // The label's own tooltip, as egui builds it: the text without its cut.
+                    ui.label(egui::text::LayoutJob {
+                        sections: notice.job.sections.clone(),
+                        text: notice.job.text.clone(),
+                        ..Default::default()
+                    });
+                }
+                ui.label(ENLARGE);
+            });
+        }
         let mut below = column.clip_rect();
         below.min.y = below.min.y.max(band.bottom() + NOTICE_GAP);
         column.set_clip_rect(below);
@@ -365,7 +388,8 @@ pub(super) fn notes(
     // would otherwise renumber egui's automatic ids and take the keyboard from a note mid-word.
     // Not while a cancelled Send's worker may yet create the copy this one would name.
     let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
-    let (clicked, cancelled) = fixed.send.as_ref().map_or((false, false), |label| {
+    let foot = fixed.send.as_ref().filter(|_| !squeezed);
+    let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);
         let label = Arc::clone(label);
         if !sending.cancellable() {
