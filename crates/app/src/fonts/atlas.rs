@@ -764,29 +764,50 @@ mod tests {
             "nothing was drawn"
         );
 
-        /// The glyphs a colour graph clips its fills to, and whether it moves any of them.
+        use skrifa::color::Transform;
+        /// `outer` applied after `inner`: a point goes through `inner` first.
+        fn then(outer: Transform, inner: Transform) -> Transform {
+            Transform {
+                xx: outer.xx * inner.xx + outer.xy * inner.yx,
+                yx: outer.yx * inner.xx + outer.yy * inner.yx,
+                xy: outer.xx * inner.xy + outer.xy * inner.yy,
+                yy: outer.yx * inner.xy + outer.yy * inner.yy,
+                dx: outer.xx * inner.dx + outer.xy * inner.dy + outer.dx,
+                dy: outer.yx * inner.dx + outer.yy * inner.dy + outer.dy,
+            }
+        }
+        /// The glyphs a colour graph clips its fills to, each with the transform in force where it
+        /// is clipped: `Segoe UI Emoji` moves its layers, so an outline read where it sits says
+        /// nothing about where it is drawn.
         #[derive(Default)]
         struct Layers {
-            glyphs: Vec<skrifa::GlyphId>,
-            transforms: usize,
+            glyphs: Vec<(skrifa::GlyphId, Transform)>,
+            stack: Vec<Transform>,
         }
         impl skrifa::color::ColorPainter for Layers {
-            fn push_transform(&mut self, _: skrifa::color::Transform) {
-                self.transforms += 1;
+            fn push_transform(&mut self, transform: Transform) {
+                let current = self.stack.last().copied().unwrap_or_default();
+                self.stack.push(then(current, transform));
             }
-            fn pop_transform(&mut self) {}
+            fn pop_transform(&mut self) {
+                self.stack.pop();
+            }
             fn push_clip_glyph(&mut self, glyph: skrifa::GlyphId) {
-                self.glyphs.push(glyph);
+                let current = self.stack.last().copied().unwrap_or_default();
+                self.glyphs.push((glyph, current));
             }
             fn push_clip_box(&mut self, _: skrifa::raw::types::BoundingBox<f32>) {}
             fn pop_clip(&mut self) {}
             fn fill(&mut self, _: skrifa::color::Brush<'_>) {}
             fn push_layer(&mut self, _: skrifa::color::CompositeMode) {}
         }
-        /// The control points' bounds: never smaller than the ink's.
-        struct Bounds([f32; 4]);
+        /// The control points' bounds, moved by the layer's transform: an affine map keeps a curve
+        /// inside the hull of its moved control points, so these are never smaller than the ink's.
+        struct Bounds([f32; 4], Transform);
         impl Bounds {
             fn take(&mut self, x: f32, y: f32) {
+                let t = self.1;
+                let (x, y) = (t.xx * x + t.xy * y + t.dx, t.yx * x + t.yy * y + t.dy);
                 let [x0, y0, x1, y1] = &mut self.0;
                 (*x0, *y0, *x1, *y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
             }
@@ -818,8 +839,12 @@ mod tests {
             .paint(location, &mut layers)
             .expect("its paint graph walks");
         let outlines = font.outline_glyphs();
-        let mut ink = Bounds([f32::MAX, f32::MAX, f32::MIN, f32::MIN]);
-        for layer in &layers.glyphs {
+        let mut ink = Bounds(
+            [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+            Transform::default(),
+        );
+        for (layer, transform) in &layers.glyphs {
+            ink.1 = *transform;
             outlines
                 .get(*layer)
                 .expect("a layer glyph has an outline")
@@ -851,18 +876,22 @@ mod tests {
         let (ascent, descent) = extent(&font, &metrics);
         let [x0, y0, x1, y1] = ink.0;
         let numbers = format!(
-            "{} layers, {} transforms, ink x {x0}..{x1} y {y0}..{y1}; box x 0..{advance:?} y \
+            "{} layers, {} of them moved, ink x {x0}..{x1} y {y0}..{y1}; box x 0..{advance:?} y \
              {descent}..{ascent}; line {} / {}, hhea {hhea:?}, OS/2 typo and win {os2:?}, head {head:?}, \
              image {:?}",
             layers.glyphs.len(),
-            layers.transforms,
+            layers
+                .glyphs
+                .iter()
+                .filter(|(_, t)| *t != Transform::default())
+                .count(),
             metrics.ascent,
             metrics.descent,
             drawn.image.size,
         );
         assert!(
-            !layers.glyphs.is_empty() && layers.transforms == 0,
-            "the layers' outlines do not say where the ink is: {numbers}"
+            !layers.glyphs.is_empty(),
+            "the graph clipped to no outline, so nothing says where the ink is: {numbers}"
         );
         assert!(
             y0 >= descent && y1 <= ascent,
