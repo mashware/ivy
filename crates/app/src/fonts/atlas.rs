@@ -504,4 +504,71 @@ mod tests {
             "a glyph with no colour drawing came out as an image"
         );
     }
+
+    /// The premise the white context paint of `colr_of` rests on: the font Windows asks for emoji
+    /// draws none of these in «the text colour» (palette index `0xFFFF`). It is the only place that
+    /// font exists to be read, so it runs on Windows only. If it fails, the atlas has to learn the
+    /// text colour, which is follow-up work and not a reason to loosen this.
+    #[cfg(windows)]
+    #[test]
+    fn segoe_ui_emoji_draws_no_emoji_in_the_text_colour() {
+        use skrifa::color::{Brush, ColorPainter, CompositeMode, Transform};
+        use skrifa::MetadataProvider as _;
+
+        #[derive(Default)]
+        struct Fills {
+            seen: usize,
+            in_text_colour: usize,
+        }
+        impl Fills {
+            fn note(&mut self, indexes: impl Iterator<Item = u16>) {
+                for index in indexes {
+                    self.seen += 1;
+                    if index == 0xFFFF {
+                        self.in_text_colour += 1;
+                    }
+                }
+            }
+        }
+        impl ColorPainter for Fills {
+            fn push_transform(&mut self, _: Transform) {}
+            fn pop_transform(&mut self) {}
+            fn push_clip_glyph(&mut self, _: skrifa::GlyphId) {}
+            fn push_clip_box(&mut self, _: skrifa::raw::types::BoundingBox<f32>) {}
+            fn pop_clip(&mut self) {}
+            fn push_layer(&mut self, _: CompositeMode) {}
+            fn fill(&mut self, brush: Brush<'_>) {
+                match brush {
+                    Brush::Solid { palette_index, .. } => self.note(std::iter::once(palette_index)),
+                    Brush::LinearGradient { color_stops, .. }
+                    | Brush::RadialGradient { color_stops, .. }
+                    | Brush::SweepGradient { color_stops, .. } => {
+                        self.note(color_stops.iter().map(|stop| stop.palette_index))
+                    }
+                }
+            }
+        }
+
+        let windows = std::env::var("WINDIR").expect("WINDIR is set on Windows");
+        let path = std::path::Path::new(&windows).join("Fonts").join("seguiemj.ttf");
+        let bytes = std::fs::read(&path).expect("Segoe UI Emoji is installed with Windows");
+        let font = skrifa::FontRef::new(&bytes).expect("Segoe UI Emoji opens");
+        for emoji in ['\u{1F600}', '\u{1F44D}', '\u{2601}'] {
+            let glyph = font.charmap().map(emoji).expect("Segoe UI Emoji maps it");
+            let colour = font
+                .color_glyphs()
+                .get(glyph)
+                .unwrap_or_else(|| panic!("{emoji:?} has no COLR record in Segoe UI Emoji"));
+            let mut fills = Fills::default();
+            colour
+                .paint(skrifa::instance::LocationRef::default(), &mut fills)
+                .expect("its paint graph walks");
+            assert!(fills.seen > 0, "{emoji:?}: the walk saw no fill, so it proved nothing");
+            assert_eq!(
+                fills.in_text_colour, 0,
+                "{emoji:?} draws {} of its {} fills in the text colour, which the atlas paints white",
+                fills.in_text_colour, fills.seen
+            );
+        }
+    }
 }

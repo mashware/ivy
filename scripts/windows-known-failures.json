@@ -649,21 +649,9 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "tests::the_real_window_declares_the_emojis_it_painted_in_its_pass",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "tests::the_silence_is_stroked_filled_and_drawn_where_its_box_is",
     "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
     "issue": "https://github.com/mashware/ivy/issues/187"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::what_painting_a_color_emoji_costs_comes_out_of_the_paintings_span_and_is_declared",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
   },
   {
     "binary": "app/app:lib",
