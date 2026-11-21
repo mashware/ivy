@@ -6278,6 +6278,21 @@ publishes for input.
 
 ---
 
+### Windows test witnesses — November 2026
+
+A raw consumer of a Windows console's output must answer the initial cursor-position request
+before expecting the child to write. The test consumer uses the same incremental `Screen` reply
+path as the application, with one parser retained across reads. A nonempty screen proves no child
+execution: ConPTY can draw before the program starts. A listener-loss witness therefore establishes
+child-produced output before disconnecting its receiver, leaves the child producing output, and
+requires `NobodyListening` exactly. Waiting longer, killing the child or accepting any abnormal
+ending would test a different event. D111's drain can continue after that ending is recorded.
+
+The error kind belongs to the platform too: raw error 5 is not `Uncategorized` on Windows. The
+synthetic failure witness must preserve both the original raw number and its platform's kind;
+a Unix mapping is not a portable oracle.
+
+
 ## D39 — A notice takes at most half its console, and it may not be drawn at all rather than drawn unreadable
 
 **A held paste's notice grew to fit its text and was only clamped to the console.** At the width two
