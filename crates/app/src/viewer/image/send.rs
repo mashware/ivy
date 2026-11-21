@@ -359,7 +359,24 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
     };
     // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
     eprintln!("{said}");
+    // The worker it waited for has ended: a notice saying so is no longer true, and is not kept.
+    let notice = &mut window.image.notice;
+    if notice
+        .as_deref()
+        .is_some_and(|n| n.contains(STILL_FINISHING))
+    {
+        *notice = Some(CANCELLED.into());
+    }
     window.image.send.unshown = Some(said);
+}
+
+/// Puts `said` after the drawer's `notice` rather than in its place: that one may be a refusal or
+/// a failed Send nobody has read yet.
+pub(super) fn join(notice: &mut Option<String>, said: String) {
+    *notice = Some(match notice.take() {
+        Some(current) => format!("{current} {said}"),
+        None => said,
+    });
 }
 
 /// A console that closed while its copy was being written could not remove its directory, which

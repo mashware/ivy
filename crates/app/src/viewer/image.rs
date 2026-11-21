@@ -262,14 +262,9 @@ impl Viewer {
                 });
             return;
         };
-        // Taken up only by a frame that lays the column out, where the notice is painted. Joined to
-        // the notice there rather than put in its place: that one may be a refusal or a failed
-        // Send nobody has read yet.
+        // Taken up only by a frame that lays the column out, where the notice is painted.
         if let Some(said) = self.send.unshown.take() {
-            self.notice = Some(match self.notice.take() {
-                Some(current) => format!("{current} {said}"),
-                None => said,
-            });
+            send::join(&mut self.notice, said);
         }
         let panning = &mut self.panning;
         let notice = self.notice.as_deref();
@@ -3938,11 +3933,12 @@ mod tests {
             painted(&mut window, &ctx, vec![]);
         }
         assert!(!window.image.send.parked());
+        // After the cancel's own word, which no longer says the worker is still finishing.
         let notice = window.image.notice.clone().unwrap_or_default();
         assert!(
             notice.starts_with(
-                "The origin console has closed, and the cancelled copy's worker reported: \
-                 disk full"
+                "Send cancelled; nothing was sent. The origin console has closed, and the \
+                 cancelled copy's worker reported: disk full"
             ),
             "{notice}"
         );
