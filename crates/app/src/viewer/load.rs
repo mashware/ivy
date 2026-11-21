@@ -142,17 +142,6 @@ pub(super) fn stalled<T>() -> (Job<T>, mpsc::Sender<Result<T, String>>) {
     (job, sender)
 }
 
-/// A job already finished with `result`, for work that was done and is handed back to wait.
-pub(super) fn done<T>(result: Result<T, String>) -> Job<T> {
-    let (sender, receiver) = mpsc::channel();
-    // The receiver is still here, so the send cannot fail.
-    let _ = sender.send(result);
-    Job {
-        receiver,
-        finished: Cell::new(false),
-    }
-}
-
 pub(super) fn take<T>(job: &Job<T>) -> Option<Result<T, String>> {
     if job.finished.get() {
         return None;

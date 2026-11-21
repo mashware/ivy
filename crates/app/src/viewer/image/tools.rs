@@ -1,7 +1,7 @@
 //! What frames the drawer's image while it is marked: the tools above it, a column of notes beside
 //! it (under it where the drawer is too narrow for both), and under them the line Send will type.
 use super::marks::{self, Marks, Tool};
-use super::send::{self, Button, Request, Sending};
+use super::send::{self, Answer, Button, Request, Sending};
 use crate::theme::{Roles, metrics};
 use crate::ui::icons::{self, Icon};
 use eframe::egui;
@@ -314,11 +314,8 @@ pub(super) enum Asked {
     Send(Request),
     /// Take back the Send whose line is not typed yet.
     Cancel,
-    /// The answer to the question about a draft at the prompt: send the line, with Enter
-    /// («Send anyway») or without («Type without Enter»).
-    Answer {
-        submit: bool,
-    },
+    /// An answer to the question about a draft at the prompt that sends the line.
+    Answer(Answer),
 }
 
 /// What the notes show besides the marks.
@@ -412,8 +409,10 @@ pub(super) fn notes(
         let label = Arc::clone(label);
         if sending.confirming() {
             let (anyway, without, cancelled) = answers(&mut column, label, height, &roles);
-            if anyway || without {
-                answered = Some(Asked::Answer { submit: anyway });
+            if anyway {
+                answered = Some(Asked::Answer(Answer::Anyway));
+            } else if without {
+                answered = Some(Asked::Answer(Answer::WithoutEnter));
             }
             return (false, cancelled);
         }
@@ -443,7 +442,8 @@ pub(super) fn notes(
             ui.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
             ui.add_space(NOTICE_GAP);
         }
-        // A Send on its way takes the notes as they were at its click; only its Cancel answers.
+        // A Send on its way takes the notes as they were at its click; only the buttons at the
+        // foot answer.
         // After the notice: a disabled label shows no tooltip, and the cut one needs its own.
         if sending.busy() {
             ui.disable();
@@ -456,9 +456,6 @@ pub(super) fn notes(
     if marks.is_empty() {
         return cancelled.then_some(Asked::Cancel);
     }
-    if answered.is_some() {
-        return answered;
-    }
     let line = match &sending.target {
         Some(Ok(path)) => Ok((compose(path, marks), path)),
         Some(Err(why)) => Err(format!("{why}; nothing can be sent.")),
@@ -469,6 +466,9 @@ pub(super) fn notes(
     }
     if cancelled {
         return Some(Asked::Cancel);
+    }
+    if answered.is_some() {
+        return answered;
     }
     let (line, path) = line.ok().filter(|_| clicked)?;
     Some(Asked::Send(Request {
@@ -509,6 +509,11 @@ fn answers(
             send_button(ui, true, label, height, roles)
         })
         .inner;
+    // What an answer starts runs in the window's input pass, which only a new frame reaches: a
+    // copy already written has no worker left to wake the window.
+    if anyway || without || cancelled {
+        ui.ctx().request_repaint();
+    }
     (anyway, without, cancelled)
 }
 
@@ -614,8 +619,8 @@ fn footer(
                 });
                 ui.label(
                     egui::RichText::new(
-                        "It is added to whatever is already typed at that console's prompt, \
-                         and Enter runs it.",
+                        "If something is typed at that console's prompt, Send asks first; \
+                         Enter runs the line.",
                     )
                     .small()
                     .color(roles.tx3),

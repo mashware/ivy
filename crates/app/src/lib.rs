@@ -653,9 +653,9 @@ struct Pane {
     /// nothing reaches the program until somebody answers. Holding rather than warning is the whole
     /// point — once the line closes, the shell has already run the truncated command.
     held: Option<keyboard::HeldPaste>,
-    /// Whether the person sent bytes here since their last Enter, from the app's own writes and
-    /// never from the screen (D6, D113): Send asks before joining its line to them. See
-    /// [`resume::wrote`].
+    /// Whether the person sent bytes here since their last Enter or Ctrl+C, from the app's own
+    /// writes and never from the screen (D6, D113), and false again in a fresh shell started over
+    /// a failed client: Send asks before joining its line to them. See [`resume::wrote`].
     typed: bool,
     /// The search open on this console, and what searching it cost. See [`search::OnThisConsole`].
     search: search::OnThisConsole,

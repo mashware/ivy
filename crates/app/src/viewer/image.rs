@@ -4035,7 +4035,16 @@ mod tests {
         );
         assert!(dir.join("annotated-1.png").exists(), "no copy for the line");
         assert!(marks_of(&window).is_empty());
-        assert!(origin_pane(&mut window).typed);
+        // The line now sits at the prompt: the next Send asks about it.
+        marks_mut(&mut window).tool = marks::Tool::Marker;
+        let at = image_view(&window, &ctx).center();
+        click(&mut window, &ctx, at);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window.image.send.confirming(),
+            "the line typed without Enter was not asked about"
+        );
         let _ = std::fs::remove_file(dir.join("annotated-1.png"));
     }
 
@@ -4079,11 +4088,13 @@ mod tests {
         if cancelled {
             let cancel = place_of(&mut window, &ctx, "Cancel");
             press(&mut window, &ctx, cancel);
-            for _ in 0..3 {
-                painted(&mut window, &ctx, vec![]);
-            }
             assert!(!window.image.sending());
             assert!(!copy.exists(), "the cancelled copy stayed");
+            assert_eq!(
+                window.image.notice.as_deref(),
+                Some("Send cancelled; nothing was sent."),
+                "a copy already written was said to be still finishing"
+            );
             assert_eq!(marks_of(&window).notes(), ["button clipped"]);
             // Only the draft arrived: the line was never typed.
             origin_pane(&mut window).pty.write(SENTINEL).unwrap();
@@ -4103,6 +4114,112 @@ mod tests {
             );
             assert!(line.contains(&copy.display().to_string()));
             let _ = std::fs::remove_file(&copy);
+        }
+    }
+
+    /// What was typed into another console is no draft at this one's prompt: Send goes straight
+    /// out, with no question.
+    #[cfg(unix)]
+    #[test]
+    fn a_draft_in_another_console_does_not_hold_the_send() {
+        let received = term_core::received::Received::new("annotated-draft-elsewhere");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        let origin = window.image.origin().unwrap().pane;
+        let other = window
+            .all_panes_mut()
+            .find(|pane| pane.name != origin)
+            .expect("the window has a second console");
+        crate::resume::write(other, b"elsewhere").unwrap();
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.confirming(), "{:?}", window.image.notice);
+        until_written(&mut window, &ctx);
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes()
+        );
+        let _ = std::fs::remove_file(dir.join("annotated-1.png"));
+    }
+
+    /// Closing the image's console while its question waits drops the Send, says so, and removes
+    /// the copy it had written with the folder the closed console could not remove over it.
+    #[cfg(unix)]
+    #[test]
+    fn closing_the_console_drops_its_question_its_copy_and_its_folder() {
+        let received = term_core::received::Received::new("annotated-draft-console-closed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        type_draft(&mut window, &received, b"z");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(window.image.send.confirming());
+        let name = window.image.origin().unwrap().pane;
+        window.close_a_pane_called(name, &ctx).unwrap();
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert!(!window.image.sending(), "the question outlived its console");
+        assert!(!copy.exists(), "the copy stayed");
+        assert!(!dir.exists(), "the closed console's folder stayed");
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("The origin console has closed; nothing was sent.")
+        );
+    }
+
+    /// The question's three answers are laid out whole, inside the drawer and under its toolbar,
+    /// with the notes still in view: beside the image, and under it in a narrow drawer, where the
+    /// column is only as tall as the room kept for what it holds.
+    #[test]
+    fn the_three_answers_are_laid_out_whole_beside_the_image_and_under_it() {
+        for (width, height) in [(700.0, 420.0), (300.0, 520.0)] {
+            let ctx = egui::Context::default();
+            let mut viewer = ready(image::RgbaImage::new(400, 300));
+            viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+            viewer.notice = Some(
+                "Something is typed at origin's prompt; it will be sent with this line.".into(),
+            );
+            viewer.send.question(send::Request {
+                document: viewer.document().unwrap(),
+                pane: 0,
+                path: PathBuf::from("/a/annotated-1.png"),
+                line: "x".into(),
+                answer: None,
+            });
+            let view = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(width, height));
+            let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+            let mut row = Vec::new();
+            for wanted in [
+                "Send anyway",
+                "Type without Enter",
+                "Cancel",
+                "the header overlaps",
+            ] {
+                let (text, clip) = clipped_text(&shapes, |t| t == wanted)
+                    .unwrap_or_else(|| panic!("{wanted:?} is not painted at {width}×{height}"));
+                assert!(
+                    clip.contains_rect(text) && view.contains_rect(text),
+                    "{wanted:?} is cut at {width}×{height}: {text:?} in {clip:?}"
+                );
+                assert!(
+                    text.top() >= view.top() + tools::TOOLBAR,
+                    "{wanted:?} is over the toolbar at {width}×{height}"
+                );
+                row.push(text);
+            }
+            assert!(
+                !row[1].intersects(row[2]) && !row[0].intersects(row[1]),
+                "the answers overlap at {width}×{height}"
+            );
         }
     }
 

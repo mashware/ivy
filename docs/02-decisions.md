@@ -11472,14 +11472,20 @@ reports never touch it, and nothing is read from the screen (D6). With the bit s
 nothing and the drawer says «Something is typed at <console>'s prompt; it will be sent with this
 line.» with three answers: **Send anyway**, which sends as a Send always has; **Type without
 Enter**, which writes the copy and the line with no Enter, clears the marks and leaves the bit set;
-and **Cancel**, which writes nothing and keeps the marks and notes. The bit is checked at the click
-and again once the copy is written, just before the line would be typed, so what was typed while
-the copy was being written is asked about too, with the copy kept for the answer. Closing the image
-while the question waits drops the Send, and a copy it had written is removed as a cancelled one's
-is. **The bit is a guess about a line editor, and its misses are accepted:** Shift+Enter is a `\r`
-here and counts as an Enter, though Claude Code reads it as a new line in the same draft; and a line
-cleared with Ctrl+U or Esc still counts as typed, so Send asks where nothing is left. A wrong guess
-costs one click; a right one keeps a draft from being submitted glued to the line.
+and **Cancel**, which types nothing, keeps the marks and notes, and removes a copy already written.
+The bit is checked at the click and, while the person has not answered, once more when the copy is
+written, just before the line would be typed: what was typed while the copy was being written is
+asked about too, with the copy kept for the answer. Once answered, a Send is not asked again — what
+is typed after «Send anyway» goes with the line, as the person chose. Closing the image or its
+console while the question waits drops the Send, a closed console said where the image is still
+shown, and a copy it had written is removed with the folder of a closed console; a window that
+closes takes it too. On a drawer too short for the Send button the answers are not laid out either,
+and the notice says on hover to enlarge it. **The bit is a guess about a line editor, and its misses
+are accepted:** Shift+Enter is a `\r` here and counts as an Enter, though Claude Code reads it as a
+new line in the same draft; Ctrl+J submits in a shell and does not count; and a line cleared with
+Ctrl+U or Esc, or keys a full-screen program took, still count as typed, so Send asks where nothing
+is left. A wrong guess costs one click; a right one keeps a draft from being submitted glued to the
+line.
 
 **Only the copy's path goes in the line, never the path the program printed.** The copy's name is
 the app's own (`[a-z0-9-]` and `.png` in a directory the app created); the original's is whatever a

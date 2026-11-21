@@ -737,7 +737,7 @@ of the column, writes a copy of the image with the marks into that console's own
 (`PANEL_DIR`) under the first free name `annotated-<n>.png`, then types the line shown under the
 image into that console and presses Enter: the copy's path and the notes. In a plain shell that line
 runs as a command, so read it before sending. If you typed something at that console since your
-last Enter, Send writes nothing and asks first, since the line would be joined to what you typed:
+last Enter, Send types nothing and asks first, since the line would be joined to what you typed:
 **Send anyway** sends as usual, **Type without Enter** writes the copy and the line but leaves Enter
 to you, and **Cancel** keeps everything as it was. It knows only what this terminal itself sent
 there, so Shift+Enter counts as an Enter, and a line you cleared with Ctrl+U or Esc still counts as

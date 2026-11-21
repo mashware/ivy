@@ -3,7 +3,7 @@
 use super::super::delivery::{self, Enter, Refusal};
 use super::flatten;
 use super::tools::Asked;
-use crate::viewer::load::{Job, done, take};
+use crate::viewer::load::{Job, take};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -45,10 +45,19 @@ pub(super) struct Request {
     pub(super) pane: usize,
     pub(super) path: PathBuf,
     pub(super) line: String,
-    /// What the person answered when Send asked about a draft at the console's prompt: `None`
-    /// until asked; then whether the line is submitted with Enter («Send anyway») or not («Type
-    /// without Enter»). An answered Send is not asked again (#196).
-    pub(super) answer: Option<bool>,
+    /// What the person answered when Send asked about a draft at the console's prompt, `None`
+    /// while it has not asked. An answered Send is not asked again (#196): what is typed after the
+    /// answer goes with the line, as the person chose.
+    pub(super) answer: Option<Answer>,
+}
+
+/// The answers to the question about a draft at the prompt that send the line.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Answer {
+    /// «Send anyway»: the line, then Enter, as a Send with nothing typed.
+    Anyway,
+    /// «Type without Enter»: the line, and Enter is left to the person.
+    WithoutEnter,
 }
 
 /// Where a Send is, from the click to the Enter; one at a time.
@@ -59,9 +68,11 @@ enum Phase {
     /// Clicked; the copy starts on the next frame's input pass.
     Asked(Request),
     /// Something was typed at the console's prompt since its last Enter: nothing is typed until
-    /// the person answers. Holds the copy when it was already written, as a job that has ended.
-    Confirm(Request, Option<Job<PathBuf>>),
+    /// the person answers. Holds the copy's path when it was already written.
+    Confirm(Request, Option<PathBuf>),
     Writing(Request, Job<PathBuf>),
+    /// Answered over a copy already written: its line goes on the next frame's input pass.
+    Written(Request, PathBuf),
     /// The Enter owed for a line written in the frame named here; it is pressed in a later one.
     Enter(Enter, u64),
 }
@@ -120,42 +131,51 @@ impl Sending {
                 self.ask(request);
                 *notice = None;
             }
-            Some(Asked::Answer { submit }) if self.confirming() => {
+            Some(Asked::Answer(answer)) if self.confirming() => {
                 let Phase::Confirm(mut request, copy) = std::mem::take(&mut self.phase) else {
                     unreachable!("confirming");
                 };
-                request.answer = Some(submit);
+                request.answer = Some(answer);
                 self.phase = match copy {
-                    Some(job) => Phase::Writing(request, job),
+                    Some(path) => Phase::Written(request, path),
                     None => Phase::Asked(request),
                 };
                 *notice = None;
             }
-            Some(Asked::Cancel) if self.cancel() => {
-                *notice = Some(if self.parked.is_some() {
-                    format!("{CANCELLED} {STILL_FINISHING}.")
-                } else {
-                    CANCELLED.into()
-                });
+            Some(Asked::Cancel) => {
+                if let Some(said) = self.cancel() {
+                    *notice = Some(said);
+                }
             }
             _ => {}
         }
     }
 
-    /// Takes back the Send whose line is not typed yet, parking its worker if it has one.
-    /// Answers whether there was one.
-    fn cancel(&mut self) -> bool {
+    /// Takes back the Send whose line is not typed yet: a copy already written is removed, a
+    /// worker still writing one is parked. Answers what to say, or `None` with nothing to take.
+    fn cancel(&mut self) -> Option<String> {
         match std::mem::take(&mut self.phase) {
-            Phase::Asked(_) | Phase::Confirm(_, None) => true,
-            Phase::Writing(request, job) | Phase::Confirm(request, Some(job)) => {
+            Phase::Asked(_) | Phase::Confirm(_, None) => Some(CANCELLED.into()),
+            // Its console is still there: `poll` drops a question whose console closed, folder
+            // and all, before a click can answer it.
+            Phase::Confirm(_, Some(path)) | Phase::Written(_, path) => {
+                Some(match std::fs::remove_file(&path) {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => format!(
+                        "{CANCELLED} The copy at {} could not be removed: {error}.",
+                        path.display()
+                    ),
+                    _ => CANCELLED.into(),
+                })
+            }
+            Phase::Writing(request, job) => {
                 // `start` refuses while a worker is parked, so there is never a second one here.
                 debug_assert!(self.parked.is_none(), "a second worker parked");
                 self.parked = Some((request, job));
-                true
+                Some(format!("{CANCELLED} {STILL_FINISHING}."))
             }
             phase => {
                 self.phase = phase;
-                false
+                None
             }
         }
     }
@@ -172,10 +192,24 @@ impl Sending {
     /// The Send whose line is not typed yet.
     fn in_flight(&self) -> Option<&Request> {
         match &self.phase {
-            Phase::Asked(request) | Phase::Confirm(request, _) | Phase::Writing(request, _) => {
-                Some(request)
-            }
+            Phase::Asked(request)
+            | Phase::Confirm(request, _)
+            | Phase::Writing(request, _)
+            | Phase::Written(request, _) => Some(request),
             _ => None,
+        }
+    }
+}
+
+impl Drop for Sending {
+    /// A question can wait for as long as nobody answers it, so the copy it holds is the app's to
+    /// remove when the window goes; it was never recorded by a console's `Written`.
+    fn drop(&mut self) {
+        if let Phase::Confirm(_, Some(path)) | Phase::Written(_, path) = &self.phase
+            && let Err(error) = std::fs::remove_file(path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("the annotated copy {} remains ({error})", path.display());
         }
     }
 }
@@ -192,14 +226,23 @@ pub(super) enum Button {
 
 #[cfg(test)]
 impl Sending {
+    /// Puts the Send at the question about a draft, as a click over one does.
+    pub(super) fn question(&mut self, request: Request) {
+        self.phase = Phase::Confirm(request, None);
+    }
+
     /// Whether a cancelled Send's worker is still writing its copy.
     pub(super) fn parked(&self) -> bool {
         self.parked.is_some()
     }
 
-    /// Whether the Send has yet to write its line: asked, or writing its copy.
+    /// Whether the Send has yet to write its line and is not waiting for the person: asked,
+    /// writing its copy, or answered over a copy already written.
     pub(super) fn before_the_line(&self) -> bool {
-        matches!(self.phase, Phase::Asked(_) | Phase::Writing(..))
+        matches!(
+            self.phase,
+            Phase::Asked(_) | Phase::Writing(..) | Phase::Written(..)
+        )
     }
 
     pub(super) fn asked(&self) -> bool {
@@ -323,14 +366,11 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
             }
             Phase::Idle
         }
-        // The image the question was about is gone: nobody is left to answer it, and a copy it
-        // wrote is removed as a cancelled one's is.
-        Phase::Confirm(request, copy) if window.image.document() != Some(request.document) => {
-            if let Some(job) = copy {
-                window.image.send.parked = Some((request, job));
-            }
+        Phase::Confirm(request, copy) if !answerable(window, &request) => {
+            abandon(window, &request, copy);
             Phase::Idle
         }
+        Phase::Written(request, path) => deliver(window, request, &path, ctx),
         Phase::Asked(request) if drafted(window, &request) => confirm(window, request, None),
         Phase::Asked(request) => start(window, request, ctx).unwrap_or_else(|why| {
             window.image.say(format!("{why}; nothing was sent."));
@@ -348,9 +388,7 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
                 failed(window, &request, why);
                 Phase::Idle
             }
-            Some(Ok(path)) if drafted(window, &request) => {
-                confirm(window, request, Some(done(Ok(path))))
-            }
+            Some(Ok(path)) if drafted(window, &request) => confirm(window, request, Some(path)),
             Some(Ok(path)) => deliver(window, request, &path, ctx),
         },
         phase => phase,
@@ -366,10 +404,10 @@ fn drafted(window: &crate::Window, request: &Request) -> bool {
             .any(|pane| pane.name == request.pane && pane.typed)
 }
 
-/// Holds the Send until the person answers, saying why in the drawer. Checked at the click and
-/// again once the copy is written, just before the line would be typed: what was typed while the
-/// copy was being written would be joined to it as well.
-fn confirm(window: &mut crate::Window, request: Request, copy: Option<Job<PathBuf>>) -> Phase {
+/// Holds the Send until the person answers, saying why in the drawer. Asked at the click and,
+/// when not answered yet, once the copy is written, just before the line would be typed: what was
+/// typed while the copy was being written would be joined to it as well.
+fn confirm(window: &mut crate::Window, request: Request, copy: Option<PathBuf>) -> Phase {
     let console = window
         .image
         .origin()
@@ -378,6 +416,25 @@ fn confirm(window: &mut crate::Window, request: Request, copy: Option<Job<PathBu
         "Something is typed at {console}'s prompt; it will be sent with this line."
     ));
     Phase::Confirm(request, copy)
+}
+
+/// Whether the question can still be answered: its image is the one shown and its console open.
+fn answerable(window: &crate::Window, request: &Request) -> bool {
+    window.image.document() == Some(request.document)
+        && window.all_panes().any(|pane| pane.name == request.pane)
+}
+
+/// Drops a question nobody can answer any more. A console that closed is said where its image is
+/// still shown; the copy goes as a cancelled one's does, with the folder of a closed console.
+fn abandon(window: &mut crate::Window, request: &Request, copy: Option<PathBuf>) {
+    if window.image.document() == Some(request.document) {
+        window
+            .image
+            .say(format!("{}; nothing was sent.", Refusal::Closed));
+    }
+    if let Some(path) = copy {
+        forsake(window, request, Ok(path));
+    }
 }
 
 /// The worker could not write the copy; its error says whether what it had written of it stayed.
@@ -520,7 +577,7 @@ fn deliver(
     let sent = if window.image.document() == Some(request.document) {
         let send = delivery::Send {
             text: &request.line,
-            submit: request.answer.unwrap_or(true),
+            submit: request.answer != Some(Answer::WithoutEnter),
         };
         delivery::send(window, request.pane, send).map_err(|r| r.to_string())
     } else {
