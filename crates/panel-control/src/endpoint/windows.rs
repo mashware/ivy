@@ -487,6 +487,11 @@ fn transfer(
     write: bool,
 ) -> io::Result<usize> {
     let mut operation = IoGuard::begin(tracker);
+    // The stop event is manual-reset, so once it is set every later operation is refused here
+    // instead of being issued and cancelled again.
+    if unsafe { WaitForSingleObject(stop, 0) } == WAIT_OBJECT_0 {
+        return Err(stopped());
+    }
     let ev = event()?;
     let mut ov: OVERLAPPED = unsafe { std::mem::zeroed() };
     ov.hEvent = ev.0;
@@ -520,9 +525,12 @@ fn transfer(
             GetOverlappedResult(handle, &ov, &mut transferred, 1);
         }
         return Err(if wait == WAIT_OBJECT_0 {
-            io::Error::new(io::ErrorKind::Interrupted, "pane channel stopped")
+            stopped()
         } else if wait == WAIT_TIMEOUT {
-            io::Error::new(io::ErrorKind::TimedOut, "pipe operation timed out")
+            // `WouldBlock`, the kind std gives a Unix socket whose timeout expired: the channel's
+            // read loop treats exactly that kind as "come back and look at the stop flag". Any
+            // other kind there ends the connection, so an idle client would be dropped.
+            io::Error::new(io::ErrorKind::WouldBlock, "pipe operation timed out")
         } else {
             winerr()
         });
@@ -535,6 +543,11 @@ fn transfer(
         return Err(io::Error::from_raw_os_error(code as i32));
     }
     Ok(transferred as usize)
+}
+/// Not `Interrupted`: std's `read_exact` and `write_all` retry that kind, and with the stop event
+/// left set the retry is refused again at once, so a stopped transfer would spin forever.
+fn stopped() -> io::Error {
+    io::Error::new(io::ErrorKind::ConnectionAborted, "pane channel stopped")
 }
 impl Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -722,14 +735,16 @@ mod tests {
                 client.write_all(b"x").unwrap();
             }
             let tracker = Arc::clone(&server.tracker);
-            let worker = thread::spawn(move || {
+            let worker = bounded(move || {
                 let mut bytes = [0; 2];
                 server.read_exact(&mut bytes)
             });
             wait_for_io_pending(&tracker);
             drop(stop);
-            let result = worker.join().unwrap();
-            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+            let result = worker
+                .recv_timeout(STOP_BOUND)
+                .expect("stop did not end the read");
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
             assert_eq!(tracker.pending.load(Ordering::Acquire), 0);
             assert_eq!(tracker.in_flight.load(Ordering::Acquire), 0);
         }
@@ -744,13 +759,72 @@ mod tests {
         acceptor.wait().unwrap();
         let mut server = acceptor.accept().unwrap();
         let tracker = Arc::clone(&server.tracker);
-        let worker = thread::spawn(move || server.write_all(&vec![b'x'; 16 * 1024 * 1024]));
+        let worker = bounded(move || server.write_all(&vec![b'x'; 16 * 1024 * 1024]));
         wait_for_io_pending(&tracker);
         drop(stop);
-        let result = worker.join().unwrap();
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        let result = worker
+            .recv_timeout(STOP_BOUND)
+            .expect("stop did not end the write");
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
         assert_eq!(tracker.pending.load(Ordering::Acquire), 0);
         assert_eq!(tracker.in_flight.load(Ordering::Acquire), 0);
+    }
+
+    /// An expired receive deadline reads as the kind the channel's loop retries, so a client that
+    /// is quiet for longer than the deadline keeps its connection.
+    #[test]
+    fn an_expired_read_deadline_is_would_block_and_the_connection_survives() {
+        let panel = panel_contract::PanelDir::create().unwrap();
+        let listener = bind(panel.path(), panel.id()).unwrap();
+        let (_stop, acceptor) = acceptor(listener).unwrap();
+        let mut client = connect(panel.path(), panel.id()).unwrap();
+        acceptor.wait().unwrap();
+        let mut server = acceptor.accept().unwrap();
+        server
+            .set_recv_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let mut byte = [0];
+        let quiet = server.read(&mut byte).unwrap_err();
+        assert_eq!(quiet.kind(), io::ErrorKind::WouldBlock);
+        client.write_all(b"y").unwrap();
+        assert_eq!(server.read(&mut byte).unwrap(), 1);
+        assert_eq!(byte[0], b'y');
+    }
+
+    /// Once stopped, a new transfer is refused at once instead of being issued.
+    #[test]
+    fn a_transfer_after_stop_is_refused_without_waiting() {
+        let panel = panel_contract::PanelDir::create().unwrap();
+        let listener = bind(panel.path(), panel.id()).unwrap();
+        let (stop, acceptor) = acceptor(listener).unwrap();
+        let mut client = connect(panel.path(), panel.id()).unwrap();
+        acceptor.wait().unwrap();
+        let server = acceptor.accept().unwrap();
+        client.write_all(b"z").unwrap();
+        drop(stop);
+        let tracker = Arc::clone(&server.tracker);
+        let worker = bounded(move || {
+            let mut byte = [0];
+            (&server).read(&mut byte)
+        });
+        let result = worker
+            .recv_timeout(STOP_BOUND)
+            .expect("a stopped read waited");
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert_eq!(tracker.in_flight.load(Ordering::Acquire), 0);
+    }
+
+    /// A hang fails the test within seconds instead of holding the whole job until its limit.
+    const STOP_BOUND: Duration = Duration::from_secs(10);
+
+    fn bounded<T: Send + 'static>(
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> std::sync::mpsc::Receiver<T> {
+        let (done, outcome) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = done.send(work());
+        });
+        outcome
     }
 
     #[test]

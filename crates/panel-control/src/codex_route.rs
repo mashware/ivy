@@ -456,7 +456,9 @@ impl Registry {
     }
 }
 
-#[cfg(test)]
+// Unix only: every route write goes through `atomic_write`, which refuses on Windows. Restoring
+// Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     fn registry() -> (PathBuf, Registry) {

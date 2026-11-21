@@ -251,6 +251,8 @@ mod publish_tests {
         assert!(whole_identity(None, None).is_none());
         assert!(whole_identity(Some(OsStr::new("pane")), None).is_none());
         assert!(whole_identity(Some(OsStr::new("pane")), Some(OsStr::new("relative"))).is_none());
-        assert!(whole_identity(Some(OsStr::new("pane")), Some(OsStr::new("/tmp/panel"))).is_some());
+        // An absolute path in this platform's own spelling: `/tmp/panel` is relative on Windows.
+        let panel = std::env::temp_dir().join("panel");
+        assert!(whole_identity(Some(OsStr::new("pane")), Some(panel.as_os_str())).is_some());
     }
 }

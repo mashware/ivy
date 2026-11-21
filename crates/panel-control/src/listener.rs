@@ -956,6 +956,9 @@ fn converse(
                 }
                 continue;
             }
+            // The Windows pipe refuses every transfer once its stop event is set; that is the
+            // channel closing, not a read failure worth naming.
+            Err(_) if stop.load(Ordering::Relaxed) => break,
             // **How a read failed is named, never guessed.** **D38** made the pseudoterminal report
             // its `ErrorKind` *and* the operating system's number for precisely this class, and a
             // channel that ends with the failure thrown away puts the next person back to guessing.
