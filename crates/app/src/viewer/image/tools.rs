@@ -122,8 +122,6 @@ pub(super) fn rows(marks: &Marks) -> usize {
 /// sliver, or painted up over the toolbar, was the defect (#197).
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
-    /// The whole notice, when the one painted is cut to a line.
-    cut: Option<String>,
     send: Option<Arc<egui::Galley>>,
     padding: egui::Vec2,
     spacing: f32,
@@ -160,7 +158,6 @@ impl Fixed {
         });
         let mut fixed = Self {
             notice: notice.map(|n| lay(said(n), wrapped(width), egui::FontSelection::Default)),
-            cut: None,
             send,
             padding,
             spacing: style.spacing.item_spacing.y,
@@ -171,7 +168,6 @@ impl Fixed {
         {
             let line = egui::text::TextWrapping::truncate_at_width(width.max(1.0));
             fixed.notice = Some(lay(said(notice), line, egui::FontSelection::Default));
-            fixed.cut = Some(notice.to_owned());
         }
         fixed
     }
@@ -345,10 +341,8 @@ pub(super) fn notes(
         ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
         // Outside the list that scrolls: a refusal is read without scrolling up to it.
         if let Some(notice) = &fixed.notice {
-            let said = ui.add(egui::Label::new(Arc::clone(notice)));
-            if let Some(whole) = &fixed.cut {
-                said.on_hover_text(whole);
-            }
+            // A notice cut to one line is elided, and egui's label then shows it whole on hover.
+            ui.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
             ui.add_space(NOTICE_GAP);
         }
         egui::ScrollArea::vertical()
