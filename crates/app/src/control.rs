@@ -80,9 +80,11 @@ impl Default for ReadActivity {
     }
 }
 
+#[cfg(not(windows))]
 struct ActiveRead(ReadActivity);
 
 impl ReadActivity {
+    #[cfg(not(windows))]
     fn begin(&self) -> Option<ActiveRead> {
         let mut state = self
             .0
@@ -142,6 +144,7 @@ impl ReadActivity {
     }
 }
 
+#[cfg(not(windows))]
 impl ActiveRead {
     fn succeeded(&self, bytes: usize) {
         let mut state = self
@@ -165,6 +168,7 @@ impl ActiveRead {
     }
 }
 
+#[cfg(not(windows))]
 impl Drop for ActiveRead {
     fn drop(&mut self) {
         let mut state = self
@@ -236,6 +240,8 @@ impl WindowActivity {
     }
 }
 
+// Windows reads the committed snapshot instead (`windows_services`), so only the socket uses it.
+#[cfg(not(windows))]
 fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) -> ReadDocument {
     Arc::new(move || {
         let Some(active) = reads.begin() else {

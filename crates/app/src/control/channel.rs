@@ -75,7 +75,7 @@ fn open_services(
                     "the native control window handle is unavailable",
                 )
             })
-            .and_then(|hwnd| panel_control::WindowsServices::new(hwnd))
+            .and_then(panel_control::WindowsServices::new)
             .and_then(|(services, document, plan)| {
                 let releases = services.release_registry();
                 Channel::open_windows(dir.path(), dir.id(), sender, services)

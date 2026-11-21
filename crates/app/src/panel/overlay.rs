@@ -1,4 +1,7 @@
 //! A hook may repaint only the live client invocation that owns the current hold.
+// The Windows control channel does not carry hook publication yet (client attestation exists only
+// on Linux and macOS), so there the admission half of this module is built and never called.
+#![cfg_attr(windows, allow(dead_code))]
 
 use panel_contract::{Attention, Panel};
 use panel_control::{Connection, Delivery, Reply, What, session::Peer};
