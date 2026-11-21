@@ -63,11 +63,44 @@ pub(crate) struct Sending {
     /// Where the copy would go for the image's console this frame, or why it cannot.
     pub(super) target: Option<Result<PathBuf, String>>,
     phase: Phase,
+    /// The worker of a Send cancelled while it wrote its copy. A write cannot be interrupted, so
+    /// it is kept and polled until it ends, and what it wrote is removed then; no other Send
+    /// starts meanwhile, as the decoder's abandoned slot keeps a second decode from starting, so
+    /// two workers never race for one copy name (#197).
+    parked: Option<(Request, Job<PathBuf>)>,
 }
 
 impl Sending {
     pub(super) fn busy(&self) -> bool {
         !matches!(self.phase, Phase::Idle)
+    }
+
+    /// Whether `poll` has anything to do: a Send on its way, or a cancelled one's worker.
+    pub(super) fn pending(&self) -> bool {
+        self.busy() || self.parked.is_some()
+    }
+
+    /// Whether Cancel can still take the Send back: until its line is typed. Offered for the
+    /// whole write rather than after a delay, because a slow disk is not a stuck one and no
+    /// constant tells them apart; the person does.
+    pub(super) fn cancellable(&self) -> bool {
+        self.in_flight().is_some()
+    }
+
+    /// Takes back the Send whose line is not typed yet, parking its worker if it has one.
+    /// Answers whether there was one.
+    pub(super) fn cancel(&mut self) -> bool {
+        match std::mem::take(&mut self.phase) {
+            Phase::Asked(_) => true,
+            Phase::Writing(request, job) => {
+                self.parked = Some((request, job));
+                true
+            }
+            phase => {
+                self.phase = phase;
+                false
+            }
+        }
     }
 
     /// A click on Send, taken up on the next frame. One at a time: a click while another Send is
@@ -101,6 +134,10 @@ impl Sending {
 
     pub(super) fn writing(&self) -> bool {
         matches!(self.phase, Phase::Writing(..))
+    }
+
+    pub(super) fn parked(&self) -> bool {
+        self.parked.is_some()
     }
 
     /// Makes the copy being written one that has not finished, for as long as the returned sender
@@ -198,6 +235,15 @@ pub(crate) fn aim(window: &mut crate::Window) {
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
+    if let Some((_, job)) = &window.image.send.parked {
+        match take(job) {
+            None => ctx.request_repaint_after(Duration::from_millis(50)),
+            Some(written) => {
+                let (request, _) = window.image.send.parked.take().expect("a parked worker");
+                forsake(window, &request, written);
+            }
+        }
+    }
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
         Phase::Enter(enter, at) if frame > at => {
@@ -243,6 +289,29 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
     window.image.say(format!("{why}; nothing was sent{left}."));
 }
 
+/// A cancelled Send's worker ended: the copy it wrote is removed, and with it the folder of a
+/// console that closed meanwhile. Only what could not be removed is said: the person already
+/// knows nothing was sent. A worker that failed removed its half-written copy itself.
+fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBuf, String>) {
+    let stays = written
+        .ok()
+        .and_then(|path| match std::fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
+                "The cancelled copy at {} could not be removed: {error}",
+                path.display()
+            )),
+            _ => None,
+        });
+    let left = forsaken_folder(window, request);
+    match stays {
+        Some(stays) => window.image.say(format!("{stays}{left}.")),
+        None if !left.is_empty() => window
+            .image
+            .say(format!("The cancelled copy is gone{left}.")),
+        None => {}
+    }
+}
+
 /// A console that closed while its copy was being written could not remove its directory, which
 /// held the copy; once the copy is gone, the directory goes as it would have. Answers what is left
 /// to say about it in the drawer, which is nothing when it went or was already gone. `PanelDir`
@@ -277,6 +346,10 @@ fn start(
     request: Request,
     ctx: &egui::Context,
 ) -> Result<Phase, String> {
+    // First: the parked worker may yet create the very file this Send's line names.
+    if window.image.send.parked.is_some() {
+        return Err("Still finishing the previous copy".into());
+    }
     if window.image.document() != Some(request.document) {
         return Err(REPLACED.into());
     }

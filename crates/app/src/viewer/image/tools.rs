@@ -283,6 +283,13 @@ pub(super) fn toolbar(
     }
 }
 
+/// What a click in the column asked of Send.
+pub(super) enum Asked {
+    Send(Request),
+    /// Take back the Send whose line is not typed yet.
+    Cancel,
+}
+
 /// What the notes show besides the marks.
 pub(super) struct Panel<'a> {
     /// The notice and the button, as laid out before the split.
@@ -299,13 +306,14 @@ pub(super) struct Panel<'a> {
 /// The column: a notice when there is one, a note per marker after its disc with a button that
 /// deletes it, the general note, and at its foot the button that sends, which names the console.
 /// Then, under image and column, the line it types. Every field is a single line: what is written
-/// here goes into one line sent to a console. Answers what a click on Send asked for.
+/// here goes into one line sent to a console. Answers what a click on Send, or on the Cancel
+/// beside it while a Send is on its way, asked for.
 pub(super) fn notes(
     ui: &mut egui::Ui,
     layout: &Layout,
     marks: &mut Marks,
     panel: Panel,
-) -> Option<Request> {
+) -> Option<Asked> {
     let Panel {
         fixed,
         roles,
@@ -321,19 +329,34 @@ pub(super) fn notes(
     );
     // On a drawer too short for the button, its top is cut rather than laid over the toolbar.
     column.set_clip_rect(layout.column.intersect(column.clip_rect()));
-    // A Send on its way takes the notes as they were at its click.
-    if sending.busy() {
-        column.disable();
-    }
     // The button is laid out first so it keeps the column's foot however many notes there are;
     // what it asks for is composed after the notes, from what they hold at the end of this pass.
     // The fields carry ids of their own: a button or a notice that comes and goes ahead of them
     // would otherwise renumber egui's automatic ids and take the keyboard from a note mid-word.
     let ready = matches!(sending.target, Some(Ok(_))) && !sending.busy();
-    let clicked = fixed.send.as_ref().is_some_and(|label| {
+    let (clicked, cancelled) = fixed.send.as_ref().map_or((false, false), |label| {
         let height = fixed.button_height(label);
-        send_button(&mut column, ready, Arc::clone(label), height, &roles)
+        let label = Arc::clone(label);
+        if !sending.cancellable() {
+            return (
+                send_button(&mut column, ready, label, height, &roles),
+                false,
+            );
+        }
+        let size = egui::vec2(column.available_width(), height);
+        let row = egui::Layout::right_to_left(egui::Align::Center);
+        let cancel = egui::Button::new("Cancel").min_size(egui::vec2(0.0, height));
+        let inner = column.allocate_ui_with_layout(size, row, |ui| {
+            let cancelled = ui.push_id("image-send-cancel", |ui| ui.add(cancel)).inner;
+            send_button(ui, false, label, height, &roles);
+            cancelled.clicked()
+        });
+        (false, inner.inner)
     });
+    // A Send on its way takes the notes as they were at its click; only its Cancel answers.
+    if sending.busy() {
+        column.disable();
+    }
     let rest = column.available_size();
     column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
         // Where not even the notice's one line fits above the button, it is cut at the button's
@@ -351,7 +374,7 @@ pub(super) fn notes(
             .show(ui, |ui| list(ui, marks, document, &roles));
     });
     if marks.is_empty() {
-        return None;
+        return cancelled.then_some(Asked::Cancel);
     }
     let line = match &sending.target {
         Some(Ok(path)) => Ok((compose(path, marks), path)),
@@ -361,13 +384,16 @@ pub(super) fn notes(
     if let Some(rect) = layout.footer {
         footer(ui, rect, &line, refused, &roles);
     }
+    if cancelled {
+        return Some(Asked::Cancel);
+    }
     let (line, path) = line.ok().filter(|_| clicked)?;
-    Some(Request {
+    Some(Asked::Send(Request {
         document,
         pane: origin.pane,
         path: path.clone(),
         line,
-    })
+    }))
 }
 
 /// The primary action: filled with the accent, the column's width, its `label` laid out wrapped

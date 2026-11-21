@@ -127,8 +127,14 @@ impl Viewer {
     }
 
     /// Whether a Send is between its click and its Enter.
+    #[cfg(test)]
     pub(super) fn sending(&self) -> bool {
         self.send.busy()
+    }
+
+    /// Whether Send has work for the input pass: a Send on its way, or a cancelled one's worker.
+    pub(super) fn send_pending(&self) -> bool {
+        self.send.pending()
     }
 
     /// What the copy is drawn from: the original at full resolution and the marks as they are.
@@ -305,9 +311,17 @@ impl Viewer {
             origin,
             sending,
         };
-        if let Some(request) = tools::notes(ui, &layout, marks, panel) {
-            sending.ask(request);
-            self.notice = None;
+        match tools::notes(ui, &layout, marks, panel) {
+            Some(tools::Asked::Send(request)) => {
+                sending.ask(request);
+                self.notice = None;
+            }
+            Some(tools::Asked::Cancel) => {
+                if sending.cancel() {
+                    self.notice = Some("Send cancelled; nothing was sent.".into());
+                }
+            }
+            None => {}
         }
         // Undo, Clear or a note's first or last letter changed whether there is something to
         // send after the split was made: the next frame lays the button and its line out again.
@@ -3477,6 +3491,61 @@ mod tests {
         let label = &window.image.origin().unwrap().label;
         assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
         assert!(line.ends_with("· 1: button clipped · Note: x"), "{line}");
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes()
+        );
+        let _ = std::fs::remove_file(&copy);
+    }
+
+    /// While the copy is written, a Cancel beside «Sending…» takes the Send back: the marks and
+    /// notes stay and can be edited again, and nothing is typed. A Send while the cancelled
+    /// worker is still writing is refused with why; once that worker ends its copy is removed,
+    /// and the next Send goes through.
+    #[cfg(unix)]
+    #[test]
+    fn cancel_takes_a_send_back_while_its_copy_is_written() {
+        let received = term_core::received::Received::new("annotated-cancel");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        assert!(!window.image.sending(), "the Send was not taken back");
+        assert!(window.image.send.parked(), "the worker was not kept");
+        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        let general = place_of(&mut window, &ctx, "A note on the whole image");
+        press(&mut window, &ctx, general);
+        painted(&mut window, &ctx, vec![egui::Event::Text("x".into())]);
+        assert_eq!(marks_of(&window).general, "x", "the notes stayed frozen");
+
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let notice = window.image.notice.clone().unwrap_or_default();
+        assert!(
+            notice.contains("Still finishing the previous copy"),
+            "{notice}"
+        );
+        assert!(!window.image.sending());
+
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        assert!(!copy.exists(), "the cancelled copy stayed");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(received.so_far().is_empty(), "a cancelled Send typed");
+
+        let line = click_send(&mut window, &ctx);
+        until_written(&mut window, &ctx);
         assert_eq!(
             received.wait_for(line.len(), Duration::from_secs(5)),
             line.as_bytes()
