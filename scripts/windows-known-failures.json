@@ -709,6 +709,18 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "viewer::interaction_tests::control_click_on_an_image_path_opens_it_pinned_to_its_console",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::load::tests::an_image_that_is_not_a_regular_png_or_jpeg_within_the_size_cap_says_why",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "viewer::load::tests::code_files_say_why_they_are_not_text",
     "reason": "drive letters and backslashes break path handling",
     "issue": "https://github.com/mashware/ivy/issues/186"
