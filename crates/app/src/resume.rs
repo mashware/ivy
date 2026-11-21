@@ -253,9 +253,7 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
             .into_iter()
             .collect();
         #[cfg(windows)]
-        let server_pid = crate::panel::pane::server_pid_env(pane.panel.as_ref()).1;
-        #[cfg(windows)]
-        identity.push(("PANEL_SERVER_PID", server_pid.as_deref()));
+        identity.push(crate::panel::pane::server_pid_env(pane.panel.as_ref()));
         let helper = helper_path();
         identity.push((
             "IVY_SESSION_HELPER",

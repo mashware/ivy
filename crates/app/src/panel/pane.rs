@@ -98,14 +98,15 @@ pub(crate) fn identity_of(
 
 /// The server process witness is a separate Windows launch variable, not part of the stable
 /// two-entry panel identity contract. Sending `None` explicitly clears an inherited parent value.
+/// The value is borrowed for `'static` because a process's own PID never changes, so every launch
+/// site can push the entry straight into its borrowed environment list.
 #[cfg(windows)]
 pub(crate) fn server_pid_env(
     panel: Option<&PanelDir>,
-) -> (&'static str, Option<std::ffi::OsString>) {
-    (
-        "PANEL_SERVER_PID",
-        panel.map(|_| std::process::id().to_string().into()),
-    )
+) -> (&'static str, Option<&'static std::ffi::OsStr>) {
+    static PID: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+    let pid = || PID.get_or_init(|| std::process::id().to_string().into());
+    ("PANEL_SERVER_PID", panel.map(|_| pid().as_os_str()))
 }
 
 #[cfg(test)]
@@ -120,7 +121,7 @@ mod windows_control_tests {
         let expected = std::process::id().to_string();
         assert_eq!(name, "PANEL_SERVER_PID");
         assert_eq!(
-            pid.as_deref().and_then(std::ffi::OsStr::to_str),
+            pid.and_then(std::ffi::OsStr::to_str),
             Some(expected.as_str())
         );
         let (name, pid) = server_pid_env(None);

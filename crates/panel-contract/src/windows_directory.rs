@@ -284,6 +284,7 @@ fn no_follow_path(path: &OsStr) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::process::CommandExt;
 
     #[test]
     fn fresh_panel_directory_has_the_required_owner_and_protected_acl() {
@@ -307,8 +308,11 @@ mod tests {
         std::fs::create_dir(&target).unwrap();
         let alias = panel.path().with_extension("alias");
         let junction = format!("mklink /J \"{}\" \"{}\"", alias.display(), target.display());
+        // `raw_arg`, not `arg`: std escapes the inner quotes as `\"`, which cmd.exe does not
+        // understand, and mklink then refuses the path as malformed syntax.
         let status = std::process::Command::new("cmd.exe")
-            .args(["/d", "/c", &junction])
+            .args(["/d", "/c"])
+            .raw_arg(&junction)
             .status()
             .unwrap();
         assert!(

@@ -614,9 +614,7 @@ fn launch(
         .map_or(args, |prepared| prepared.args());
     let mut identity: Vec<_> = identity_of(panel.as_ref()).into_iter().collect();
     #[cfg(windows)]
-    let server_pid = crate::panel::pane::server_pid_env(panel.as_ref()).1;
-    #[cfg(windows)]
-    identity.push(("PANEL_SERVER_PID", server_pid.as_deref()));
+    identity.push(crate::panel::pane::server_pid_env(panel.as_ref()));
     let helper = crate::resume::helper_path();
     identity.push((
         "IVY_SESSION_HELPER",
