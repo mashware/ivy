@@ -155,8 +155,9 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 # font Windows asks for emoji — and not as a bitmap (D25, #176). It is the rasteriser epaint already
 # draws its letters with, at the version epaint pins; `text` is what adds the glyph painter (`glifo`),
 # which epaint builds without: checked with `cargo tree -e features -i glifo`, which printed nothing
-# before this line. `tiny-skia` above cannot do it: it has no sweep gradient, which `COLR` version 1
-# needs.
+# before this line. Cargo builds one `vello_cpu` for both, so epaint's gets the feature too — idle
+# for its letters, and the reason D25 takes its control batch again on this build. `tiny-skia` above
+# cannot do it: it has no sweep gradient, which `COLR` version 1 needs.
 vello_cpu = { version = "0.1.0", default-features = false, features = ["std", "u8_pipeline", "text"] }
 
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants

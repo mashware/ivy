@@ -2030,7 +2030,12 @@ mod tests {
         discovery.record(ms(4), 9, 2);
 
         let mut rasterizing = Rasterizing::default();
-        rasterizing.record(ms(1), 15, 1);
+        rasterizing.record(&crate::fonts::ColorCost {
+            spent: ms(1),
+            rasterized: 15,
+            failed: 1,
+            outlines: 4,
+        });
 
         // A console that was typed into: batch E's guard reads its keystroke line, which only a
         // console's own table writes.

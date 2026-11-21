@@ -3220,29 +3220,39 @@ and the modifier comes out on its own.
 
 **`Segoe UI Emoji`, the font Windows asks for emoji, is `COLR`**: layers of outlines with a palette,
 no bitmap. Discovery already reached it — fontique names it as the emoji family on Windows — and the
-bitmap-only rasterizer answered nothing, so on Windows every emoji came out monochrome or blank, and
-the colour tests that guard this path skipped themselves there.
+bitmap-only rasterizer answered nothing, so on Windows every emoji came out monochrome or blank. Two
+of the colour tests failed there and were listed as known failures (#188); the others skipped
+themselves for want of a colour font, and now run.
 
 **Decision.** A face that has no colour bitmap for the glyph but has a `COLR` record for it is drawn
 with `vello_cpu` and its `text` feature, whose glyph painter (`glifo`) understands `COLR` versions 0
 and 1 — gradients, composites, clip boxes. The image goes into the same atlas, under the same key,
-timed by the same span. **The bitmap path keeps answering first**: no emoji face on the supported
-machines carries both tables, so Linux and macOS draw exactly what they drew, and the blast radius is
-the one new branch.
+timed by the same span, and the report says how many of its glyphs came from outlines, so a batch
+cannot publish one path's cost under the other's name. **The bitmap is asked first**: a face that
+has one for the glyph never reaches the outlines, and the emoji fonts Linux and macOS ship —
+`Noto Color Emoji`, `Apple Color Emoji` — are bitmap ones. A machine whose emoji font is drawn in
+outlines does change: its emoji go from monochrome to colour.
+
+**What turning `text` on reaches beyond that branch**: Cargo builds one `vello_cpu` for both crates,
+so epaint's letters are drawn by a `vello_cpu` that carries the glyph painter's cache and its hooks
+too, idle for them. That is why the control `C` is taken again with this build, not borrowed from an
+earlier one.
 
 **It is not the rasterizer this decision refused.** What was refused was code of our own drawing
 outlines, which would have taken over the letters and so every published frame. This draws only
 colour glyphs, on an atlas miss, with a library — the same `vello_cpu` epaint already rasterizes its
-letters with. Not the same *path*: epaint builds `vello_cpu` without `text`, so turning it on adds
+letters with, unhinted, which a colour glyph never is. Not the same *path*: epaint builds `vello_cpu` without `text`, so turning it on adds
 `glifo` to the build. Saying «epaint already does this» would be false.
 
 **The rules it draws by.** A glyph with no `COLR` record is not drawn here even though the library
 would draw its outline — that would be a white silhouette winning over the next face, the defect
-**D24** fixed. The glyph is placed on its em box (advance × ascender to descender), never on its ink,
-so every emoji of a face shares one scale and one baseline, and it is drawn directly at the size it
-will occupy instead of drawn large and shrunk. A layer drawn «in the text colour» is drawn white:
-the atlas is not keyed by colour, and the Windows suite checks that `Segoe UI Emoji` draws none of
-its emoji that way.
+**D24** fixed. A graph the library cannot walk is not drawn either: it drops the error and hands back
+a blank, which remembered as a success would stand where the emoji is for the whole session. The
+glyph is placed on its advance and the face's line (ascent to descent), never on its ink, so every
+emoji of a face shares one scale and one baseline, and it is drawn directly at the size it will
+occupy instead of drawn large and shrunk. A layer drawn «in the text colour» is drawn white: the
+atlas is not keyed by colour, and the Windows suite checks four of `Segoe UI Emoji`'s emoji — a
+face, a hand, a cloud and a keycap — for a layer drawn that way.
 
 **Discarded.** Walking the paint graph with `skrifa` onto `tiny-skia`: our own painter, and
 `tiny-skia` has no sweep gradient, which `COLR` version 1 needs. DirectWrite's

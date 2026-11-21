@@ -1201,12 +1201,6 @@ seed() {
     done
 }
 
-case "$BATCH" in
-    A) : ;;                       # no panel: nobody publishes anything
-    B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
-esac
-
 # **Batch colr: the machine's emoji family, pointed at a font drawn in coloured outlines.** The emoji
 # font this machine ships is a bitmap one, so batch Q never reaches the `COLR` path — the one Windows
 # takes with `Segoe UI Emoji` — and publishing Q as its cost would be a number with the wrong label.
@@ -1215,9 +1209,10 @@ esac
 # outside the run's directory so it is fetched once, and checked every run. The figures are that
 # font's — heavy in gradients — not Segoe's.
 #
-# **The path is proved before the window opens**, by asking fontconfig itself what `emoji` is under
-# the override: the report counts glyphs, not faces, so a machine whose fontconfig ignored the
-# override would rasterise its bitmap font and pass the colour guard under this batch's name.
+# **The path is proved twice**: before the window opens, by asking fontconfig which colour faces it
+# can see under the override; and after, by the report, which says how many glyphs came from colour
+# outlines — the guard below invalidates the run unless every one did. It runs before the panels are
+# seeded, so a first download does not eat the seeder's wait.
 if [ "${COLR:-}" = 1 ]; then
     COLR_URL="https://raw.githubusercontent.com/googlefonts/noto-emoji/v2.047/fonts/Noto-COLRv1.ttf"
     COLR_SHA256="23549f29b5ad741fcb4c025b8dc44652ff0f459892467ebcccec1e6bbe839b44"
@@ -1225,7 +1220,12 @@ if [ "${COLR:-}" = 1 ]; then
     COLR_FONT="$COLR_DIR/Noto-COLRv1.ttf"
     mkdir -p "$COLR_DIR"
     if [ ! -f "$COLR_FONT" ]; then
-        curl -fsSL -o "$COLR_FONT.part" "$COLR_URL" && mv "$COLR_FONT.part" "$COLR_FONT"
+        if ! curl -fsSL -o "$COLR_FONT.part" "$COLR_URL"; then
+            rm -f "$COLR_FONT.part"
+            echo "batch colr: could not download $COLR_URL" >&2
+            exit 1
+        fi
+        mv "$COLR_FONT.part" "$COLR_FONT"
     fi
     if ! echo "$COLR_SHA256  $COLR_FONT" | sha256sum -c --status; then
         rm -f "$COLR_FONT"
@@ -1248,12 +1248,23 @@ if [ "${COLR:-}" = 1 ]; then
 </fontconfig>
 FONTS
     export FONTCONFIG_FILE="$CONFIG/fonts.conf"
-    ANSWERED=$(fc-match -f "%{file}" emoji)
-    if [ "$ANSWERED" != "$COLR_FONT" ]; then
-        echo "batch colr: fontconfig answers «emoji» with $ANSWERED, not with $COLR_FONT; the run would measure another font" >&2
+    # Asked in the application's own environment — the system file includes the user's, which is
+    # read through `XDG_CONFIG_HOME` — and about every colour face, not only the best match: the
+    # application walks every face of every emoji family, so one other colour font left visible
+    # would answer some glyphs from a bitmap under this batch's name.
+    COLOUR_FACES=$(XDG_CONFIG_HOME="$CONFIG" fc-list -f "%{file}\n" :color=true)
+    if [ "$COLOUR_FACES" != "$COLR_FONT" ]; then
+        echo "batch colr: fontconfig sees these colour faces, and only $COLR_FONT may be one:" >&2
+        echo "$COLOUR_FACES" >&2
         exit 1
     fi
 fi
+
+case "$BATCH" in
+    A) : ;;                       # no panel: nobody publishes anything
+    B) seed quiet & ;;
+    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
 
@@ -1446,6 +1457,23 @@ if [ "$COLOR_GLYPHS" != 1 ] && [ "$RASTERIZED" != 0 ]; then
     invalidate "this batch paints no emoji and yet it rasterised $RASTERIZED colour glyphs: \
 something other than the load is triggering it, so its spans mix in work that does not belong to what \
 it claims to measure"
+fi
+
+# **And which of the two paths drew them, read both ways too** (#176). Batch colr exists to measure the
+# colour outlines and Q the bitmaps; each costs differently, and a machine decides which one it walks
+# by the font it has, not by the batch's name. So colr is invalidated unless every glyph came from
+# outlines, and every other batch if any did: Q on a machine whose emoji font is drawn in outlines
+# would otherwise publish that path's cost as the bitmap's.
+OUTLINES=$(grep -oE "[0-9]+ of them from colour outlines" "$REPORT" | grep -oE "^[0-9]+" | head -1)
+OUTLINES=${OUTLINES:-0}
+if [ "${COLR:-}" = 1 ] && [ "$OUTLINES" != "$RASTERIZED" ]; then
+    invalidate "batch colr measures colour outlines and only $OUTLINES of its $RASTERIZED glyphs came \
+from them: the rest were bitmaps, so its colour section would mix the two paths under one name"
+fi
+if [ "${COLR:-}" != 1 ] && [ "$OUTLINES" != 0 ]; then
+    invalidate "this batch is not colr and $OUTLINES of its colour glyphs were drawn from outlines: \
+the machine's emoji font is the other kind, and the colour section would publish that path's cost \
+under this batch's name"
 fi
 
 # **The panel's buttons, read in both directions like the emoji above and for the same reason.**
