@@ -22,6 +22,8 @@ pub struct Peer {
     lifetime: Arc<OwnedFd>,
     #[cfg(target_os = "macos")]
     lifetime: Arc<OwnedFd>,
+    #[cfg(windows)]
+    lifetime: std::sync::Arc<crate::endpoint::WindowsPeer>,
 }
 
 impl Peer {
@@ -39,6 +41,10 @@ impl Peer {
     }
 
     pub fn is_alive(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.lifetime.is_alive()
+        }
         #[cfg(target_os = "linux")]
         {
             let mut descriptor = libc::pollfd {
@@ -50,7 +56,7 @@ impl Peer {
             let ready = unsafe { libc::poll(&mut descriptor, 1, 0) };
             ready == 0 && descriptor.revents == 0
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             #[cfg(target_os = "macos")]
             {
@@ -69,6 +75,23 @@ impl Peer {
     }
 
     pub(crate) fn capture(stream: &Stream) -> io::Result<Self> {
+        #[cfg(windows)]
+        {
+            let lifetime = stream.verified_peer().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "verified control peer unavailable",
+                )
+            })?;
+            if !lifetime.is_alive() {
+                return Err(io::Error::other("control peer has already exited"));
+            }
+            Ok(Self {
+                pid: lifetime.pid(),
+                birth: lifetime.birth(),
+                lifetime,
+            })
+        }
         #[cfg(target_os = "linux")]
         {
             let Stream::UdSocket(stream) = stream;
@@ -98,7 +121,7 @@ impl Peer {
             }
             Ok(peer)
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             #[cfg(target_os = "macos")]
             {
