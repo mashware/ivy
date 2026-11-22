@@ -32,11 +32,12 @@ impl Tree {
             std::fs::write(&path, "x".repeat(400)).unwrap();
         }
         std::fs::create_dir_all(&base).unwrap();
-        Self(std::fs::canonicalize(base).unwrap())
+        Self(opener::canonical(&base).unwrap())
     }
 
     fn at(&self, path: &str) -> PathBuf {
-        self.0.join(path)
+        self.0
+            .join(Path::new(path).components().collect::<PathBuf>())
     }
 }
 
@@ -263,7 +264,10 @@ fn the_copy_items_copy_the_literal_paths() {
     let absolute = drawer.menu_item(&mut state, "Copy absolute path");
     assert_eq!(absolute.copied, [file.to_str().unwrap()]);
     let relative = drawer.menu_item(&mut state, "Copy relative path");
-    assert_eq!(relative.copied, ["src/a.ts"]);
+    assert_eq!(
+        relative.copied,
+        [Path::new("src").join("a.ts").to_str().unwrap()]
+    );
 }
 
 /// Outside the folder it was opened from, Copy relative path is off and says why; Copy absolute
@@ -421,7 +425,10 @@ fn copy_relative_path_says_why_it_is_off() {
     let mut state = opened(&file, Some(&tree.at("r")));
     Drawer::new().settled(&mut state);
     let copied = Drawer::new().menu_item(&mut state, "Copy relative path");
-    assert_eq!(copied.copied, ["src/a.ts"]);
+    assert_eq!(
+        copied.copied,
+        [Path::new("src").join("a.ts").to_str().unwrap()]
+    );
 }
 
 /// Open hands a document to its application and shows anything else in the file manager, and its

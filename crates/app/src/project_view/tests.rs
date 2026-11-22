@@ -52,7 +52,10 @@ fn colliding_names_are_disambiguated_by_shared_identity_paths() {
     let second = identity("/two/same");
     let all = vec![(0, first.clone()), (1, second.clone())];
     assert_ne!(badge_name(&first, &all), badge_name(&second, &all));
-    assert_eq!(badge_name(&first, &all), "One/Same");
+    assert_eq!(
+        badge_name(&first, &all),
+        PathBuf::from("One").join("Same").to_str().unwrap()
+    );
     assert_eq!(badge_name(&first, &[(0, first.clone())]), "Same");
     assert_eq!(display_name("project-a"), "ProjectA");
     assert_eq!(display_name("my_project name"), "MyProjectName");
@@ -89,7 +92,8 @@ fn remote_directory_veto_clears_existing_badge_and_accounts_work() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         refresh(&mut window, &ctx);
-        if window.pane_called(pane).unwrap().project.is_some() {
+        // Both fixture directories must finish resolving before Windows can remove their tree.
+        if window.all_panes().all(|pane| pane.project.is_some()) {
             break;
         }
         assert!(

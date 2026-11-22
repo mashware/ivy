@@ -184,6 +184,12 @@ fn open_regular(path: &Path) -> Result<std::fs::File, String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Directories need this flag before handle metadata can provide the folder diagnostic.
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS);
+    }
     let file = options
         .open(path)
         .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;

@@ -1876,9 +1876,11 @@ mod file_tests {
 
     #[test]
     fn the_path_comes_out_of_the_configuration_directory() {
+        let home = std::env::temp_dir().join("home");
+        let config = home.join("config");
         assert_eq!(
-            path_from(Some(OsStr::new("/home/config")), Some(OsStr::new("/home"))),
-            Some(PathBuf::from("/home/config/ivy/layout.json"))
+            path_from(Some(config.as_os_str()), Some(home.as_os_str())),
+            Some(config.join("ivy").join("layout.json"))
         );
     }
 
@@ -1921,9 +1923,10 @@ mod file_tests {
 
     #[test]
     fn with_no_configuration_directory_it_falls_back_to_home() {
+        let home = std::env::temp_dir().join("home");
         assert_eq!(
-            path_from(None, Some(OsStr::new("/home"))),
-            Some(PathBuf::from("/home/.config/ivy/layout.json"))
+            path_from(None, Some(home.as_os_str())),
+            Some(home.join(".config").join("ivy").join("layout.json"))
         );
     }
 
@@ -1931,10 +1934,11 @@ mod file_tests {
     fn an_empty_or_relative_variable_is_not_a_path_and_does_not_rule_out_the_other() {
         // Home is different from the two variables above on purpose: if the empty or the relative one
         // slipped through, the path would not be this one.
+        let home = std::env::temp_dir().join("home");
         for variable in ["", "config", "./config", "~/config"] {
             assert_eq!(
-                path_from(Some(OsStr::new(variable)), Some(OsStr::new("/home"))),
-                Some(PathBuf::from("/home/.config/ivy/layout.json")),
+                path_from(Some(OsStr::new(variable)), Some(home.as_os_str())),
+                Some(home.join(".config").join("ivy").join("layout.json")),
                 "with {variable:?} it did not fall back to home"
             );
         }

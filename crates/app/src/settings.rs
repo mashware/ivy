@@ -2820,17 +2820,19 @@ mod tests {
     fn the_file_is_looked_for_where_the_document_says() {
         // **`path_from` was pulled out explicitly «to be able to test it without touching the environment», and it was not
         // tested**: pointing it at the layout file left the suite green. A review caught it.
-        let path = path_from(Some(std::ffi::OsStr::new("/home/config")), None)
+        let home = std::env::temp_dir().join("home");
+        let config = home.join("config");
+        let path = path_from(Some(config.as_os_str()), None)
             .expect("an absolute path has to give a location");
         assert_eq!(
             path,
-            PathBuf::from("/home/config/ivy/config"),
+            config.join("ivy").join("config"),
             "the file is not looked for where the document says"
         );
 
         assert_eq!(
-            path_from(None, Some(std::ffi::OsStr::new("/home"))),
-            Some(PathBuf::from("/home/.config/ivy/config")),
+            path_from(None, Some(home.as_os_str())),
+            Some(home.join(".config").join("ivy").join("config")),
             "without the dedicated variable it does not fall back to the home's «.config»"
         );
         assert_eq!(

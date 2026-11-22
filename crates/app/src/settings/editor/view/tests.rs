@@ -543,7 +543,7 @@ mod theme_preview;
 fn the_startup_page_names_the_log_file_and_shows_it_in_its_folder() {
     let folder = std::env::temp_dir().join(format!("settings-log-{}", std::process::id()));
     std::fs::create_dir_all(&folder).unwrap();
-    let log = std::fs::canonicalize(&folder).unwrap().join("ivy.log");
+    let log = crate::opener::canonical(&folder).unwrap().join("ivy.log");
     std::fs::write(&log, "a line\n").unwrap();
     let mut editor = Editor {
         draft: Some(Document::new(String::new())),

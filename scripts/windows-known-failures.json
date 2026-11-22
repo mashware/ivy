@@ -1,12 +1,6 @@
 [
   {
     "binary": "app/app:lib",
-    "name": "board::branches::tests::distinct_worktrees_and_switches_refresh",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "explorer::interaction_tests::a_press_on_the_list_over_the_files_divider_picks_the_row_and_resizes_nothing",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
@@ -113,36 +107,6 @@
     "name": "ligature_tests::tests::same_window_replaces_ligature_drawing_after_size_scale_face_and_reset",
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
     "issue": "https://github.com/mashware/ivy/issues/188"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "links::local::tests::accepts_local_paths_and_refuses_web_or_remote_targets",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "links::local::tests::local_files_and_directories_keep_literal_paths_without_executing_them",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "opener::tests::a_click_hands_the_desktop_what_it_decided",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "opener::tests::only_a_regular_file_is_launched",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "opener::tests::open_launches_an_allowed_document_and_reveals_anything_else",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
   },
   {
     "binary": "app/app:lib",
@@ -320,64 +284,9 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "project_view::tests::colliding_names_are_disambiguated_by_shared_identity_paths",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "project_view::tests::remote_directory_veto_clears_existing_badge_and_accounts_work",
-    "reason": "a file still open elsewhere cannot be removed in time (os error 32)",
-    "issue": "https://github.com/mashware/ivy/issues/186",
-    "intermittent": true
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "restoration::tests::oversized_serialized_snapshot_never_replaces_the_previous_file",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "restoration::tests::verified_client_directory_wins_over_wrapper_cwd_but_not_remote_veto",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "resume::tests::saved_identity_is_typed_and_lower_modes_remove_it",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "session::file_tests::an_empty_or_relative_variable_is_not_a_path_and_does_not_rule_out_the_other",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "session::file_tests::the_path_comes_out_of_the_configuration_directory",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "session::file_tests::with_no_configuration_directory_it_falls_back_to_home",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "settings::editor::runtime::tests::ligatures_save_cancel_and_reset_preserve_programs_grid_and_lazy_fonts",
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
     "issue": "https://github.com/mashware/ivy/issues/188"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "settings::tests::the_file_is_looked_for_where_the_document_says",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
   },
   {
     "binary": "app/app:lib",
@@ -452,64 +361,9 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "viewer::code_header::tests::a_binary_file_keeps_its_header",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::code_header::tests::copy_relative_path_says_why_it_is_off",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::code_header::tests::open_launches_a_document_reveals_a_script_and_says_which",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::code_header::tests::outside_the_files_folder_there_is_no_relative_path_and_it_says_why",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::code_header::tests::the_copy_items_copy_the_literal_paths",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "viewer::interaction_tests::git_viewer_opens_and_switches_modes_through_its_controls",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::interaction_tests::control_click_on_an_image_path_opens_it_pinned_to_its_console",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186",
-    "intermittent": true
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::load::tests::an_image_that_is_not_a_regular_png_or_jpeg_within_the_size_cap_says_why",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::load::tests::code_files_say_why_they_are_not_text",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "viewer::tests::the_file_tab_keeps_a_code_file_across_tabs",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
   },
   {
     "binary": "app/batches:test",
@@ -547,11 +401,5 @@
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
     "issue": "https://github.com/mashware/ivy/issues/188",
     "intermittent": true
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "settings::editor::view::tests::the_startup_page_names_the_log_file_and_shows_it_in_its_folder",
-    "reason": "the log folder is revealed with a verbatim \\\\?\\ prefix the test does not expect",
-    "issue": "https://github.com/mashware/ivy/issues/186"
   }
 ]
