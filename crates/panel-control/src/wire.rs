@@ -614,8 +614,8 @@ fn image_open(envelope: &Envelope<'_>) -> Incoming {
     if !path.is_absolute() {
         return Incoming::Malformed("an image_open's \"path\" is not absolute".to_owned());
     }
-    if !crate::image::is_local(&path) {
-        return Incoming::Malformed("an image_open's \"path\" is not on this machine".to_owned());
+    if let Some(elsewhere) = crate::image::elsewhere(&path) {
+        return Incoming::Malformed(format!("an image_open's \"path\" {}", elsewhere.says()));
     }
     Incoming::Request(Request::ImageOpen { path })
 }
@@ -986,16 +986,20 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn an_image_open_on_another_machine_is_malformed() {
-        for remote in [
-            r"\\host\share\a.png",
-            r"\\?\UNC\host\share\a.png",
-            r"\\?\unc\host\share\a.png",
-            r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
-            r"\\.\PhysicalDrive0",
+        for (remote, why) in [
+            (r"\\host\share\a.png", "is not on this machine"),
+            (r"\\?\UNC\host\share\a.png", "is not on this machine"),
+            (r"\\?\unc\host\share\a.png", "is not on this machine"),
+            (
+                r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
+                "is not a drive path; give it as C:\\…",
+            ),
+            (r"\\.\C:\a.png", "is not a drive path; give it as C:\\…"),
+            (r"\\.\PhysicalDrive0", "is not a drive path; give it as C:\\…"),
         ] {
             assert_eq!(
                 one(&image_open_line(std::path::Path::new(remote), "")),
-                Incoming::Malformed("an image_open's \"path\" is not on this machine".to_owned()),
+                Incoming::Malformed(format!("an image_open's \"path\" {why}")),
                 "{remote}"
             );
         }

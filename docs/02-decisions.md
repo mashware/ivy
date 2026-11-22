@@ -12093,7 +12093,12 @@ refused on the wire — a share, a device, and any other name in the NT object n
 (`\\host\share\a.png`, `\\?\UNC\…`, `\\?\GLOBALROOT\Device\Mup\…`, `\\.\…`) — because the image
 worker would otherwise authenticate to a remote host over SMB on an agent's word. It is an
 allowlist because a refusal list let `\\?\GLOBALROOT\…` and a lowercase `\\?\unc\…` through. A
-mapped drive letter passes: it is the user's own mapping, not a host the agent chose. The MCP
+share (`\\host\…`, `\\?\UNC\…`, `\\.\UNC\…`) is answered «is not on this machine»; any other
+refused prefix is answered «is not a drive path; give it as C:\…», because its text cannot say
+whether it stays here — `\\.\C:\…` and `\\?\GLOBALROOT\Device\HarddiskVolume3\…` do,
+`\\?\GLOBALROOT\Device\Mup\…` does not — and the agent can act on the form where it could not act
+on a false «elsewhere». A mapped drive letter passes: it is the user's own mapping, not a host the
+agent chose. The MCP
 bridge also `stat`s the file in its own process, which is not always the agent's, so a missing file, a folder, something that is not a regular file or a file
 over 32 MiB is refused at once. It then reads the file's first bytes and refuses anything that
 begins as neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to

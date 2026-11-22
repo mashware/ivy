@@ -713,8 +713,8 @@ fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
             "image_open needs an absolute path, and {path} is relative"
         ));
     }
-    if !panel_control::image::is_local(&file) {
-        return Err(format!("{path} is not on this machine"));
+    if let Some(elsewhere) = panel_control::image::elsewhere(&file) {
+        return Err(format!("{path} {}", elsewhere.says()));
     }
     let found = std::fs::metadata(&file).map_err(|why| format!("cannot open {path}: {why}"))?;
     if found.is_dir() {
@@ -1839,19 +1839,20 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn an_image_on_another_machine_is_refused_by_the_bridge_before_it_is_asked_for() {
-        for remote in [
-            r"\\host\share\a.png",
-            r"\\?\UNC\host\share\a.png",
-            r"\\?\unc\host\share\a.png",
-            r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
-            r"\\.\PhysicalDrive0",
+        for (remote, why) in [
+            (r"\\host\share\a.png", "is not on this machine"),
+            (r"\\?\UNC\host\share\a.png", "is not on this machine"),
+            (r"\\?\unc\host\share\a.png", "is not on this machine"),
+            (
+                r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
+                "is not a drive path; give it as C:\\…",
+            ),
+            (r"\\.\C:\a.png", "is not a drive path; give it as C:\\…"),
+            (r"\\.\PhysicalDrive0", "is not a drive path; give it as C:\\…"),
         ] {
             let result = open_an_image(serde_json::json!(remote));
             assert_eq!(result["isError"], true, "{remote}");
-            assert_eq!(
-                result["content"][0]["text"],
-                format!("{remote} is not on this machine")
-            );
+            assert_eq!(result["content"][0]["text"], format!("{remote} {why}"));
         }
     }
 

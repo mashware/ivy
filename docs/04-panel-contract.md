@@ -743,7 +743,9 @@ replaces it.
   in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the
   marks, then call image_open again`) and when the console that asked is gone. Malformed lines say
   `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
-  not absolute` or `an image_open's "path" is not on this machine`, and the connection lives on.
+  not absolute`, `an image_open's "path" is not on this machine` (a share) or `an image_open's
+  "path" is not a drive path; give it as C:\…` (any other refused prefix, a local device path such
+  as `\\.\C:\…` included), and the connection lives on.
 - **`panel-mcp` checks the file first**, in its own process, which is not always the
   agent's: a missing file, a folder, something that is not a regular file, a
   file over 32 MiB and a file whose first bytes are neither a PNG's signature nor a JPEG's
