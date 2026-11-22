@@ -1093,6 +1093,41 @@ mod tests {
         assert_eq!(window.active().root.describe(), original);
     }
 
+    /// D120: the header's «Paste screenshot» asks the clipboard for its image, for the console
+    /// whose header was pressed, focused or not, and shows that console's image tab, as a
+    /// Ctrl+click on an image path does.
+    #[test]
+    fn a_header_paste_asks_the_clipboard_for_its_own_console() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let (service, harness) = crate::clipboard::Service::testing();
+        window.clipboard = service;
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let dir = crate::PanelDir::create().unwrap();
+        window
+            .all_panes_mut()
+            .find(|p| p.name == names[1])
+            .unwrap()
+            .panel = Some(dir);
+        let paste = control(&window, &ctx, area, 1, 87.5);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(paste)],
+        );
+        frame(&mut window, &ctx, area, click_at(paste));
+        assert_eq!(harness.requested_image(), Some(names[1]));
+        assert_eq!(window.active().focus, names[1]);
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Image)
+        );
+    }
+
     fn tall_area() -> egui::Rect {
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))
     }
@@ -1123,7 +1158,7 @@ mod tests {
         let right = control(window, ctx, area, which, 0.0).x;
         let rect = pane_rect(window, ctx, area, names_in_order(window)[which]);
         egui::Rect::from_min_max(
-            egui::pos2(right - 175.0, rect.top()),
+            egui::pos2(right - 200.0, rect.top()),
             egui::pos2(right, rect.top() + header::height(&m, window.headers)),
         )
     }
@@ -1154,7 +1189,7 @@ mod tests {
     /// focused console does not move.
     #[test]
     fn an_unfocused_console_splits_from_its_own_header() {
-        for (from_right, beside) in [(162.5, true), (137.5, false)] {
+        for (from_right, beside) in [(187.5, true), (162.5, false)] {
             let ctx = egui::Context::default();
             let mut window = integrated_pair();
             let area = tall_area();
@@ -1440,7 +1475,7 @@ mod tests {
             ),
             "this test needs a console that fits a split beside it and not below it: {short:?}"
         );
-        let next_to_review = control(&window, &ctx, area, 1, 137.5);
+        let next_to_review = control(&window, &ctx, area, 1, 162.5);
         frame(
             &mut window,
             &ctx,
@@ -1481,7 +1516,7 @@ mod tests {
             0,
             "a maximized console painted a split"
         );
-        for from_right in [162.5, 137.5] {
+        for from_right in [187.5, 162.5] {
             let at = control(&window, &ctx, area, 0, from_right);
             frame(&mut window, &ctx, area, click_at(at));
             frame(&mut window, &ctx, area, vec![]);
@@ -1759,7 +1794,7 @@ mod tests {
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
-        let search = control(&window, &ctx, area, 0, 112.5);
+        let search = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(search));
         assert!(window.active().panes()[0].search.is_open());
         assert!(!window.active().panes()[1].search.is_open());
@@ -3762,7 +3797,7 @@ mod tests {
         };
         // The control: no such box before the search opens.
         assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
-        let search = control(&window, &ctx, area, 0, 112.5);
+        let search = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(search));
         // Read before the menu opens: an open menu dims the consoles beneath it.
         assert!(
@@ -3886,7 +3921,7 @@ mod tests {
             names[0],
             "the premise: the left one has the keys"
         );
-        let button = control(&window, &ctx, area, 1, 112.5);
+        let button = control(&window, &ctx, area, 1, 137.5);
         // The unfocused header shows its controls under the pointer, and a press counts only once
         // they were painted (D99).
         frame(
@@ -3949,7 +3984,7 @@ mod tests {
             .unwrap()
             .screen
             .advance(b"one needle\r\ntwo needle\r\n");
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         frame(
             &mut window,
@@ -4091,7 +4126,7 @@ mod tests {
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
         let names = names_in_order(&window);
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         frame(&mut window, &ctx, area, vec![]);
         let secondary = |at: egui::Pos2| {
@@ -4147,7 +4182,7 @@ mod tests {
             .unwrap()
             .screen
             .advance(b"one needle\r\ntwo needle\r\n");
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         frame(
             &mut window,
@@ -4235,7 +4270,7 @@ mod tests {
             .unwrap()
             .screen
             .advance(text.as_bytes());
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         frame(
             &mut window,
@@ -4299,7 +4334,7 @@ mod tests {
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
         let names = names_in_order(&window);
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         frame(&mut window, &ctx, area, vec![]);
         let at = search_target(&window, 0, Target::Options);
@@ -4314,7 +4349,7 @@ mod tests {
                 .list()
         );
         // The other console's review control: revealed by hovering, then pressed.
-        let review = control(&window, &ctx, area, 1, 87.5);
+        let review = control(&window, &ctx, area, 1, 112.5);
         frame(
             &mut window,
             &ctx,
@@ -4356,7 +4391,7 @@ mod tests {
             );
             assert!(pane.held.is_some(), "the premise: the paste is held");
         }
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         frame(&mut window, &ctx, area, vec![]);
         let pane = pane_of(&window, names[0]);
@@ -4391,7 +4426,7 @@ mod tests {
         received.wait_until_ready(Duration::from_secs(5));
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         window.blink.typed_at = Instant::now() - Duration::from_secs(20);
         frame(&mut window, &ctx, area, click_at(at));
         assert!(window.blink.typed_at.elapsed() < Duration::from_secs(1));
@@ -4468,7 +4503,7 @@ mod tests {
         }
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
-        let at = control(&window, &ctx, area, 0, 112.5);
+        let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         assert!(window.active().panes()[0].search.is_open());
         (window, ctx)
@@ -4721,7 +4756,7 @@ mod tests {
         let names = names_in_order(&window);
         assert_eq!(window.active().focus, names[0]);
         let cells = control_cells(&window, &ctx, area, 0);
-        let split_right = control(&window, &ctx, area, 0, 162.5);
+        let split_right = control(&window, &ctx, area, 0, 187.5);
         let other = pane_rect(&window, &ctx, area, names[1]).center();
         let at = |window: &mut Window, time, events| {
             icon_alphas(&timed_pass(window, &ctx, area, time, events).0, cells)
@@ -4784,7 +4819,7 @@ mod tests {
     fn a_lingering_control_acts_before_the_fade_starts() {
         let (ctx, mut window, area) = lingering_pair(true);
         let names = names_in_order(&window);
-        let split_right = control(&window, &ctx, area, 0, 162.5);
+        let split_right = control(&window, &ctx, area, 0, 187.5);
         let other = pane_rect(&window, &ctx, area, names[1]).center();
         let cells = control_cells(&window, &ctx, area, 0);
         timed_pass(&mut window, &ctx, area, 10.0, click_at(other));

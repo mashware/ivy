@@ -256,7 +256,7 @@ pub(crate) fn open_image_target(
 }
 
 /// Gives the console `pane` the keys, showing its tab: the image tab shows the focused console's.
-fn focus(window: &mut Window, pane: usize) {
+pub(super) fn focus(window: &mut Window, pane: usize) {
     if let Some(tab) = window
         .tabs
         .iter()

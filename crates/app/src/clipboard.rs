@@ -4,6 +4,11 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 const DEADLINE: Duration = Duration::from_secs(2);
+/// arboard decodes the screenshot inside the read, and a debug build decoded a 2400×1600 PNG in
+/// 1.5–4 s under load (#178): the text deadline would expire on an ordinary capture.
+const IMAGE_DEADLINE: Duration = Duration::from_secs(10);
+const BUSY: &str = "The clipboard is still answering an earlier read; try again shortly.";
+const UNAVAILABLE: &str = "The clipboard is unavailable; restart Ivy to paste.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
@@ -11,14 +16,63 @@ pub(crate) enum Source {
     Primary,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wanted {
+    Text,
+    Image,
+}
+
 struct Read {
     pane: usize,
     source: Source,
+    wanted: Wanted,
+}
+
+enum Content {
+    Text(Result<String, String>),
+    Image(Pasted),
 }
 
 struct Reply {
     pane: usize,
-    text: Result<String, String>,
+    content: Content,
+}
+
+/// What a clipboard read brought back for the console it was asked for.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Delivered {
+    Text(usize, String),
+    Image(usize, Pasted),
+}
+
+/// What an image read found. Unlike text, every ending is said in the drawer: a button pressed for
+/// nothing visible reads as a button that does not work.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Pasted {
+    Image(image::RgbaImage),
+    Absent,
+    Failed(String),
+    /// No clipboard to read from — it could not be opened, the system does not offer one, or its
+    /// worker stopped — which asking again does not mend.
+    Unavailable(String),
+    /// The clipboard's owner did not answer in time; whatever it answers later is discarded.
+    Expired,
+}
+
+/// Why an image read was not even asked: busy is worth a retry, unavailable is not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refused {
+    Busy,
+    Unavailable,
+}
+
+impl Refused {
+    pub(crate) fn says(self) -> &'static str {
+        match self {
+            Self::Busy => BUSY,
+            Self::Unavailable => UNAVAILABLE,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -35,6 +89,8 @@ struct Worker {
 }
 
 struct Pending {
+    pane: usize,
+    wanted: Wanted,
     deadline: Instant,
     expired: bool,
 }
@@ -79,34 +135,55 @@ impl Service {
     }
 
     pub(crate) fn request(&mut self, pane: usize, source: Source, now: Instant) -> bool {
+        let read = Read {
+            pane,
+            source,
+            wanted: Wanted::Text,
+        };
+        let asked = self.ask(read, now);
+        let said = |why: Refused| eprintln!("{} This paste was not requested.", why.says());
+        asked.map_err(said).is_ok()
+    }
+
+    /// Asks for the image on the ordinary clipboard, for the console `pane`; refused, it says
+    /// whether asking again can help (`Refused::says` has the words).
+    pub(crate) fn request_image(&mut self, pane: usize, now: Instant) -> Result<(), Refused> {
+        let read = Read {
+            pane,
+            source: Source::Clipboard,
+            wanted: Wanted::Image,
+        };
+        self.ask(read, now)
+    }
+
+    fn ask(&mut self, read: Read, now: Instant) -> Result<(), Refused> {
         if self.pending.is_some() {
-            eprintln!("Clipboard is busy; this paste was not requested");
-            return false;
+            return Err(Refused::Busy);
         }
-        let Some(worker) = &self.worker else {
-            eprintln!("Clipboard is unavailable");
-            return false;
-        };
-        let Ok(mut mailbox) = worker.mailbox.lock() else {
-            eprintln!("Clipboard mailbox is unavailable");
-            return false;
-        };
-        mailbox.read = Some(Read { pane, source });
+        let worker = self.worker.as_ref().ok_or(Refused::Unavailable)?;
+        let mut mailbox = worker.mailbox.lock().map_err(|_| Refused::Unavailable)?;
+        let (pane, wanted) = (read.pane, read.wanted);
+        mailbox.read = Some(read);
         if matches!(
             worker.requests.try_send(()),
             Err(mpsc::TrySendError::Disconnected(()))
         ) {
             mailbox.read = None;
-            eprintln!("Clipboard request could not be queued");
-            return false;
+            return Err(Refused::Unavailable);
         }
         drop(mailbox);
+        let deadline = match wanted {
+            Wanted::Text => DEADLINE,
+            Wanted::Image => IMAGE_DEADLINE,
+        };
         self.pending = Some(Pending {
-            deadline: now + DEADLINE,
+            pane,
+            wanted,
+            deadline: now + deadline,
             expired: false,
         });
-        worker.context.request_repaint_after(DEADLINE);
-        true
+        worker.context.request_repaint_after(deadline);
+        Ok(())
     }
 
     pub(crate) fn publish_primary(&mut self, text: String) {
@@ -127,27 +204,36 @@ impl Service {
         }
     }
 
-    pub(crate) fn poll(&mut self, now: Instant) -> Option<(usize, String)> {
+    pub(crate) fn poll(&mut self, now: Instant) -> Option<Delivered> {
         let worker = self.worker.as_ref()?;
         match worker.replies.try_recv() {
             Ok(reply) => {
                 let pending = self.pending.take()?;
                 if pending.expired || now >= pending.deadline {
-                    if !pending.expired {
-                        eprintln!("Clipboard read timed out; its late reply was discarded");
+                    if pending.expired {
+                        return None;
                     }
-                    return None;
+                    eprintln!("Clipboard read timed out; its late reply was discarded");
+                    return expired(&pending);
                 }
-                match reply.text {
-                    Ok(text) if !text.is_empty() => return Some((reply.pane, text)),
-                    Ok(_) => {}
-                    Err(error) => eprintln!("Clipboard read failed: {error}"),
+                match reply.content {
+                    Content::Text(Ok(text)) if !text.is_empty() => {
+                        return Some(Delivered::Text(reply.pane, text));
+                    }
+                    Content::Text(Ok(_)) => {}
+                    Content::Text(Err(error)) => eprintln!("Clipboard read failed: {error}"),
+                    Content::Image(pasted) => return Some(Delivered::Image(reply.pane, pasted)),
                 }
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 eprintln!("Clipboard worker stopped");
-                self.pending = None;
                 self.worker = None;
+                // An image read is answered once: one already said expired was answered.
+                let pending = self.pending.take().filter(|p| !p.expired)?;
+                let stopped =
+                    Pasted::Unavailable("it stopped answering; restart Ivy to paste".into());
+                return (pending.wanted == Wanted::Image)
+                    .then_some(Delivered::Image(pending.pane, stopped));
             }
             Err(mpsc::TryRecvError::Empty) => {
                 if let Some(pending) = &mut self.pending
@@ -158,6 +244,7 @@ impl Service {
                     eprintln!(
                         "Clipboard read timed out; waiting for its owner before another read"
                     );
+                    return expired(pending);
                 }
             }
         }
@@ -165,16 +252,52 @@ impl Service {
     }
 }
 
+/// What arboard's answer means for a paste: an empty clipboard, or one holding only text, is not
+/// a failure.
+fn pasted(read: Result<arboard::ImageData<'_>, arboard::Error>) -> Pasted {
+    let data = match read {
+        Ok(data) => data,
+        Err(arboard::Error::ContentNotAvailable) => return Pasted::Absent,
+        // The same answer however often it is asked.
+        Err(error @ arboard::Error::ClipboardNotSupported) => {
+            return Pasted::Unavailable(error.to_string());
+        }
+        Err(error) => return Pasted::Failed(error.to_string()),
+    };
+    let (Ok(width), Ok(height)) = (u32::try_from(data.width), u32::try_from(data.height)) else {
+        return Pasted::Failed("the clipboard image is larger than an image can be".into());
+    };
+    match image::RgbaImage::from_raw(width, height, data.bytes.into_owned()) {
+        Some(image) => Pasted::Image(image),
+        None => Pasted::Failed("the clipboard image's pixels do not match its size".into()),
+    }
+}
+
+/// An image read that ran out of time is said once; a text one only on standard error, as before.
+fn expired(pending: &Pending) -> Option<Delivered> {
+    (pending.wanted == Wanted::Image).then_some(Delivered::Image(pending.pane, Pasted::Expired))
+}
+
 pub(crate) fn deliver(window: &mut crate::Window, context: &egui::Context) {
     if window.clipboard.pending.is_none() {
         return;
     }
     let started = Instant::now();
-    if let Some((name, text)) = window.clipboard.poll(Instant::now())
-        && let Some(pane) = window.all_panes_mut().find(|pane| pane.name == name)
-    {
-        crate::keyboard::paste_into(pane, &text);
-        context.request_repaint();
+    match window.clipboard.poll(Instant::now()) {
+        Some(Delivered::Text(name, text)) => {
+            if let Some(pane) = window.all_panes_mut().find(|pane| pane.name == name) {
+                crate::keyboard::paste_into(pane, &text);
+                context.request_repaint();
+            }
+        }
+        Some(Delivered::Image(name, pasted)) => {
+            if let Pasted::Failed(why) | Pasted::Unavailable(why) = &pasted {
+                eprintln!("Clipboard image read failed: {why}");
+            }
+            crate::viewer::image::paste::received(window, name, pasted, context);
+            context.request_repaint();
+        }
+        None => {}
     }
     window.chrome.record_work(started.elapsed());
     window.timed_separately += window.chrome.take_cost();
@@ -208,9 +331,11 @@ fn run(
         }
         read.map(|read| Reply {
             pane: read.pane,
-            text: match backend.as_mut() {
-                Ok(backend) => backend.load(read.source),
-                Err(error) => Err(error.clone()),
+            content: match (backend.as_mut(), read.wanted) {
+                (Ok(backend), Wanted::Text) => Content::Text(backend.load(read.source)),
+                (Ok(backend), Wanted::Image) => Content::Image(pasted(backend.0.get_image())),
+                (Err(error), Wanted::Text) => Content::Text(Err(error.clone())),
+                (Err(error), Wanted::Image) => Content::Image(Pasted::Unavailable(error.clone())),
             },
         })
     });
@@ -335,7 +460,26 @@ impl Harness {
     }
 
     pub(crate) fn reply(&self, pane: usize, text: Result<String, String>) {
-        self.replies.send(Reply { pane, text }).unwrap();
+        let content = Content::Text(text);
+        self.replies.send(Reply { pane, content }).unwrap();
+    }
+
+    /// The console an image read was asked for, if the read outstanding is one.
+    pub(crate) fn requested_image(&self) -> Option<usize> {
+        let _ = self.wake.try_recv();
+        let mut mailbox = self.mailbox.lock().unwrap();
+        match mailbox.read.take() {
+            Some(read) if read.wanted == Wanted::Image => Some(read.pane),
+            other => {
+                mailbox.read = other;
+                None
+            }
+        }
+    }
+
+    pub(crate) fn reply_image(&self, pane: usize, pasted: Pasted) {
+        let content = Content::Image(pasted);
+        self.replies.send(Reply { pane, content }).unwrap();
     }
 
     pub(crate) fn primary(&self) -> Option<String> {
@@ -379,7 +523,7 @@ impl Service {
                         finished.send(()).unwrap();
                         Reply {
                             pane: read.pane,
-                            text,
+                            content: Content::Text(text),
                         }
                     })
                 },
@@ -513,12 +657,12 @@ mod tests {
         replies
             .send(Reply {
                 pane: read.pane,
-                text: Ok("selected".into()),
+                content: Content::Text(Ok("selected".into())),
             })
             .unwrap();
         assert_eq!(
             service.poll(now + Duration::from_millis(10)),
-            Some((17, "selected".into()))
+            Some(Delivered::Text(17, "selected".into()))
         );
     }
 
@@ -534,7 +678,7 @@ mod tests {
         replies
             .send(Reply {
                 pane: read.pane,
-                text: Ok("stale".into()),
+                content: Content::Text(Ok("stale".into())),
             })
             .unwrap();
         assert!(service.poll(now + DEADLINE).is_none());
@@ -551,7 +695,7 @@ mod tests {
         replies
             .send(Reply {
                 pane: read.pane,
-                text: Ok("late".into()),
+                content: Content::Text(Ok("late".into())),
             })
             .unwrap();
         assert!(service.poll(now + DEADLINE).is_none());
@@ -569,7 +713,7 @@ mod tests {
         replies
             .send(Reply {
                 pane: read.pane,
-                text: Err("empty owner".into()),
+                content: Content::Text(Err("empty owner".into())),
             })
             .unwrap();
         assert!(service.poll(now).is_none());
@@ -614,12 +758,172 @@ mod tests {
         replies
             .send(Reply {
                 pane: read.pane,
-                text: Err("primary selection is unsupported".into()),
+                content: Content::Text(Err("primary selection is unsupported".into())),
             })
             .unwrap();
         assert!(service.poll(now).is_none());
         assert!(requests.try_recv().is_err());
         assert!(service.pending.is_none());
+    }
+
+    fn image_reply(pane: usize, pasted: Pasted) -> Reply {
+        Reply {
+            pane,
+            content: Content::Image(pasted),
+        }
+    }
+
+    /// Every way an image read ends reaches the caller, for the console it was asked for; an
+    /// empty clipboard is not an error and says so.
+    #[test]
+    fn an_image_read_delivers_the_image_its_absence_or_its_failure() {
+        let image = image::RgbaImage::from_pixel(3, 2, image::Rgba([1, 2, 3, 255]));
+        let cases = [
+            (Pasted::Image(image.clone()), Pasted::Image(image)),
+            (Pasted::Absent, Pasted::Absent),
+            (Pasted::Failed("gone".into()), Pasted::Failed("gone".into())),
+        ];
+        for (found, expected) in cases {
+            let (mut service, requests, replies) = connected();
+            let now = Instant::now();
+            assert!(service.request_image(6, now).is_ok());
+            let read = requests.try_recv().unwrap();
+            assert_eq!((read.pane, read.wanted), (6, Wanted::Image));
+            assert_eq!(read.source, Source::Clipboard);
+            replies.send(image_reply(read.pane, found)).unwrap();
+            assert_eq!(service.poll(now), Some(Delivered::Image(6, expected)));
+            assert!(
+                service.pending.is_none(),
+                "a delivered image read still holds the clipboard"
+            );
+        }
+    }
+
+    /// An image read outlives the text deadline, because arboard decodes inside it; past its own
+    /// deadline it is said once, and its late image is discarded.
+    #[test]
+    fn an_image_read_has_a_longer_deadline_and_its_expiry_is_said_once() {
+        let (mut service, requests, replies) = connected();
+        let now = Instant::now();
+        assert!(service.request_image(4, now).is_ok());
+        let read = requests.try_recv().unwrap();
+        assert_eq!(
+            service.poll(now + DEADLINE),
+            None,
+            "expired at the text deadline"
+        );
+        assert_eq!(
+            service.poll(now + IMAGE_DEADLINE),
+            Some(Delivered::Image(4, Pasted::Expired))
+        );
+        assert_eq!(service.poll(now + IMAGE_DEADLINE), None, "said twice");
+        assert!(service.pending.is_some(), "a stuck owner was asked again");
+        let late = image::RgbaImage::new(1, 1);
+        replies
+            .send(image_reply(read.pane, Pasted::Image(late)))
+            .unwrap();
+        assert_eq!(service.poll(now + IMAGE_DEADLINE), None);
+        assert!(service.pending.is_none());
+    }
+
+    /// A late image whose deadline passed with no frame polling in between is said as expired,
+    /// never shown.
+    #[test]
+    fn a_late_image_with_no_poll_in_between_is_said_expired() {
+        let (mut service, requests, replies) = connected();
+        let now = Instant::now();
+        assert!(service.request_image(2, now).is_ok());
+        let read = requests.try_recv().unwrap();
+        let late = image::RgbaImage::new(1, 1);
+        replies
+            .send(image_reply(read.pane, Pasted::Image(late)))
+            .unwrap();
+        assert_eq!(
+            service.poll(now + IMAGE_DEADLINE),
+            Some(Delivered::Image(2, Pasted::Expired))
+        );
+    }
+
+    /// A worker that stops with an image read outstanding answers it as unavailable: otherwise the
+    /// paste waiting on it waits for ever, and every later one is refused as busy.
+    #[test]
+    fn a_stopped_worker_answers_the_image_read_it_held() {
+        let (mut service, requests, replies) = connected();
+        let now = Instant::now();
+        assert!(service.request_image(5, now).is_ok());
+        requests.try_recv().unwrap();
+        drop(replies);
+        assert_eq!(
+            service.poll(now),
+            Some(Delivered::Image(
+                5,
+                Pasted::Unavailable("it stopped answering; restart Ivy to paste".into())
+            ))
+        );
+        assert_eq!(service.request_image(5, now), Err(Refused::Unavailable));
+    }
+
+    /// A read already said expired is not answered again when its worker then stops: the paste
+    /// that waited on it has ended, and a second answer would open a viewer nobody asked for.
+    #[test]
+    fn an_expired_read_is_not_answered_again_when_the_worker_stops() {
+        let (mut service, requests, replies) = connected();
+        let now = Instant::now();
+        assert!(service.request_image(5, now).is_ok());
+        requests.try_recv().unwrap();
+        assert_eq!(
+            service.poll(now + IMAGE_DEADLINE),
+            Some(Delivered::Image(5, Pasted::Expired))
+        );
+        drop(replies);
+        assert_eq!(service.poll(now + IMAGE_DEADLINE), None);
+    }
+
+    /// A refused image read says why, in words for the drawer: busy is worth a retry, gone is not.
+    #[test]
+    fn a_refused_image_read_says_whether_to_try_again() {
+        let (mut service, requests, _replies) = connected();
+        let now = Instant::now();
+        assert!(service.request_image(1, now).is_ok());
+        requests.try_recv().unwrap();
+        assert_eq!(service.request_image(2, now), Err(Refused::Busy));
+        assert_eq!(
+            Service::default().request_image(2, now),
+            Err(Refused::Unavailable)
+        );
+    }
+
+    /// arboard's answer, as a paste reads it: an empty clipboard is no image, not a failure, and
+    /// pixels that do not fill the size are a failure, not a smaller image.
+    #[test]
+    fn arboards_answer_maps_to_a_paste() {
+        use std::borrow::Cow;
+        let data = |width, height, bytes: Vec<u8>| arboard::ImageData {
+            width,
+            height,
+            bytes: Cow::Owned(bytes),
+        };
+        assert_eq!(
+            pasted(Err(arboard::Error::ContentNotAvailable)),
+            Pasted::Absent
+        );
+        assert!(matches!(
+            pasted(Err(arboard::Error::ClipboardNotSupported)),
+            Pasted::Unavailable(_)
+        ));
+        assert!(matches!(
+            pasted(Err(arboard::Error::ClipboardOccupied)),
+            Pasted::Failed(_)
+        ));
+        assert!(matches!(
+            pasted(Ok(data(2, 2, vec![0; 15]))),
+            Pasted::Failed(_)
+        ));
+        let image = image::RgbaImage::from_raw(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        assert_eq!(
+            pasted(Ok(data(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]))),
+            Pasted::Image(image)
+        );
     }
 
     #[test]

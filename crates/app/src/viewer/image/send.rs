@@ -15,7 +15,7 @@ use std::time::Duration;
 pub(crate) struct Written(Vec<PathBuf>);
 
 impl Written {
-    fn record(&mut self, path: PathBuf) {
+    pub(super) fn record(&mut self, path: PathBuf) {
         self.0.push(path);
     }
 }

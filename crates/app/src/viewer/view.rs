@@ -3,16 +3,22 @@ use super::{Kind, State};
 use eframe::egui::{self, FontId};
 use std::path::Path;
 
-/// What the drawer's body shows: the document state's, or the focused console's image slot, which
-/// may hold no image.
+/// What the drawer's body shows: the document state's, or the focused console — by name — and its
+/// image slot, which may hold no image.
 pub(super) enum Body<'a> {
     Document,
-    Image(Option<(&'a mut super::image::Viewer, &'a mut super::image::Slot)>),
+    Image(
+        Option<usize>,
+        Option<(&'a mut super::image::Viewer, &'a mut super::image::Slot)>,
+    ),
 }
 
-/// What the image tab says on a console with no image.
-pub(super) const NO_IMAGE: &str =
-    "No image in this console. Ctrl+click a PNG or JPEG path printed in it.";
+/// What the image tab says on a console with no image. The chord is the platform's: Cmd on macOS.
+pub(super) const NO_IMAGE: &str = if cfg!(target_os = "macos") {
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Cmd+V here."
+} else {
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Ctrl+V here."
+};
 
 /// The radius of the body's bottom corners, inside the drawer's one-point frame.
 pub(super) const BODY_CORNER: u8 = crate::theme::metrics::RADIUS_CARD - 1;
@@ -24,7 +30,7 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    (tabs, title, image): (&super::drawer::Tabs, &super::drawer::Title, Body),
+    (tabs, title, mut image): (&super::drawer::Tabs, &super::drawer::Title, Body),
 ) {
     let namespace = if state.kind.is_document() {
         "markdown-viewer"
@@ -126,12 +132,17 @@ pub(super) fn show(
                     },
                     roles.base,
                 );
+                if let Body::Image(_, Some((image, _))) = &mut image {
+                    super::image::paste::take_chord(image, &mut body_ui, state.keys);
+                }
                 match image {
-                    Body::Image(Some((image, slot))) if slot.shown() => {
+                    Body::Image(_, Some((image, slot))) if slot.shown() => {
                         image.show(slot, &mut body_ui, theme, state.space);
                     }
-                    Body::Image(slot) => {
-                        let word = slot.and_then(|(_, slot)| slot.word());
+                    Body::Image(pane, slot) => {
+                        let word = slot.and_then(|(image, slot)| {
+                            super::image::paste::shown(&image.paste, pane, slot.word())
+                        });
                         egui::Frame::new()
                             .inner_margin(14)
                             .show(&mut body_ui, |ui| {

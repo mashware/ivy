@@ -126,6 +126,8 @@ pub(crate) enum Target {
     Close,
     /// Opens or closes the search on this console, focused or not, and hands it the keyboard (D61).
     Search,
+    /// Opens the clipboard's screenshot in the drawer, pinned to this console (D120).
+    Paste,
 }
 
 /// Which controls a header carries. Painting and pressing build it with this one constructor
@@ -183,12 +185,17 @@ fn layout(strip: egui::Rect, offer: Offer) -> Layout {
             separators: Vec::new(),
         };
     }
-    // The splits are the first to go when the header is narrow: they are also in the titlebar.
+    // What is not essential goes first when the header is narrow: the splits, which are also in
+    // the titlebar, then the paste (D120); the controls in `base` stay.
+    let spare = ((room / CELL) as usize).saturating_sub(base.len());
+    if spare > 0 {
+        base.insert(2, Target::Paste);
+    }
     let splits: Vec<Target> = [Target::SplitRight, Target::SplitDown]
         .into_iter()
         .zip(offer.split)
         .filter_map(|(target, offered)| offered.then_some(target))
-        .take(((room / CELL) as usize).saturating_sub(base.len()))
+        .take(spare.saturating_sub(1))
         .collect();
     let order: Vec<Target> = splits.iter().copied().chain(base).collect();
     let left = right - order.len() as f32 * CELL;
@@ -510,6 +517,7 @@ fn tooltip(target: Target, folded: bool, zoomed: bool) -> &'static str {
         Target::Zoom => "Maximize console",
         Target::Close => "Close console",
         Target::Search => "Search this console",
+        Target::Paste => "Paste screenshot",
     }
 }
 
@@ -533,6 +541,7 @@ pub(crate) fn paint_icon(
         Target::Zoom => Icon::Expand,
         Target::Close => Icon::Close,
         Target::Search => Icon::Search,
+        Target::Paste => Icon::PasteImage,
         Target::Label => unreachable!(),
     };
     paint(painter, center, icon, size, color);
@@ -591,6 +600,7 @@ mod tests {
             ),
             (Target::Zoom, true, egui_phosphor::regular::ARROWS_IN_SIMPLE),
             (Target::Review, false, egui_phosphor::regular::GIT_BRANCH),
+            (Target::Paste, false, egui_phosphor::regular::IMAGE),
             (Target::Panel, false, egui_phosphor::regular::SIDEBAR_SIMPLE),
             (
                 Target::Search,
@@ -632,6 +642,7 @@ mod tests {
                 Target::Label as u8,
                 Target::Search as u8,
                 Target::Review as u8,
+                Target::Paste as u8,
                 Target::Panel as u8,
                 Target::Zoom as u8,
                 Target::Close as u8
@@ -643,6 +654,12 @@ mod tests {
     #[test]
     fn the_search_control_says_it_searches_this_console() {
         assert_eq!(tooltip(Target::Search, false, false), "Search this console");
+    }
+
+    /// D120: the paste control is named by what it does.
+    #[test]
+    fn the_paste_control_says_it_pastes_a_screenshot() {
+        assert_eq!(tooltip(Target::Paste, false, false), "Paste screenshot");
     }
 
     #[test]
@@ -1128,7 +1145,7 @@ mod tests {
                 ));
             }
             if width >= 150.0 {
-                assert_eq!(items.len(), 4);
+                assert_eq!(items.len(), 5);
             }
             if width == 500.0 {
                 assert_eq!(
@@ -1168,6 +1185,7 @@ mod tests {
                 Target::SplitDown,
                 Target::Search,
                 Target::Review,
+                Target::Paste,
                 Target::Panel,
                 Target::Zoom,
                 Target::Close
@@ -1189,6 +1207,7 @@ mod tests {
                 Target::SplitDown,
                 Target::Search,
                 Target::Review,
+                Target::Paste,
                 Target::Panel
             ]
         );
@@ -1200,7 +1219,7 @@ mod tests {
     #[test]
     fn a_narrow_header_drops_its_splits_before_the_rest() {
         for (can_close, label_only, base, with_split) in
-            [(true, 160.0, 161.0, 186.0), (false, 110.0, 111.0, 136.0)]
+            [(true, 160.0, 161.0, 211.0), (false, 110.0, 111.0, 161.0)]
         {
             let offer = Offer {
                 can_close,
@@ -1213,6 +1232,10 @@ mod tests {
                     && base_set.contains(&Target::Review)
                     && base_set.contains(&Target::Panel)
             );
+            // The paste comes one cell later, and a split only after it (D120).
+            assert!(!base_set.contains(&Target::Paste));
+            assert!(!kinds(strip_of(base + 24.0), offer).contains(&Target::Paste));
+            assert!(kinds(strip_of(base + 25.0), offer).contains(&Target::Paste));
             assert!(!base_set.contains(&Target::SplitDown));
             assert!(!kinds(strip_of(with_split - 1.0), offer).contains(&Target::SplitDown));
             assert!(kinds(strip_of(with_split), offer).contains(&Target::SplitDown));
