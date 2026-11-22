@@ -98,7 +98,7 @@ impl Sending {
     }
 
     /// What the Send button of the image opened as `document` stands for. The label and whether
-    /// the button answers are both read from this one value, so a greyed button always says why.
+    /// the button answers are both read from this one value, so a button greyed by a Send says why.
     pub(super) fn button(&self, document: u64) -> Button<'_> {
         match &self.phase {
             Phase::Asked(r) | Phase::Writing(r, _) if r.document == document => Button::Sending,
@@ -378,8 +378,9 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
 }
 
 /// The worker could not write the copy; its error says whether what it had written of it stayed.
-/// Its console is open: `poll` cancels the Send of one that closed before its worker is read.
+/// A closed console's worker is left to `forsake`: `poll` cancels its Send before reading it.
 fn failed(window: &mut crate::Window, request: &Request, why: String) {
+    debug_assert!(window.all_panes().any(|p| p.name == request.pane));
     let to = (request.pane, request.console.as_str());
     say(window, to, format!("{why}; nothing was sent."));
 }
@@ -514,7 +515,8 @@ fn deliver(
     path: &Path,
     ctx: &egui::Context,
 ) -> Phase {
-    // Its console is open: `poll` cancels the Send of one that closed before its worker is read.
+    // A Send whose console closed is cancelled by `poll` before its worker is read.
+    debug_assert!(window.all_panes().any(|p| p.name == request.pane));
     let opened = slot(window, request.pane).and_then(|s| s.document());
     let sent = if opened == Some(request.document) {
         let send = delivery::Send {
@@ -616,6 +618,9 @@ mod tests {
         sending.answer(Some(Asked::Cancel(1)), &mut notice);
         assert!(!sending.busy());
         assert_eq!(notice.as_deref(), Some(CANCELLED));
+        // The Enter owed after a line is typed still holds every other image's Send.
+        sending.phase = Phase::Enter(Enter(7), 0, "A".into());
+        assert_eq!(sending.button(2), Button::Waiting("A"));
     }
 
     /// A console that closes takes the copies Send left in its directory, and then the directory

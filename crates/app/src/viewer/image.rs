@@ -44,9 +44,9 @@ pub(crate) struct Slot {
     abandoned: Option<(PathBuf, Job<Picture>)>,
     /// Why the last thing asked of the marks was refused, or what became of them.
     notice: Option<String>,
-    /// What a cancelled Send's worker left to say when it ended, until a drawer lays this
-    /// console's image out: the image may be closed by then, and the next one opened clears the
-    /// notice it would have gone to.
+    /// What a cancelled Send's worker left to say when it ended, held for the drawer to lay out
+    /// this console's image or its empty Image tab: the image may be closed by then, and the next
+    /// one opened clears the notice it would have gone to.
     unshown: Option<String>,
 }
 
@@ -332,7 +332,7 @@ impl Viewer {
                 });
             return;
         };
-        // Taken up only by a frame that lays the column out, where the notice is painted.
+        // Taken up where the notice is painted, never by a frame that only says the image loads.
         if let Some(said) = slot.unshown.take() {
             send::join(&mut slot.notice, said);
         }

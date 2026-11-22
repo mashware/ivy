@@ -137,7 +137,7 @@ pub(crate) fn open_document_target(
 
 /// Forgets what `state` showed, keeping which tab it is, the window's context and the drawer's
 /// own input flags: the image tab takes its input through the document state's, so closing the
-/// document beside it is not closing the drawer. A tab change suspends those flags anyway.
+/// document beside it is not closing the drawer. Moving to another tab is left to suspend them.
 pub(super) fn forget(state: &mut super::State) {
     *state = super::State {
         context: state.context.take(),
