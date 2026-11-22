@@ -35,8 +35,11 @@ pub(crate) struct Pasting {
     pub(super) key: bool,
     /// Whether the chord that asked is still held: egui-winit turns every repeat of a held chord
     /// into another text paste with no repeat flag, but lets its key's release through as a key,
-    /// which is where a hold ends.
-    pub(super) held: bool,
+    /// which is where a hold ends — or where the window loses the keys, or a frame the viewer was
+    /// not painted in, since its release then went to somebody else.
+    held: bool,
+    /// The frame the viewer last looked for the chord in.
+    seen: Option<u64>,
     /// Who started the clipboard read outstanding; the clipboard answers every read it took.
     asked: Option<By>,
     writing: Option<Writing>,
@@ -80,22 +83,39 @@ pub(in crate::viewer) fn pin(
 /// The paste chord is the viewer's only while the drawer holds the keys — a console that holds
 /// them leaves the chord in the input, its own (`a_paste_into_a_console_is_not_taken_by_the_viewer`)
 /// — and no note is being typed, which keeps it for its own text. Taken here, it is asked for in
-/// the next input pass, once per hold.
+/// the next input pass, once per hold. The events are walked in order, so a release and a new
+/// press in one frame are two presses.
 pub(super) fn take_chord(viewer: &mut super::Viewer, ui: &mut egui::Ui, keys: bool) {
-    let free = keys && !viewer.send.busy() && !ui.ctx().text_edit_focused();
-    if free && ui.input_mut(take_key) {
-        if !viewer.paste.held {
-            viewer.paste.key = true;
-            ui.ctx().request_repaint();
-        }
-        viewer.paste.held = true;
-    }
-    if ui.input(|i| i.events.iter().any(released)) {
+    let frame = ui.ctx().cumulative_frame_nr();
+    if viewer.paste.seen.is_none_or(|last| frame > last + 1) {
         viewer.paste.held = false;
+    }
+    viewer.paste.seen = Some(frame);
+    let free = keys && !viewer.send.busy() && !ui.ctx().text_edit_focused();
+    let paste = &mut viewer.paste;
+    let mut asked = false;
+    ui.input_mut(|input| {
+        input.events.retain(|event| {
+            if released(event) {
+                paste.held = false;
+                return true;
+            }
+            if !free || !chord(event) {
+                return true;
+            }
+            asked |= !paste.held;
+            paste.held = true;
+            false
+        });
+    });
+    if asked {
+        paste.key = true;
+        ui.ctx().request_repaint();
     }
 }
 
-/// The release of a key a paste chord is made of.
+/// The release of a key a paste chord is made of, or the window losing the keys, after which no
+/// release is reported.
 fn released(event: &egui::Event) -> bool {
     use egui::Key::{Insert, Paste, V};
     matches!(
@@ -104,36 +124,40 @@ fn released(event: &egui::Event) -> bool {
             key: V | Paste | Insert,
             pressed: false,
             ..
-        }
+        } | egui::Event::WindowFocused(false)
     )
 }
 
-/// Takes the paste chord out of `input`: as the text paste egui-winit makes of every paste chord
-/// when the clipboard holds text, or as the key it lets through — the vendored copy does — when it
-/// holds none, which is when a screenshot is there: Ctrl+V or Ctrl+Shift+V (Cmd on macOS), the
-/// Paste key, and Shift+Insert on Windows, where Win+Shift+S leaves only an image. A held chord's
-/// repeats are not new pastes.
+/// Whether `event` is the paste chord: the text paste egui-winit makes of every paste chord when
+/// the clipboard holds text, or the key it lets through — the vendored copy does — when it holds
+/// none, which is when a screenshot is there: Ctrl+V or Ctrl+Shift+V (Cmd on macOS), the Paste key,
+/// and Shift+Insert on Windows, where Win+Shift+S leaves only an image. A key's own repeats are
+/// not the chord.
+fn chord(event: &egui::Event) -> bool {
+    let egui::Event::Key {
+        key,
+        pressed: true,
+        repeat: false,
+        modifiers: m,
+        ..
+    } = event
+    else {
+        return matches!(event, egui::Event::Paste(_));
+    };
+    let insert = cfg!(windows) && m.shift && !m.ctrl && !m.alt && !m.command;
+    match key {
+        egui::Key::V => m.command && !m.alt,
+        egui::Key::Paste => true,
+        egui::Key::Insert => insert,
+        _ => false,
+    }
+}
+
+/// Takes the paste chord out of `input`, answering whether there was one.
+#[cfg(test)]
 fn take_key(input: &mut egui::InputState) -> bool {
     let before = input.events.len();
-    input.events.retain(|event| {
-        let egui::Event::Key {
-            key,
-            pressed: true,
-            repeat: false,
-            modifiers: m,
-            ..
-        } = event
-        else {
-            return !matches!(event, egui::Event::Paste(_));
-        };
-        let insert = cfg!(windows) && m.shift && !m.ctrl && !m.alt && !m.command;
-        !match key {
-            egui::Key::V => m.command && !m.alt,
-            egui::Key::Paste => true,
-            egui::Key::Insert => insert,
-            _ => false,
-        }
-    });
+    input.events.retain(|event| !chord(event));
     input.events.len() != before
 }
 
@@ -150,9 +174,10 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
         let retry = format!("{BUSY} {HINT}");
         match window.image.document.as_mut().map(|d| &mut d.load) {
             Some(super::Load::Empty(text)) => *text = retry,
-            Some(super::Load::Ready { .. }) => window.image.say(BUSY),
-            // Nothing that paints a notice: the paste on its way opens the viewer soon.
-            _ => return,
+            // A failed image paints no notice, and with no image the paste on its way opens one.
+            Some(super::Load::Failed(_)) | None => return eprintln!("{BUSY}"),
+            // A loading picture paints it once decoded.
+            Some(_) => window.image.say(BUSY),
         }
         return origin::show_image(window);
     }
@@ -175,9 +200,7 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
 fn closed(viewer: &mut super::Viewer) {
     match viewer.document.as_mut().map(|d| &mut d.load) {
         Some(super::Load::Empty(text)) => *text = CLOSED.to_owned(),
-        Some(super::Load::Failed(_)) | None => {
-            eprintln!("A paste was asked for a console that has closed")
-        }
+        Some(super::Load::Failed(_)) | None => eprintln!("A paste for a console that has closed"),
         Some(_) => viewer.say(CLOSED),
     }
 }
@@ -207,8 +230,10 @@ pub(crate) fn received(
             tell(window, pane, by, Said::Retry(&said));
         }
         Pasted::Unavailable(why) => {
-            let why = why.trim_end_matches('.');
-            let said = format!("The clipboard is unavailable ({why}).");
+            let said = format!(
+                "The clipboard is unavailable: {}.",
+                why.trim_end_matches('.')
+            );
             tell(window, pane, by, Said::Final(&said));
         }
         Pasted::Expired => tell(window, pane, by, Said::Retry(EXPIRED)),
@@ -343,8 +368,8 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
     }
     if window.image.has_marks() {
         // Marks drawn on the image shown while the screenshot was written: they are kept, and the
-        // file stays the console's until it closes. Asked before opening, which would take the
-        // keyboard and replace a notice not yet read.
+        // file stays the console's until it closes. Asked before opening, whose refusal would
+        // replace a notice not yet read.
         let said = format!(
             "The screenshot was saved to {}; send or clear the marks on this image to open it.",
             path.display()
@@ -400,8 +425,13 @@ enum Said<'a> {
 /// Says what became of a paste, and shows it: the drawer's document tab takes the keys, as
 /// opening a clicked image does, however late the answer (D117). Over unsent marks it is said
 /// beside them, after any notice not yet read; over an image a key's paste found shown or still
-/// loading, it replaces the notice. Anything else opens the viewer for that console, empty.
+/// loading, it replaces the notice; anything else opens the viewer for that console, empty. An
+/// answer for a console that has closed is said in that console's own viewer, unshown, or on
+/// standard error — never beside another console's.
 fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
+    if !window.all_panes().any(|p| p.name == pane) {
+        return gone(&mut window.image, pane);
+    }
     let (alone, text) = match said {
         Said::Hint => (None, HINT.to_owned()),
         Said::Retry(said) => (Some(said), format!("{said} {HINT}")),
@@ -422,14 +452,21 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
         window.image.say(alone);
         return origin::show_image(window);
     }
-    if origin::pin_empty_image(window, pane, text) {
-        return;
+    origin::pin_empty_image(window, pane, text);
+}
+
+/// The answer for a console that closed: said in its own viewer; another console's viewer only
+/// loses a «paste on its way» this paste had put there, which is no longer true.
+fn gone(viewer: &mut super::Viewer, pane: usize) {
+    if viewer.origin().is_some_and(|o| o.pane == pane) {
+        return closed(viewer);
     }
-    // That console closed before its answer: said in its own viewer, never in another's.
-    if window.image.origin().is_some_and(|o| o.pane == pane) {
-        closed(&mut window.image);
-    } else {
-        eprintln!("A paste's answer arrived for a console that has closed");
+    eprintln!("A paste's answer arrived for a console that has closed");
+    let busy = format!("{BUSY} {HINT}");
+    match viewer.document.as_mut().map(|d| &mut d.load) {
+        Some(super::Load::Empty(text)) if *text == busy => *text = HINT.to_owned(),
+        _ if viewer.notice.as_deref() == Some(BUSY) => viewer.notice = None,
+        _ => {}
     }
 }
 

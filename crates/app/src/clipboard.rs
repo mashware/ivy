@@ -230,7 +230,8 @@ impl Service {
                 self.worker = None;
                 // An image read is answered once: one already said expired was answered.
                 let pending = self.pending.take().filter(|p| !p.expired)?;
-                let stopped = Pasted::Unavailable("the clipboard stopped answering".into());
+                let stopped =
+                    Pasted::Unavailable("it stopped answering; restart Ivy to paste".into());
                 return (pending.wanted == Wanted::Image)
                     .then_some(Delivered::Image(pending.pane, stopped));
             }
@@ -856,7 +857,7 @@ mod tests {
             service.poll(now),
             Some(Delivered::Image(
                 5,
-                Pasted::Unavailable("the clipboard stopped answering".into())
+                Pasted::Unavailable("it stopped answering; restart Ivy to paste".into())
             ))
         );
         assert_eq!(service.request_image(5, now), Err(Refused::Unavailable));

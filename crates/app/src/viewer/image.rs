@@ -259,8 +259,6 @@ impl Viewer {
         // A drag whose release came while the image was not painted must not resume on return.
         if self.painted.is_none_or(|last| frame > last + 1) {
             self.panning = None;
-            // Nor a paste chord held while it was not: its release went to somebody else.
-            self.paste.held = false;
             if let Some(document) = self.document.as_mut() {
                 document.marks.cancel();
             }
@@ -4588,7 +4586,8 @@ mod tests {
             modifiers: egui::Modifiers::COMMAND,
         };
         for event in [chord, egui::Event::Paste("some text".into())] {
-            painted(&mut window, &ctx, vec![event.clone()]);
+            // Each one a press of its own: the key let go before it.
+            painted(&mut window, &ctx, vec![released_v(), event.clone()]);
             painted(&mut window, &ctx, vec![]);
             assert_eq!(harness.requested_image(), Some(name), "{event:?}");
             harness.reply_image(name, crate::clipboard::Pasted::Absent);
@@ -5039,17 +5038,17 @@ mod tests {
         );
     }
 
-    /// A clipboard that answers unavailable is said without the hint, with what mends it.
+    /// A clipboard that answers unavailable is said without the hint, with its cause, once.
     #[test]
-    fn an_unavailable_clipboard_answer_says_to_restart() {
+    fn an_unavailable_clipboard_answer_says_its_cause() {
         let (mut window, ctx, harness, name, _folder) = window_to_paste();
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
-        let stopped = crate::clipboard::Pasted::Unavailable("stopped".into());
+        let stopped = crate::clipboard::Pasted::Unavailable("not offered here.".into());
         paste::received(&mut window, name, stopped, &ctx);
         assert_eq!(
             paste::empty(&window.image),
-            Some("The clipboard is unavailable (stopped).")
+            Some("The clipboard is unavailable: not offered here.")
         );
     }
 
@@ -5073,7 +5072,7 @@ mod tests {
     }
 
     /// A chord held down asks once: egui-winit turns each repeat into another text paste, with no
-    /// repeat flag, while the modifier stays down.
+    /// repeat flag, until its key is released.
     #[test]
     fn a_held_chord_asks_once() {
         let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
@@ -5153,5 +5152,96 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         assert_eq!(window.image.origin().map(|o| o.pane), Some(name));
         assert_eq!(paste::empty(&window.image), Some(paste::HINT));
+    }
+
+    fn released_v() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }
+    }
+
+    /// The empty viewer — the screen whose hint says to press Ctrl+V — asks once per hold too, and
+    /// a release and a new press in one frame are two presses.
+    #[test]
+    fn the_empty_viewer_asks_once_per_hold() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        paste::ask(&mut window, name, paste::By::Button);
+        harness.requested_image();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        let paste = || egui::Event::Paste("text".into());
+        painted(&mut window, &ctx, vec![paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![paste()]);
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert_eq!(harness.requested_image(), None, "a repeat pasted again");
+        painted(&mut window, &ctx, vec![released_v(), paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            harness.requested_image(),
+            Some(name),
+            "a re-press in one frame was lost"
+        );
+    }
+
+    /// The window losing the keys ends a hold: the release that never comes is not waited for.
+    #[test]
+    fn losing_the_window_ends_a_hold() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        let paste = || egui::Event::Paste("text".into());
+        painted(&mut window, &ctx, vec![paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![egui::Event::WindowFocused(false)]);
+        painted(&mut window, &ctx, vec![egui::Event::WindowFocused(true)]);
+        painted(&mut window, &ctx, vec![paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+    }
+
+    /// A paste asked while another is on its way, over a picture, is said beside it and the picture
+    /// stays.
+    #[test]
+    fn a_second_paste_over_a_picture_is_said_beside_it() {
+        let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, name, paste::By::Button);
+        painted(&mut window, &ctx, vec![]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert_eq!(window.image.path(), Some(path.as_path()));
+        assert!(text_rect(&shapes, |t| t == "A paste is already on its way.").is_some());
+    }
+
+    /// An answer for a console that closed is not said beside another console's marked image.
+    #[test]
+    fn a_closed_consoles_answer_is_not_said_beside_another_consoles_marks() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let other = window.active().panes()[0].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == other)
+            .unwrap()
+            .panel = Some(crate::PanelDir::create().unwrap());
+        paste::ask(&mut window, other, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(other));
+        marks_mut(&mut window).general = "keep".into();
+        window.close_a_pane_called(other, &ctx).unwrap();
+        harness.reply_image(other, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(window.image.notice, None);
+        assert_eq!(marks_of(&window).general, "keep");
     }
 }
