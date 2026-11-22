@@ -12136,8 +12136,11 @@ shown to for the device names. Without those, an
 entry that is not there stops the walk and leaves the path to the open, which has to pass through
 that same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through
 a link: <error>`), because a folder the walk may not look into can still be passed through by the
-open. The drawer follows the window's refusal with «Open it from Files to see it yourself.»: the
-person's own open is theirs to make. Where a link leads is never read. The bridge walks before
+open. The drawer follows the window's refusal over a link, or over an entry it could not ask, with
+«Open it from Files to see it yourself.»: the person's own open is theirs to make. A refusal by the
+path's text — a `..` or a name Win32 rewrites — is painted as the agent is told it, with nothing
+after it (review round 5): its sentence already says what to send instead, and a second
+instruction beside it read as two. Where a link leads is never read. The bridge walks before
 its `stat`, and the image worker walks before it opens, **only for an agent's open**: the open
 carries who named the path to the worker, and a person's own click or Files open is not walked. A
 link swapped in between the walk and the open is not caught, the race D108 also leaves. Elsewhere

@@ -241,11 +241,18 @@ fn read_text(path: &Path) -> Result<String, String> {
 fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<Picture, String> {
     use image::{ImageDecoder, ImageFormat, ImageReader};
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
-    // The enforcement of what the bridge only advises, for an agent's open; a person's own open is
-    // not walked (D120), so the person reading the refusal is told that open is theirs to make.
+    // The enforcement of what the bridge only advises, for an agent's open. A person's own open is
+    // not walked (D120), so a refusal over a link tells the person reading it that open is theirs to
+    // make; one over the path's text already says what to send instead, and is left at that.
     if let Some(is_link) = links {
-        panel_control::image::no_link_on_the_way(path, is_link)
-            .map_err(|why| format!("{why}. Open it from Files to see it yourself."))?;
+        panel_control::image::no_link_on_the_way(path, is_link).map_err(
+            |refused| match refused {
+                panel_control::image::Refused::Link(why) => {
+                    format!("{why}. Open it from Files to see it yourself.")
+                }
+                panel_control::image::Refused::Text(why) => why,
+            },
+        )?;
     }
     let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
@@ -928,8 +935,10 @@ mod tests {
 
     /// **An agent's image is walked before it is opened** (D120): on Windows the open through a
     /// link is what reaches the host. The file here does not exist, so a worker that opened first
-    /// would say «Cannot open …» instead of the link sentence; this platform refuses no link, so
-    /// the reader handed in calls every entry one.
+    /// would say «Cannot open …» instead of the link sentence. The reader is handed in because the
+    /// real one calls no entry a link off Windows, and stops at the missing file on it. A refusal
+    /// over a link, or over an entry the walk could not ask, is followed by the sentence that
+    /// sends the person to Files.
     #[test]
     fn an_agents_image_is_walked_before_the_worker_opens_it() {
         let temp = Temp::new();
@@ -944,12 +953,22 @@ mod tests {
                 missing.display()
             )
         );
+        let denied: IsLink = |_| Err(std::io::Error::other("access is denied"));
+        assert_eq!(
+            decode_image(&missing, 4096, Some(denied)).err().unwrap(),
+            format!(
+                "cannot tell whether {} passes through a link: access is denied. Open it from Files \
+                 to see it yourself.",
+                missing.display()
+            )
+        );
     }
 
     /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses an agent's
-    /// image before anything is asked** (D120), with the walk's own sentence: no entry is asked
-    /// whether it is a link, and the file, which does not exist, is never opened — a worker that
-    /// opened it would say «Cannot open …» instead.
+    /// image before anything is asked** (D120), with the walk's own sentence and nothing after it:
+    /// it already says what to send instead, and Files is no answer to it. No entry is asked whether
+    /// it is a link, and the file, which does not exist, is never opened — a worker that opened it
+    /// would say «Cannot open …» instead.
     #[test]
     fn a_name_the_walk_cannot_ask_refuses_an_agents_image_before_anything_is_asked() {
         let temp = Temp::new();
@@ -975,10 +994,7 @@ mod tests {
             let asked: IsLink = |at| panic!("{} was asked", at.display());
             assert_eq!(
                 decode_image(&missing, 4096, Some(asked)).err().unwrap(),
-                format!(
-                    "{} {why}. Open it from Files to see it yourself.",
-                    missing.display()
-                ),
+                format!("{} {why}", missing.display()),
                 "{name}"
             );
         }

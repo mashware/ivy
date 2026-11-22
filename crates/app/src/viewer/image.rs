@@ -6504,9 +6504,9 @@ mod tests {
     }
 
     /// **An agent's image is refused through a link, and the person's own open of the same file is
-    /// not** (D120). This platform refuses no link, so the window is handed a reader for which
-    /// every entry is one: what is pinned is that the agent's open reaches the worker's walk and
-    /// the person's does not.
+    /// not** (D120). The window is handed a reader for which every entry is one, so the test holds
+    /// on every platform — off Windows the real reader calls nothing a link: what is pinned is that
+    /// the agent's open reaches the worker's walk and the person's does not.
     #[test]
     fn an_agents_image_through_a_link_is_refused_and_the_persons_own_open_is_not() {
         let folder = Folder::new();

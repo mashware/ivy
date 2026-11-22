@@ -101,7 +101,7 @@ fn is_volume(component: &OsStr) -> bool {
 pub fn no_link_on_the_way(
     path: &Path,
     mut is_link: impl FnMut(&Path) -> std::io::Result<bool>,
-) -> Result<(), String> {
+) -> Result<(), Refused> {
     for component in path.components() {
         let why = match component {
             Component::ParentDir => "has a «..» in it; give the path without one".to_owned(),
@@ -111,7 +111,7 @@ pub fn no_link_on_the_way(
             },
             _ => continue,
         };
-        return Err(format!("{} {why}", path.display()));
+        return Err(Refused::Text(format!("{} {why}", path.display())));
     }
     let mut walked = std::path::PathBuf::new();
     for component in path.components() {
@@ -122,21 +122,40 @@ pub fn no_link_on_the_way(
         match is_link(&walked) {
             Ok(false) => {}
             Ok(true) => {
-                return Err(format!(
+                return Err(Refused::Link(format!(
                     "{} passes through a link, and an agent's image is not opened through one",
                     path.display()
-                ));
+                )));
             }
             Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(why) => {
-                return Err(format!(
+                return Err(Refused::Link(format!(
                     "cannot tell whether {} passes through a link: {why}",
                     path.display()
-                ));
+                )));
             }
         }
     }
     Ok(())
+}
+
+/// Why [`no_link_on_the_way`] refused a path, each holding the sentence the agent is told. The
+/// kind is kept because the window words the two apart for the person reading its drawer (D120).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refused {
+    /// By the path's text, before anything is asked: a `..` or a name Win32 rewrites. The sentence
+    /// already says what to send instead.
+    Text(String),
+    /// A link on the way, or an entry the walk could not ask whether it is one.
+    Link(String),
+}
+
+impl From<Refused> for String {
+    fn from(refused: Refused) -> Self {
+        match refused {
+            Refused::Text(why) | Refused::Link(why) => why,
+        }
+    }
 }
 
 /// Why one name on an agent's path is one Win32 reads as another entry when it ends a path, as
@@ -303,7 +322,7 @@ mod tests {
     fn walk(
         path: &str,
         answers: &[(&str, Answer)],
-    ) -> (Result<(), String>, Vec<std::path::PathBuf>) {
+    ) -> (Result<(), Refused>, Vec<std::path::PathBuf>) {
         let mut asked = Vec::new();
         let said = no_link_on_the_way(Path::new(path), |at: &Path| {
             asked.push(at.to_path_buf());
@@ -357,7 +376,7 @@ mod tests {
             ),
         ] {
             let (said, asked) = walk("/home/me/a.png", &[(at, link)]);
-            assert_eq!(said, Err(refused.to_owned()), "{at}");
+            assert_eq!(said, Err(Refused::Link(refused.to_owned())), "{at}");
             assert_eq!(asked, paths(asked_up_to), "{at}");
         }
     }
@@ -370,10 +389,10 @@ mod tests {
         let (said, asked) = walk("/home/me/a.png", &[("/home/me", denied)]);
         assert_eq!(
             said,
-            Err(
+            Err(Refused::Link(
                 "cannot tell whether /home/me/a.png passes through a link: access is denied"
                     .to_owned()
-            )
+            ))
         );
         assert_eq!(asked, paths(&["/home", "/home/me"]));
     }
@@ -391,9 +410,9 @@ mod tests {
             let (said, asked) = walk(path, &[("/home/gone", gone), ("/home/me", link)]);
             assert_eq!(
                 said,
-                Err(format!(
+                Err(Refused::Text(format!(
                     "{path} has a «..» in it; give the path without one"
-                )),
+                ))),
                 "{path}"
             );
             assert_eq!(asked, paths(&[]), "{path}");
@@ -438,7 +457,7 @@ mod tests {
                 let (said, asked) = walk(&path, &[("/home/me", link)]);
                 assert_eq!(
                     said,
-                    Err(format!("{path} has «{name}» in it, {why}")),
+                    Err(Refused::Text(format!("{path} has «{name}» in it, {why}"))),
                     "{path}"
                 );
                 assert_eq!(asked, paths(&[]), "{path}");
@@ -481,8 +500,10 @@ mod tests {
         ]);
         assert!(name.to_str().is_none());
         let path = Path::new("/home").join(&name);
-        let said = no_link_on_the_way(&path, |_| panic!("nothing is asked"))
-            .expect_err("a name ending in a dot is refused");
+        let Err(Refused::Text(said)) = no_link_on_the_way(&path, |_| panic!("nothing is asked"))
+        else {
+            panic!("a name ending in a dot is refused by its text");
+        };
         assert!(
             said.starts_with(&format!("{} has «\u{FFFD}", path.display())),
             "{said}"
@@ -545,10 +566,10 @@ mod tests {
             let file = link.join("a.png");
             assert_eq!(
                 no_link_on_the_way(&file, refused_link),
-                Err(format!(
+                Err(Refused::Link(format!(
                     "{} passes through a link, and an agent's image is not opened through one",
                     file.display()
-                ))
+                )))
             );
         }
         let _ = std::fs::remove_dir_all(&folder);

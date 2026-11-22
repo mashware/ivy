@@ -752,7 +752,9 @@ replaces it.
   path whose names do not end in one`), or a reserved device name — CON, PRN, AUX, NUL, COM0–9,
   LPT0–9 and COM¹–³, LPT¹–³, in any case, with or without an extension (`<path> has «<name>» in
   it, which Windows reads as a device; give the path without it`). The check for links asks each
-  entry as the end of a path, where Windows reads those names as another entry (**D120**).
+  entry as the end of a path, where Windows reads those names as another entry (**D120**). Where
+  the window refuses a `..` or one of these names, the drawer paints the sentence alone, without the
+  `Open it from Files` sentence that follows a refusal over a link.
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
   person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
   image — it opened on it, or its Image tab was already on show for that console — and `opened; the

@@ -1828,7 +1828,8 @@ mod tests {
 
     /// **A link on the way refuses the path before the bridge asks for the file** (D120): the file
     /// here does not exist, so a bridge that asked first, or never walked, would answer «cannot
-    /// open …». This platform refuses no link, so the folder is called one by the reader handed in.
+    /// open …». The folder is called one by the reader handed in, which works on every platform: the
+    /// real one calls nothing a link off Windows, and on it stops at this folder, which is not there.
     #[test]
     fn a_link_on_the_way_refuses_the_bridge_before_it_asks_for_the_file() {
         let folder = std::env::temp_dir().join(format!("ivy-image-link-{}", std::process::id()));
