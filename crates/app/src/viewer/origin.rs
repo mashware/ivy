@@ -245,7 +245,7 @@ pub(crate) fn open_image_target(
     let Some(slot) = super::image::slot_of(&mut window.tabs, pane) else {
         return Err(NotOpened::Gone);
     };
-    window.image.open(slot, source, path);
+    window.image.open(slot, source, path, false);
     show_image(window);
     if let Some(ctx) = window.viewer.context.clone()
         && let Some(slot) = super::image::slot_of(&mut window.tabs, pane)
@@ -281,7 +281,8 @@ pub(crate) struct Room<'a> {
 /// takes its place, and otherwise the drawer opens on it only where the person is working in that
 /// console and nothing else holds the screen or the keys. The keyboard stays where it was. Refused
 /// over that console's unsent marks, with nothing shown and nothing said in the drawer, because the
-/// agent is the one asking. The file itself is not read here.
+/// agent is the one asking. The file itself is not read here: the worker that decodes it refuses a
+/// path through a link first, which a person's own open is spared.
 pub(crate) fn open_for_an_agent(
     window: &mut Window,
     pane: usize,
@@ -294,7 +295,7 @@ pub(crate) fn open_for_an_agent(
     if slot.has_marks() {
         return Err(MARKS_NOT_SENT.to_owned());
     }
-    window.image.open(slot, source, path);
+    window.image.open(slot, source, path, true);
     // Set even where the drawer shows it at once: one rule, and the frame that paints it takes
     // the mark down.
     slot.mark_unseen();

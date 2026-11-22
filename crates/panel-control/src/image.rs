@@ -75,120 +75,64 @@ fn is_volume(component: &OsStr) -> bool {
         && name.ends_with('}')
 }
 
-/// How many links a path may pass through before it is refused: the bound Linux puts on the
-/// symbolic links of one path.
-#[cfg(any(windows, test))]
-const MAX_LINKS: usize = 40;
-
-/// Refuses `path` when a symbolic link or a junction on its way — an ancestor or the file itself —
-/// leads off this machine. On Windows a link under `C:\` can point at `\\host\share`, and opening
-/// through it authenticates to that host exactly as the prefix `is_local` refuses would (D120).
-/// Each link's target is read without following it, so the walk itself reaches no host.
+/// Refuses an agent's `path` when an entry on its way — a folder from the root down, or the file
+/// itself — is a link (D120). On Windows a symbolic link under `C:\` can lead to `\\host\share`,
+/// and opening through it authenticates to that host exactly as the prefixes `is_local` refuses
+/// would. Where a link leads is never read: reading a target and checking it is what review found
+/// three ways around (D120). Entries are asked from the root down and the walk stops at the first
+/// link, so nothing is asked through one. An entry that is not there stops the walk without a
+/// refusal, since the open that follows fails and says why; any other error refuses, because the
+/// walk can no longer tell what is there.
 ///
-/// Elsewhere it answers `Ok`: a link to a mount is to a mount the user made, as a mapped drive
-/// letter is on Windows.
-#[cfg(windows)]
-pub fn links_stay_on_this_machine(path: &Path) -> Result<(), String> {
-    walk_links(path, &mut look_on_disk, &is_local)
-}
-
-/// See the Windows arm: no other platform names a host in a path.
-#[cfg(not(windows))]
-pub fn links_stay_on_this_machine(_path: &Path) -> Result<(), String> {
-    Ok(())
-}
-
-/// What one step of the walk found at a path, without following it if it is a link.
-#[cfg(any(windows, test))]
-enum Step {
-    /// Not a link.
-    Plain,
-    /// A link, and where it points.
-    Link(std::path::PathBuf),
-    /// A link whose target could not be read.
-    Unreadable(std::io::Error),
-    /// Nothing could be asked of it: the open that follows says why, and nothing past it is
-    /// looked at, since looking would go through it.
-    Unknown,
-}
-
-/// `std` calls both a symbolic link and a junction (a mount point) a symlink on Windows, and reads
-/// both with `read_link`, which takes the target from the reparse data (D108).
-#[cfg(windows)]
-fn look_on_disk(path: &Path) -> Step {
-    match std::fs::symlink_metadata(path) {
-        Ok(found) if found.file_type().is_symlink() => match std::fs::read_link(path) {
-            Ok(target) => Step::Link(target),
-            Err(why) => Step::Unreadable(why),
-        },
-        Ok(_) => Step::Plain,
-        Err(_) => Step::Unknown,
-    }
-}
-
-/// The walk over `path`, with how a step is looked at and what counts as local handed in, so it is
-/// tested where no path has a prefix.
-#[cfg(any(windows, test))]
-fn walk_links(
+/// `is_link` answers for one entry without following it: [`refused_link`] in the bridge and the
+/// window, and a table in the tests, so the walk and both callers are pinned where no entry is one.
+pub fn no_link_on_the_way(
     path: &Path,
-    look: &mut impl FnMut(&Path) -> Step,
-    local: &impl Fn(&Path) -> bool,
+    mut is_link: impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Result<(), String> {
-    let mut links = 0;
-    walk_from(path, path, look, local, &mut links).map(|_| ())
-}
-
-/// Walks `through` from its root, and each link's target before going past that link: whatever
-/// is looked at past a link is reached through it. Answers whether the walk got to the end.
-#[cfg(any(windows, test))]
-fn walk_from(
-    asked: &Path,
-    through: &Path,
-    look: &mut impl FnMut(&Path) -> Step,
-    local: &impl Fn(&Path) -> bool,
-    links: &mut usize,
-) -> Result<bool, String> {
     let mut walked = std::path::PathBuf::new();
-    for component in through.components() {
+    for component in path.components() {
         walked.push(component);
         if matches!(component, Component::Prefix(_) | Component::RootDir) {
             continue;
         }
-        let target = match look(&walked) {
-            Step::Plain => continue,
-            Step::Unknown => return Ok(false),
-            Step::Unreadable(why) => {
+        match is_link(&walked) {
+            Ok(false) => {}
+            Ok(true) => {
                 return Err(format!(
-                    "{} passes through a link whose target cannot be read: {why}",
-                    asked.display()
+                    "{} passes through a link, and an agent's image is not opened through one",
+                    path.display()
                 ));
             }
-            Step::Link(target) => target,
-        };
-        *links += 1;
-        if *links > MAX_LINKS {
-            return Err(format!(
-                "{} passes through more than {MAX_LINKS} links",
-                asked.display()
-            ));
-        }
-        // A relative target is relative to the folder the link is in.
-        let target = match walked.parent() {
-            Some(folder) if target.is_relative() => folder.join(target),
-            _ => target,
-        };
-        if !local(&target) {
-            return Err(format!(
-                "{} leads to {}, which is not on this machine",
-                asked.display(),
-                target.display()
-            ));
-        }
-        if !walk_from(asked, &target, look, local, links)? {
-            return Ok(false);
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(why) => {
+                return Err(format!(
+                    "cannot tell whether {} passes through a link: {why}",
+                    path.display()
+                ));
+            }
         }
     }
-    Ok(true)
+    Ok(())
+}
+
+/// Whether the entry `path` names is a link, asked of the entry itself: `symlink_metadata` opens
+/// the reparse point rather than what it names. std's `is_symlink` is the name-surrogate rule — a
+/// symbolic link, a junction, or any other reparse tag that names another path — so those are what
+/// is refused. A reparse point that is no name (a cloud placeholder, deduplication, compression)
+/// holds the file's own data behind its filter and passes, as D108 lets it pass: refusing it would
+/// refuse every image under a OneDrive-synced folder (D120).
+#[cfg(windows)]
+pub fn refused_link(path: &Path) -> std::io::Result<bool> {
+    Ok(std::fs::symlink_metadata(path)?.file_type().is_symlink())
+}
+
+/// No link is refused here, and nothing is asked of the disk: a link leads to what the user made
+/// reachable, as a mapped drive letter does on Windows. That is an accepted cost, not a claim that
+/// no path can name a host here — macOS's `/net` and an autofs `-hosts` map can (D120).
+#[cfg(not(windows))]
+pub fn refused_link(_path: &Path) -> std::io::Result<bool> {
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -278,171 +222,143 @@ mod tests {
         }
     }
 
-    /// A disk made of a table: the links in it, the paths nothing can be asked of, and every
-    /// other path a plain entry. It writes down each path it is asked about, in order.
-    struct Disk {
-        links: Vec<(&'static str, &'static str)>,
-        unknown: Vec<&'static str>,
-        unreadable: Vec<&'static str>,
-        looked: Vec<std::path::PathBuf>,
+    /// What one entry of the table answers when it is asked.
+    type Answer = fn() -> std::io::Result<bool>;
+
+    /// Walks `path` over a disk made of a table — what each entry answers, every other entry not
+    /// a link — and writes down each entry it was asked about, in order.
+    fn walk(
+        path: &str,
+        answers: &[(&str, Answer)],
+    ) -> (Result<(), String>, Vec<std::path::PathBuf>) {
+        let mut asked = Vec::new();
+        let said = no_link_on_the_way(Path::new(path), |at: &Path| {
+            asked.push(at.to_path_buf());
+            answers
+                .iter()
+                .find(|(entry, _)| Path::new(entry) == at)
+                .map_or(Ok(false), |(_, answer)| answer())
+        });
+        (said, asked)
     }
 
-    impl Disk {
-        fn of(links: &[(&'static str, &'static str)]) -> Self {
-            Disk {
-                links: links.to_vec(),
-                unknown: Vec::new(),
-                unreadable: Vec::new(),
-                looked: Vec::new(),
-            }
+    fn link() -> std::io::Result<bool> {
+        Ok(true)
+    }
+
+    fn gone() -> std::io::Result<bool> {
+        Err(std::io::ErrorKind::NotFound.into())
+    }
+
+    fn denied() -> std::io::Result<bool> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "access is denied",
+        ))
+    }
+
+    fn paths(entries: &[&str]) -> Vec<std::path::PathBuf> {
+        entries.iter().map(std::path::PathBuf::from).collect()
+    }
+
+    /// Every entry is asked, from the root down, and the file last.
+    #[test]
+    fn a_path_with_no_link_is_asked_entry_by_entry_from_the_root() {
+        let (said, asked) = walk("/home/me/a.png", &[]);
+        assert_eq!(said, Ok(()));
+        assert_eq!(asked, paths(&["/home", "/home/me", "/home/me/a.png"]));
+    }
+
+    /// **A link anywhere refuses the path, the file included**, and nothing past a link is asked:
+    /// asking would go through it.
+    #[test]
+    fn a_link_anywhere_on_the_way_refuses_the_path() {
+        let refused = "/home/me/a.png passes through a link, and an agent's image is not opened \
+                       through one";
+        for (at, asked_up_to) in [
+            ("/home", &["/home"][..]),
+            ("/home/me", &["/home", "/home/me"][..]),
+            (
+                "/home/me/a.png",
+                &["/home", "/home/me", "/home/me/a.png"][..],
+            ),
+        ] {
+            let (said, asked) = walk("/home/me/a.png", &[(at, link)]);
+            assert_eq!(said, Err(refused.to_owned()), "{at}");
+            assert_eq!(asked, paths(asked_up_to), "{at}");
         }
-
-        /// Walks `path` over this disk, where only what is under `/share` is another machine:
-        /// the walk's own logic, with the prefix test that only Windows can parse handed in.
-        fn walk(&mut self, path: &str) -> Result<(), String> {
-            let mut look = |at: &Path| {
-                self.looked.push(at.to_path_buf());
-                if self.unknown.iter().any(|p| Path::new(p) == at) {
-                    return Step::Unknown;
-                }
-                if self.unreadable.iter().any(|p| Path::new(p) == at) {
-                    return Step::Unreadable(std::io::Error::other("no reparse data"));
-                }
-                match self.links.iter().find(|(link, _)| Path::new(link) == at) {
-                    Some((_, target)) => Step::Link(target.into()),
-                    None => Step::Plain,
-                }
-            };
-            walk_links(Path::new(path), &mut look, &|p: &Path| {
-                !p.starts_with("/share")
-            })
-        }
-
-        fn looked_at(&self, path: &str) -> bool {
-            self.looked.iter().any(|p| p == Path::new(path))
-        }
     }
 
+    /// **An entry the disk will not answer for refuses the path** with what it said: the walk
+    /// cannot tell whether a link is there, and a folder it may not look into may still be passed
+    /// through by the open.
     #[test]
-    fn a_path_with_no_link_is_walked_to_its_end() {
-        let mut disk = Disk::of(&[]);
-        assert_eq!(disk.walk("/home/me/a.png"), Ok(()));
+    fn an_entry_that_cannot_be_asked_refuses_the_path() {
+        let (said, asked) = walk("/home/me/a.png", &[("/home/me", denied)]);
         assert_eq!(
-            disk.looked,
-            ["/home", "/home/me", "/home/me/a.png"].map(std::path::PathBuf::from)
-        );
-    }
-
-    /// **The file, or any folder on its way, that links to another machine refuses the path**, and
-    /// nothing past that link is looked at: looking would go through it.
-    #[test]
-    fn a_link_to_another_machine_refuses_the_path_wherever_it_is() {
-        let mut disk = Disk::of(&[("/home/me/a.png", "/share/a.png")]);
-        assert_eq!(
-            disk.walk("/home/me/a.png"),
-            Err("/home/me/a.png leads to /share/a.png, which is not on this machine".to_owned())
-        );
-        let mut disk = Disk::of(&[("/home/me", "/share")]);
-        assert_eq!(
-            disk.walk("/home/me/a.png"),
-            Err("/home/me/a.png leads to /share, which is not on this machine".to_owned())
-        );
-        assert!(!disk.looked_at("/home/me/a.png"));
-    }
-
-    /// A relative target is read from the link's own folder: `b.png` beside the link, which is
-    /// itself a link to another machine. Read on its own, `b.png` names nothing in the table.
-    #[test]
-    fn a_relative_target_is_read_from_the_links_folder() {
-        let mut disk = Disk::of(&[
-            ("/home/me/a.png", "b.png"),
-            ("/home/me/b.png", "/share/b.png"),
-        ]);
-        assert_eq!(
-            disk.walk("/home/me/a.png"),
-            Err("/home/me/a.png leads to /share/b.png, which is not on this machine".to_owned())
-        );
-    }
-
-    /// **A local target is walked too, before anything past the link**: a link to `/data` where
-    /// `/data` itself links to another machine is refused, and the file under it is never asked
-    /// for. A local chain is followed to its end.
-    #[test]
-    fn a_local_target_is_walked_before_the_path_goes_past_it() {
-        let mut disk = Disk::of(&[("/home/me", "/data"), ("/data", "/share")]);
-        assert_eq!(
-            disk.walk("/home/me/a.png"),
-            Err("/home/me/a.png leads to /share, which is not on this machine".to_owned())
-        );
-        assert!(!disk.looked_at("/home/me/a.png"));
-        let mut disk = Disk::of(&[("/home/me", "/data/me")]);
-        assert_eq!(disk.walk("/home/me/a.png"), Ok(()));
-        assert!(disk.looked_at("/data/me"));
-        assert!(disk.looked_at("/home/me/a.png"));
-    }
-
-    #[test]
-    fn a_loop_of_links_is_refused_once_it_passes_the_bound() {
-        let mut disk = Disk::of(&[("/home/a", "/home/b"), ("/home/b", "/home/a")]);
-        assert_eq!(
-            disk.walk("/home/a/x.png"),
-            Err(format!(
-                "/home/a/x.png passes through more than {MAX_LINKS} links"
-            ))
-        );
-    }
-
-    /// A link whose target cannot be read refuses the path: where it leads is unknown. A path
-    /// nothing can be asked of ends the walk without a refusal, because the open that follows
-    /// fails and says why — and nothing past it is looked at.
-    #[test]
-    fn an_unreadable_link_refuses_and_an_unknown_path_ends_the_walk() {
-        let mut disk = Disk::of(&[]);
-        disk.unreadable.push("/home/me");
-        assert_eq!(
-            disk.walk("/home/me/a.png"),
+            said,
             Err(
-                "/home/me/a.png passes through a link whose target cannot be read: \
-                 no reparse data"
+                "cannot tell whether /home/me/a.png passes through a link: access is denied"
                     .to_owned()
             )
         );
-        let mut disk = Disk::of(&[("/home/gone/a.png", "/share/a.png")]);
-        disk.unknown.push("/home/gone");
-        assert_eq!(disk.walk("/home/gone/a.png"), Ok(()));
-        assert!(!disk.looked_at("/home/gone/a.png"));
+        assert_eq!(asked, paths(&["/home", "/home/me"]));
     }
 
-    /// **On a real Windows disk**, a symbolic link to a share — as a file, and as a folder on the
-    /// way — is refused by reading it, never by following it. Creating a symbolic link needs a
-    /// privilege (or Developer Mode) that a test runner may lack; then the test says so and checks
-    /// nothing. A junction cannot point at a share, so none is made here.
+    /// An entry that is not there leaves the path to the open, which fails and says why, and
+    /// nothing under it is asked.
+    #[test]
+    fn an_entry_that_is_not_there_is_left_to_the_open() {
+        let (said, asked) = walk("/home/gone/a.png", &[("/home/gone", gone)]);
+        assert_eq!(said, Ok(()));
+        assert_eq!(asked, paths(&["/home", "/home/gone"]));
+        let (said, _) = walk("/home/me/a.png", &[("/home/me/a.png", gone)]);
+        assert_eq!(said, Ok(()));
+    }
+
+    /// **On a real Windows disk** a junction — which needs no privilege to make — and a symbolic
+    /// link are each refused as the file's folder, and the plain folder beside them is not. A
+    /// symbolic link needs a privilege (or Developer Mode) a runner may lack: then that half says
+    /// so and checks nothing, and the junction half still runs.
     #[cfg(windows)]
     #[test]
-    fn a_symbolic_link_to_a_share_is_refused_on_windows() {
+    fn a_junction_or_a_symbolic_link_is_refused_on_windows() {
         const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
         let folder = std::env::temp_dir().join(format!("ivy-image-links-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
-        std::fs::create_dir_all(&folder).unwrap();
-        let file = folder.join("a.png");
-        let through = folder.join("share");
-        let made = std::os::windows::fs::symlink_file(r"\\host\share\a.png", &file)
-            .and_then(|()| std::os::windows::fs::symlink_dir(r"\\host\share", &through));
-        if let Err(why) = &made
-            && why.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD)
-        {
-            let _ = std::fs::remove_dir_all(&folder);
-            eprintln!("skipped: this account may not create symbolic links ({why})");
-            return;
+        let plain = folder.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("a.png"), b"x").unwrap();
+        assert_eq!(
+            no_link_on_the_way(&plain.join("a.png"), refused_link),
+            Ok(())
+        );
+        let junction = folder.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let mut links = vec![junction];
+        let symbolic = folder.join("symbolic");
+        match std::os::windows::fs::symlink_dir(&plain, &symbolic) {
+            Ok(()) => links.push(symbolic),
+            Err(why) if why.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+                eprintln!("symbolic link skipped: this account may not create one ({why})");
+            }
+            Err(why) => panic!("{why}"),
         }
-        made.unwrap();
-        for asked in [file.clone(), through.join("a.png")] {
-            let said = links_stay_on_this_machine(&asked).unwrap_err();
-            let start = format!("{} leads to ", asked.display());
-            assert!(said.starts_with(&start), "{said}");
-            assert!(said.ends_with(", which is not on this machine"), "{said}");
-            let target = &said[start.len()..said.len() - ", which is not on this machine".len()];
-            assert!(!is_local(Path::new(target)), "{target}");
+        for link in links {
+            let file = link.join("a.png");
+            assert_eq!(
+                no_link_on_the_way(&file, refused_link),
+                Err(format!(
+                    "{} passes through a link, and an agent's image is not opened through one",
+                    file.display()
+                ))
+            );
         }
         let _ = std::fs::remove_dir_all(&folder);
     }

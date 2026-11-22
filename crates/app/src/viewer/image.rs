@@ -4,7 +4,7 @@
 //! and never refreshed, so a program that overwrites the same screenshot name does not change what
 //! is on screen.
 use super::Source;
-use super::load::{Job, Picture};
+use super::load::{IsLink, Job, Picture};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,6 +65,8 @@ impl Console {
 /// What the drawer keeps across consoles: one pointer, one Send at a time, one count of openings.
 #[derive(Default)]
 pub(crate) struct Viewer {
+    /// How an agent's open asks each entry of its path whether it is a link (D120).
+    links: Links,
     /// The button whose drag pans the image, latched when it went down.
     panning: Option<egui::PointerButton>,
     /// The frame an image was last painted in, and which opening it was: a pan or a stroke begun
@@ -76,10 +78,22 @@ pub(crate) struct Viewer {
     opened: u64,
 }
 
+/// The platform's reader, or a test's.
+struct Links(IsLink);
+
+impl Default for Links {
+    fn default() -> Self {
+        Self(panel_control::image::refused_link)
+    }
+}
+
 struct Opened {
     id: u64,
     origin: Source,
     path: PathBuf,
+    /// Set for an agent's open: the worker refuses a path through a link before it opens it. A
+    /// person's own open is not walked (D120).
+    links: Option<IsLink>,
     load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
@@ -110,8 +124,9 @@ enum Gpu {
 impl Viewer {
     /// Replaces the image `slot` held with `path`, read from `origin`'s console. A pan latched on
     /// another console's image is that image's, and an agent may open into a console the person is
-    /// not looking at, so only a pan on the image being replaced is let go.
-    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf) {
+    /// not looking at, so only a pan on the image being replaced is let go. `by_agent` is whether
+    /// an agent named the path, which is what its decode is walked for.
+    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf, by_agent: bool) {
         if self
             .painted
             .is_some_and(|(_, opening)| slot.document() == Some(opening))
@@ -119,7 +134,8 @@ impl Viewer {
             self.panning = None;
         }
         self.opened += 1;
-        slot.open(self.opened, origin, path);
+        let links = by_agent.then_some(self.links.0);
+        slot.open(self.opened, origin, path, links);
     }
 
     /// Whether a Send is between its click and its Enter.
@@ -137,7 +153,7 @@ impl Viewer {
 impl Slot {
     /// Replaces the image with `path`, opened as `id`. A relative path is one whose console's
     /// directory is unknown: it is refused and says so.
-    fn open(&mut self, id: u64, origin: Source, path: PathBuf) {
+    fn open(&mut self, id: u64, origin: Source, path: PathBuf, links: Option<IsLink>) {
         self.clear();
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
@@ -148,6 +164,7 @@ impl Slot {
             id,
             origin,
             path,
+            links,
             load,
             scale: None,
             offset: egui::Vec2::ZERO,
@@ -299,7 +316,7 @@ impl Slot {
                 Some((busy, _)) => Load::Failed(format!("Still reading {}…", busy.display())),
                 None => {
                     let side = ctx.input(|i| i.max_texture_side);
-                    match Job::image(document.path.clone(), side, ctx.clone()) {
+                    match Job::image(document.path.clone(), side, document.links, ctx.clone()) {
                         Ok(job) => Load::Decoding(job),
                         Err(why) => Load::Failed(why),
                     }
@@ -670,7 +687,7 @@ mod tests {
         write_png(&path, 40, 20);
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(1, source(), path.clone());
+        viewer.open(1, source(), path.clone(), None);
         let started = Instant::now();
         while !viewer.loaded() {
             viewer.poll(&ctx);
@@ -1269,7 +1286,7 @@ mod tests {
         let mut alone = Alone::default();
         alone
             .image
-            .open(&mut alone.slot, source(), PathBuf::from("/shot.png"));
+            .open(&mut alone.slot, source(), PathBuf::from("/shot.png"), false);
         alone.slot.document.as_mut().unwrap().load = Load::Ready {
             original: Arc::new(original),
             gpu: Gpu::Waiting(egui::ColorImage::filled([4, 2], egui::Color32::RED)),
@@ -1321,7 +1338,7 @@ mod tests {
     fn a_relative_path_says_why_and_reads_nothing() {
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(1, source(), PathBuf::from("shot.png"));
+        viewer.open(1, source(), PathBuf::from("shot.png"), None);
         viewer.poll(&ctx);
         assert!(!viewer.loaded());
         assert!(matches!(
@@ -3044,9 +3061,12 @@ mod tests {
             rect
         };
         let mut viewer = Alone::default();
-        viewer
-            .image
-            .open(&mut viewer.slot, source(), PathBuf::from("/shot.png"));
+        viewer.image.open(
+            &mut viewer.slot,
+            source(),
+            PathBuf::from("/shot.png"),
+            false,
+        );
         let at = egui::pos2(150.0, 50.0);
         // Loading, then decoded: no pass before this one painted the image.
         assert_eq!(run(&mut viewer, vec![egui::Event::PointerMoved(at)]), None);
@@ -4838,7 +4858,7 @@ mod tests {
             label: "bash".into(),
             cwd: None,
         };
-        slot.open(1, source, PathBuf::from("/a.png"));
+        slot.open(1, source, PathBuf::from("/a.png"), None);
         slot.sent();
         assert_eq!(slot.notice.as_deref(), Some("Sent to bash."));
         slot.add("Send or clear the marks.");
@@ -6665,9 +6685,12 @@ mod tests {
     fn taking_the_mark_down_asks_for_the_next_frame() {
         let mut alone = Alone::default();
         // A relative path is refused the moment it is opened: the refusal is what is painted.
-        alone
-            .image
-            .open(&mut alone.slot, source(), PathBuf::from("relative.png"));
+        alone.image.open(
+            &mut alone.slot,
+            source(),
+            PathBuf::from("relative.png"),
+            false,
+        );
         let ctx = egui::Context::default();
         let frame = |alone: &mut Alone| {
             let mut output = ctx.run_ui(

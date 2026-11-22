@@ -704,6 +704,15 @@ const IMAGE_OPEN: &str = "Show an image to the person in the drawer under this c
 /// its own read checks again. A path on another machine is refused before anything is asked of it:
 /// asking is what reaches that host.
 fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
+    image_to_open_with(path, panel_control::image::refused_link)
+}
+
+/// [`image_to_open`] with how an entry is asked whether it is a link handed in, so a test can put
+/// a link on the way where the platform has none.
+fn image_to_open_with(
+    path: &str,
+    is_link: impl FnMut(&std::path::Path) -> std::io::Result<bool>,
+) -> Result<std::path::PathBuf, String> {
     if path.is_empty() {
         return Err("image_open's \"path\" is empty".to_owned());
     }
@@ -716,8 +725,8 @@ fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
     if let Some(elsewhere) = panel_control::image::elsewhere(&file) {
         return Err(format!("{path} {}", elsewhere.says()));
     }
-    // Before the metadata below, which would follow a link to another machine and reach it.
-    panel_control::image::links_stay_on_this_machine(&file)?;
+    // Before the metadata below, which follows links: on Windows one can lead to another machine.
+    panel_control::image::no_link_on_the_way(&file, is_link)?;
     let found = std::fs::metadata(&file).map_err(|why| format!("cannot open {path}: {why}"))?;
     if found.is_dir() {
         return Err(format!("{path} is a folder, not an image"));

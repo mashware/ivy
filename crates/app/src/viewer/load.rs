@@ -17,6 +17,8 @@ const CODE_LIMIT: usize = 1024 * 1024;
 const BINARY_SNIFF: usize = 8 * 1024;
 /// The bridge refuses the same size before an agent's open reaches the window (D120).
 pub(super) const IMAGE_LIMIT: usize = panel_control::image::MAX_BYTES as usize;
+/// Asks one entry of a path whether it is a link an agent's open is refused through.
+pub(super) type IsLink = fn(&Path) -> std::io::Result<bool>;
 pub(super) const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 64 * 1024;
@@ -118,12 +120,15 @@ impl Job {
 }
 
 impl Job<Picture> {
+    /// Decodes `path` on the worker. `links` is set for an agent's open: the walk that refuses a
+    /// path through a link runs there, before the open, with that reader (D120).
     pub(super) fn image(
         path: PathBuf,
         max_side: usize,
+        links: Option<IsLink>,
         ctx: egui::Context,
     ) -> Result<Self, String> {
-        spawn(ctx, move || decode_image(&path, max_side))
+        spawn(ctx, move || decode_image(&path, max_side, links))
     }
 
     pub(super) fn poll(&self) -> Option<Result<Picture, String>> {
@@ -233,12 +238,14 @@ fn read_text(path: &Path) -> Result<String, String> {
 
 /// Decodes a PNG or JPEG, keeping the original and a copy no side of which exceeds `max_side`,
 /// the largest texture the GPU takes.
-fn decode_image(path: &Path, max_side: usize) -> Result<Picture, String> {
+fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<Picture, String> {
     use image::{ImageDecoder, ImageFormat, ImageReader};
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
-    // The enforcement of what the bridge only advises (D120). It holds for every image the drawer
-    // opens, the person's own included: the drawer does not know who named the path.
-    panel_control::image::links_stay_on_this_machine(path)?;
+    // The enforcement of what the bridge only advises, for an agent's open; a person's own open is
+    // not walked (D120).
+    if let Some(is_link) = links {
+        panel_control::image::no_link_on_the_way(path, is_link)?;
+    }
     let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
@@ -885,10 +892,10 @@ mod tests {
     #[test]
     fn an_image_that_is_not_a_regular_png_or_jpeg_within_the_size_cap_says_why() {
         let temp = Temp::new();
-        let folder = decode_image(&temp.0, 4096).err().unwrap();
+        let folder = decode_image(&temp.0, 4096, None).err().unwrap();
         assert_eq!(folder, "This is a folder, not a file");
         let missing = temp.0.join("missing.png");
-        let error = decode_image(&missing, 4096).err().unwrap();
+        let error = decode_image(&missing, 4096, None).err().unwrap();
         assert!(
             error.starts_with(&format!("Cannot open {}: ", missing.display())),
             "{error}"
@@ -898,7 +905,7 @@ mod tests {
             .unwrap()
             .set_len(IMAGE_LIMIT as u64 + 1)
             .unwrap();
-        let error = decode_image(&large, 4096).err().unwrap();
+        let error = decode_image(&large, 4096, None).err().unwrap();
         assert!(
             error.starts_with(&format!("Cannot read {}: ", large.display())),
             "{error}"
@@ -911,7 +918,7 @@ mod tests {
             let path = temp.0.join(name);
             fs::write(&path, bytes).unwrap();
             assert_eq!(
-                decode_image(&path, 4096).err().unwrap(),
+                decode_image(&path, 4096, None).err().unwrap(),
                 "This file is not a PNG or JPEG image",
                 "{name}"
             );
@@ -926,7 +933,7 @@ mod tests {
         let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
         assert!(
-            decode_image(&fifo, 4096)
+            decode_image(&fifo, 4096, None)
                 .err()
                 .unwrap()
                 .contains("not a regular file")
@@ -942,7 +949,7 @@ mod tests {
             let path = temp.0.join(name);
             fs::write(&path, png_header(width, width, color)).unwrap();
             assert_eq!(
-                decode_image(&path, 4096).err().unwrap(),
+                decode_image(&path, 4096, None).err().unwrap(),
                 "This image needs more memory than the viewer allows",
                 "{name}"
             );
@@ -956,11 +963,14 @@ mod tests {
         image::RgbaImage::from_fn(300, 120, |x, y| image::Rgba([x as u8, y as u8, 30, 255]))
             .save_with_format(&png, image::ImageFormat::Png)
             .unwrap();
-        let picture = decode_image(&png, 100).unwrap();
+        let picture = decode_image(&png, 100, None).unwrap();
         assert_eq!(picture.original.dimensions(), (300, 120));
         assert_eq!(picture.display.size, [100, 40]);
-        assert_eq!(decode_image(&png, 299).unwrap().display.size, [299, 119]);
-        let exact = decode_image(&png, 300).unwrap();
+        assert_eq!(
+            decode_image(&png, 299, None).unwrap().display.size,
+            [299, 119]
+        );
+        let exact = decode_image(&png, 300, None).unwrap();
         assert_eq!(exact.display.size, [300, 120]);
         assert_eq!(exact.display.as_raw(), exact.original.as_raw().as_slice());
         let jpeg = temp.0.join("photo.JPG");
@@ -968,7 +978,10 @@ mod tests {
             .save_with_format(&jpeg, image::ImageFormat::Jpeg)
             .unwrap();
         assert_eq!(
-            decode_image(&jpeg, 4096).unwrap().original.dimensions(),
+            decode_image(&jpeg, 4096, None)
+                .unwrap()
+                .original
+                .dimensions(),
             (64, 32)
         );
     }
