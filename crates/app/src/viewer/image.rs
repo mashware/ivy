@@ -2335,7 +2335,14 @@ mod tests {
             assert!(!window.viewer.keyboard);
             assert!(ctx.memory(|m| m.focused()).is_none());
             assert_eq!(first.wait_for(5, Duration::from_secs(5)), b"FIRST");
-            assert!(second.so_far().is_empty());
+            window.active_mut().panes_mut()[1]
+                .pty
+                .write(b"PREVIOUS-1")
+                .unwrap();
+            assert_eq!(
+                second.wait_for(b"PREVIOUS-1".len(), Duration::from_secs(5)),
+                b"PREVIOUS-1"
+            );
             painted(
                 &mut window,
                 &ctx,
@@ -2363,7 +2370,14 @@ mod tests {
             } else {
                 assert_eq!(window.viewer.base, "private");
             }
-            assert!(second.so_far().is_empty());
+            window.active_mut().panes_mut()[1]
+                .pty
+                .write(b"PREVIOUS-2")
+                .unwrap();
+            assert_eq!(
+                second.wait_for(b"PREVIOUS-1PREVIOUS-2".len(), Duration::from_secs(5)),
+                b"PREVIOUS-1PREVIOUS-2"
+            );
         }
     }
 
@@ -2443,14 +2457,21 @@ mod tests {
                 vec![button(egui::PointerButton::Primary, released, false)],
             );
             assert_eq!(window.active().focus, focus, "{boundary} release");
-            assert!(
-                first.so_far().is_empty(),
-                "{boundary}: first program received input"
-            );
-            assert!(
-                second.so_far().is_empty(),
-                "{boundary}: second program received input"
-            );
+            // Each barrier uses the program's own FIFO writer, behind any leaked input.
+            for (index, received, barrier) in [
+                (0, &first, b"FIRST-BARRIER".as_slice()),
+                (1, &second, b"SECOND-BARRIER".as_slice()),
+            ] {
+                window.active_mut().panes_mut()[index]
+                    .pty
+                    .write(barrier)
+                    .unwrap();
+                assert_eq!(
+                    received.wait_for(barrier.len(), Duration::from_secs(5)),
+                    barrier,
+                    "{boundary}: program {index} received input before its barrier"
+                );
+            }
         }
     }
 
