@@ -193,25 +193,42 @@ fn unavailable_candidate_explicitly_negotiates_an_unverified_stream() {
 #[test]
 fn client_upgrade_uses_its_supplied_total_deadline() {
     let (dir, listener) = listener();
+    let (stop, acceptor) = windows::acceptor(listener).unwrap();
+    let (release, held) = std::sync::mpsc::channel();
     let server = thread::spawn(move || {
-        let stream = listener.accept().unwrap();
-        let mut hello = [0; HELLO.len()];
-        (&stream).read_exact(&mut hello).unwrap();
-        assert_eq!(&hello, HELLO);
-        thread::sleep(Duration::from_millis(100));
+        if matches!(
+            acceptor.wait().unwrap(),
+            crate::endpoint::AcceptorReady::Connection
+        ) {
+            let stream = acceptor.accept().unwrap();
+            // Keep the peer open until the client returns. The outer watchdog only releases a
+            // broken implementation; EOF must never count as evidence that its deadline worked.
+            let _ = held.recv_timeout(DEADLINE * 2);
+            drop(stream);
+        }
     });
     let started = Instant::now();
-    assert!(
-        connect_verified(
-            dir.path(),
-            dir.id(),
-            std::process::id(),
-            started + Duration::from_millis(20)
-        )
-        .is_err()
+    let result = connect_verified(
+        dir.path(),
+        dir.id(),
+        std::process::id(),
+        started + Duration::from_millis(20),
     );
-    assert!(started.elapsed() < DEADLINE);
+    let elapsed = started.elapsed();
+    let _ = release.send(());
+    drop(stop); // Also releases accept if the deadline expired before the client connected.
     server.join().unwrap();
+    let failure = result
+        .err()
+        .expect("a silent peer must exhaust the supplied deadline");
+    assert!(matches!(
+        failure.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ));
+    assert!(
+        elapsed < DEADLINE / 2,
+        "client reset its caller's total deadline"
+    );
 }
 
 #[test]

@@ -18,6 +18,12 @@ CHILD = "endpoint::windows::peer_tests::exited_windows_peer_and_its_clones_never
 # These mutations each remove one observable guarantee; compilation failure is not a kill.
 MUTATIONS = [
     (
+        "client-resets-supplied-deadline", NEGOTIATION,
+        "    let bootstrap = super::connect(dir, id)?;",
+        "    let deadline = Instant::now() + DEADLINE;\n    let bootstrap = super::connect(dir, id)?;",
+        "endpoint::windows::negotiation::tests::client_upgrade_uses_its_supplied_total_deadline",
+    ),
+    (
         "exited-process-stays-alive", PROCESS,
         "unsafe { WaitForSingleObject(self.lifetime.as_raw_handle(), 0) == WAIT_TIMEOUT }",
         "unsafe { WaitForSingleObject(self.lifetime.as_raw_handle(), 0); true }",
