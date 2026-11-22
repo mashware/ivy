@@ -128,8 +128,8 @@ pub(super) fn rows(marks: &Marks) -> usize {
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
     send: Option<Arc<egui::Galley>>,
-    /// The height of the console picker over the button, when there is a console to pick.
-    chooser: Option<f32>,
+    /// Whether the button shares its row with a picker of the console it types into.
+    chooser: bool,
     padding: egui::Vec2,
     spacing: f32,
 }
@@ -160,12 +160,14 @@ impl Fixed {
         let wrapped = |width: f32| egui::text::TextWrapping::wrap_at_width(width.max(1.0));
         let said =
             |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
+        // The picker takes its width off the button's, so the label wraps to what is left.
+        let chooser = choose && send.is_some();
+        let beside = if chooser { PICKER + style.spacing.item_spacing.x } else { 0.0 };
         let send = send.map(|(console, busy, parked)| {
             let font = egui::TextStyle::Button.into();
             let label = send_label(console, busy, parked).into();
-            lay(label, wrapped(width - 2.0 * padding.x), font)
+            lay(label, wrapped(width - beside - 2.0 * padding.x), font)
         });
-        let chooser = (choose && send.is_some()).then_some(style.spacing.interact_size.y);
         let mut fixed = Self {
             notice: notice.map(|n| lay(said(n), wrapped(width), egui::FontSelection::Default)),
             send,
@@ -192,8 +194,7 @@ impl Fixed {
             .send
             .as_ref()
             .map_or(0.0, |send| self.button_height(send) + self.spacing);
-        let chooser = self.chooser.map_or(0.0, |height| height + self.spacing);
-        notice + send + chooser
+        notice + send
     }
 
     /// Whether the notice and the button together are taller than `room`, the column's height
@@ -398,14 +399,25 @@ pub(super) fn notes(
     // Not while a cancelled Send's worker may yet create the copy this one would name.
     let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
     let foot = fixed.send.as_ref().filter(|_| !squeezed);
+    let to = sending.to.clone().unwrap_or((origin.pane, origin.label.clone()));
+    let mut picked = None;
     let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);
         let label = Arc::clone(label);
-        if !sending.cancellable() {
+        if !sending.cancellable() && !fixed.chooser {
             return (
                 send_button(&mut column, ready, label, height, &roles),
                 false,
             );
+        }
+        let size = egui::vec2(column.available_width(), height);
+        let row = egui::Layout::right_to_left(egui::Align::Center);
+        if !sending.cancellable() {
+            let inner = column.allocate_ui_with_layout(size, row, |ui| {
+                picked = chooser(ui, &to, &sending.consoles, height);
+                send_button(ui, ready, label, height, &roles)
+            });
+            return (inner.inner, false);
         }
         let size = egui::vec2(column.available_width(), height);
         let row = egui::Layout::right_to_left(egui::Align::Center);
@@ -417,12 +429,6 @@ pub(super) fn notes(
         });
         (false, inner.inner)
     });
-    // Over the button, laid out after it in this bottom-up column: the console Send types into.
-    let to = sending.to.clone().unwrap_or((origin.pane, origin.label.clone()));
-    let picked = match fixed.chooser.filter(|_| foot.is_some()) {
-        Some(height) => chooser(&mut column, &to, &sending.consoles, height, sending.busy()),
-        None => None,
-    };
     let rest = column.available_size();
     column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
         // Nothing here is painted over the button under it.
@@ -471,35 +477,37 @@ pub(super) fn notes(
     }))
 }
 
-/// The console Send types into, which can be changed for another open one while nothing is on its
-/// way: the image, its marks and its notes stay as they are. Answers the console picked.
+/// Beside Send, the console it types into, which can be changed for another open one while
+/// nothing is on its way: the image, its marks and its notes stay as they are. The button already
+/// names the console, so the picker is only its arrow. Answers the console picked.
 fn chooser(
     ui: &mut egui::Ui,
-    (to, label): &(usize, String),
+    (to, _): &(usize, String),
     consoles: &[(usize, String)],
     height: f32,
-    busy: bool,
 ) -> Option<usize> {
-    let size = egui::vec2(ui.available_width(), height);
-    let row = egui::Layout::left_to_right(egui::Align::Center);
     let mut picked = None;
-    ui.allocate_ui_with_layout(size, row, |ui| {
-        ui.add_enabled_ui(!busy, |ui| {
-            ui.label("Send to");
-            egui::ComboBox::from_id_salt("image-send-target")
-                .selected_text(label.as_str())
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    for (name, label) in consoles {
-                        if ui.selectable_label(name == to, label.as_str()).clicked() && name != to {
-                            picked = Some(*name);
-                        }
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = height;
+        let response = egui::ComboBox::from_id_salt("image-send-target")
+            .selected_text("")
+            .width(PICKER)
+            .show_ui(ui, |ui| {
+                for (name, label) in consoles {
+                    if ui.selectable_label(name == to, label.as_str()).clicked() && name != to {
+                        picked = Some(*name);
                     }
-                });
-        });
+                }
+            });
+        response.response.on_hover_text(PICK);
     });
     picked
 }
+
+/// The width of the picker beside Send: room for its arrow.
+const PICKER: f32 = 18.0;
+/// What the picker beside Send says on hover and to a screen reader.
+pub(super) const PICK: &str = "Send to another console";
 
 /// The primary action: filled with the accent, the column's width, its `label` laid out wrapped
 /// rather than losing the console's name. Answers whether it was clicked.

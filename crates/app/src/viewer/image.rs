@@ -1738,7 +1738,9 @@ mod tests {
                 "with {} markers",
                 n + 1
             );
-            let (_, label) = text_rect(&shapes, |t| t == "General note").unwrap();
+            // The first marker's note: Send's row, which shares its width with the console picker,
+            // can scroll the general note's label out of a list five markers long.
+            let (_, label) = text_rect(&shapes, |t| t == "What this marker shows").unwrap();
             assert!(label.left() >= clip.right(), "{label:?} beside {clip:?}");
         }
     }

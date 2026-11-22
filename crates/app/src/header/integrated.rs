@@ -595,6 +595,7 @@ mod tests {
             ),
             (Target::Zoom, true, egui_phosphor::regular::ARROWS_IN_SIMPLE),
             (Target::Review, false, egui_phosphor::regular::GIT_BRANCH),
+            (Target::Paste, false, egui_phosphor::regular::IMAGE),
             (Target::Panel, false, egui_phosphor::regular::SIDEBAR_SIMPLE),
             (
                 Target::Search,
@@ -636,6 +637,7 @@ mod tests {
                 Target::Label as u8,
                 Target::Search as u8,
                 Target::Review as u8,
+                Target::Paste as u8,
                 Target::Panel as u8,
                 Target::Zoom as u8,
                 Target::Close as u8
@@ -1132,7 +1134,7 @@ mod tests {
                 ));
             }
             if width >= 150.0 {
-                assert_eq!(items.len(), 4);
+                assert_eq!(items.len(), 5);
             }
             if width == 500.0 {
                 assert_eq!(
@@ -1172,6 +1174,7 @@ mod tests {
                 Target::SplitDown,
                 Target::Search,
                 Target::Review,
+                Target::Paste,
                 Target::Panel,
                 Target::Zoom,
                 Target::Close
@@ -1193,6 +1196,7 @@ mod tests {
                 Target::SplitDown,
                 Target::Search,
                 Target::Review,
+                Target::Paste,
                 Target::Panel
             ]
         );
@@ -1204,7 +1208,7 @@ mod tests {
     #[test]
     fn a_narrow_header_drops_its_splits_before_the_rest() {
         for (can_close, label_only, base, with_split) in
-            [(true, 160.0, 161.0, 186.0), (false, 110.0, 111.0, 136.0)]
+            [(true, 185.0, 186.0, 211.0), (false, 135.0, 136.0, 161.0)]
         {
             let offer = Offer {
                 can_close,
@@ -1215,6 +1219,7 @@ mod tests {
             assert!(
                 base_set.contains(&Target::Search)
                     && base_set.contains(&Target::Review)
+                    && base_set.contains(&Target::Paste)
                     && base_set.contains(&Target::Panel)
             );
             assert!(!base_set.contains(&Target::SplitDown));
