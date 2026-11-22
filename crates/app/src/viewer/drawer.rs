@@ -447,3 +447,56 @@ pub(super) fn hint(action: StripAction, maximized: bool) -> &'static str {
         StripAction::Close => "Close drawer",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::viewer::StripAction;
+
+    /// With an image beside the document and the review, the strip lays out all three tabs, each
+    /// with its close button, at the width a 1000-point window with Files open leaves; narrower, a
+    /// strip that leaves any of them out says so.
+    #[test]
+    fn a_strip_with_three_tabs_lays_them_all_out_or_says_it_could_not() {
+        let tabs = Tabs {
+            changes: Some(Some(3)),
+            document: Some("plan.md".into()),
+            image: Some("shot.png".into()),
+            active: Some(crate::sidebar::Tool::Image),
+            side_by_side: false,
+        };
+        let has = |strip: &Strip, action| strip.places.iter().any(|(a, _)| *a == action);
+        let tabs_and_closes = [
+            StripAction::Changes,
+            StripAction::Document,
+            StripAction::Image,
+            StripAction::CloseChanges,
+            StripAction::CloseDocument,
+            StripAction::CloseImage,
+        ];
+        let strip = |width: f32| {
+            Strip::framed(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 370.0)),
+                &tabs,
+            )
+        };
+        let laid = strip(718.0);
+        for action in tabs_and_closes {
+            assert!(has(&laid, action), "{action:?} left out at 718 points");
+        }
+        for width in [300.0, 450.0, 550.0] {
+            let narrow = strip(width);
+            if tabs_and_closes.iter().any(|&action| !has(&narrow, action)) {
+                assert!(
+                    narrow.crowded,
+                    "a tab left out at {width} points was not said"
+                );
+            }
+        }
+        assert!(
+            tabs_and_closes
+                .iter()
+                .any(|&action| !has(&strip(300.0), action))
+        );
+    }
+}

@@ -317,7 +317,7 @@ pub(crate) fn apply_strip_action(
     match action {
         StripAction::Changes => activate(window, false),
         StripAction::Document => activate(window, true),
-        StripAction::Image => origin::show_image(window, true),
+        StripAction::Image => origin::show_image(window),
         StripAction::Unified | StripAction::SideBySide => {
             for state in [&mut window.viewer, &mut window.viewer_other] {
                 if state.tool_markdown == Some(false) {
@@ -524,8 +524,11 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         }
         window.viewer.poll(&ctx);
     }
-    let unavailable = origin::shown_origin(window)
-        .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
+    // An image tab with nothing to show is about the focused console, which is there.
+    let empty = image && image::focused(window).is_none_or(|slot| !slot.shown());
+    let unavailable = !empty
+        && origin::shown_origin(window)
+            .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
     let filtered = ctx.input(|input| input.events.clone());
     if let Some(events) = window.viewer.events.take() {
         ctx.input_mut(|input| input.events = events);
@@ -546,7 +549,6 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
             if image {
                 view::Body::Image(
                     image::focused_mut(&mut window.tabs, window.active)
-                        .filter(|slot| slot.shown())
                         .map(|slot| (&mut window.image, slot)),
                 )
             } else {

@@ -151,14 +151,13 @@ pub(super) fn forget(state: &mut super::State) {
     };
 }
 
-/// Shows the drawer's image tab; `keys` is whether the drawer takes the keyboard with it. The
-/// drawer's open, keyboard and gesture flags stay the document state's, so the image takes input
-/// exactly as a document would.
-pub(crate) fn show_image(window: &mut Window, keys: bool) {
+/// Shows the drawer's image tab, which takes the keyboard. The drawer's open, keyboard and
+/// gesture flags stay the document state's, so the image takes input exactly as a document would.
+pub(crate) fn show_image(window: &mut Window) {
     super::select_state(window, true);
     crate::sidebar::select(window, crate::sidebar::Tool::Image);
     window.viewer.open = true;
-    window.viewer.keyboard = keys;
+    window.viewer.keyboard = true;
     if let Some(ctx) = &window.viewer.context {
         ctx.request_repaint();
     }
@@ -172,7 +171,7 @@ pub(super) fn keeps_marks(window: &mut Window, pane: usize) -> bool {
         return false;
     };
     slot.add(UNSENT_MARKS);
-    show_image(window, true);
+    show_image(window);
     true
 }
 
@@ -247,7 +246,7 @@ pub(crate) fn open_image_target(
         return Err(NotOpened::Gone);
     };
     window.image.open(slot, source, path);
-    show_image(window, true);
+    show_image(window);
     if let Some(ctx) = window.viewer.context.clone()
         && let Some(slot) = super::image::slot_of(&mut window.tabs, pane)
     {
@@ -304,7 +303,7 @@ pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::C
     }
     if crate::sidebar::active(window) == Some(closed) {
         match next {
-            Some(Tool::Image) => show_image(window, true),
+            Some(Tool::Image) => show_image(window),
             Some(tool) => super::activate(window, tool == Tool::Document),
             None => crate::sidebar::close(window, ctx),
         }

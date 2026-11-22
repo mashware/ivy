@@ -119,7 +119,6 @@ impl Slot {
     /// directory is unknown: it is refused and says so.
     fn open(&mut self, id: u64, origin: Source, path: PathBuf) {
         self.clear();
-        self.notice = None;
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
         } else {
@@ -137,8 +136,9 @@ impl Slot {
         });
     }
 
-    /// Forgets the image, keeping an unfinished decode's handle.
+    /// Forgets the image and what was said about it, keeping an unfinished decode's handle.
     pub(super) fn clear(&mut self) {
+        self.notice = None;
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -147,6 +147,15 @@ impl Slot {
         {
             self.abandoned = Some((path, job));
         }
+    }
+
+    /// What a slot with no image has to say: its notice, with what a cancelled Send's worker left
+    /// to say taken into it, since the empty tab is where this console's word is read.
+    pub(super) fn word(&mut self) -> Option<&str> {
+        if let Some(said) = self.unshown.take() {
+            send::join(&mut self.notice, said);
+        }
+        self.notice.as_deref()
     }
 
     /// Whether there is an image to paint.
@@ -2153,6 +2162,60 @@ mod tests {
         );
         painted(&mut window, &ctx, vec![]);
         assert_eq!(grids(&window), before);
+        // A focus not yet settled after a close names no console: the tab is still not one whose
+        // source went away.
+        window.tabs[active_tab].focus = usize::MAX;
+        let said = texts(&painted(&mut window, &ctx, vec![]), dock);
+        assert!(!said.iter().any(|t| t.contains("unavailable")), "{said:?}");
+    }
+
+    /// A cancelled Send's last word for a console whose image was closed is said on that
+    /// console's empty tab, once, and not again under the next image opened there.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_sends_word_is_said_on_its_consoles_empty_tab() {
+        use crate::viewer::StripAction;
+        let received = term_core::received::Received::new("annotated-cancel-empty");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let own = slot(&window).origin().unwrap().pane;
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        marks_mut(&mut window).clear();
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        let reported = "the half-written copy could not be removed: busy";
+        sender.send(Err(reported.into())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains(reported))
+        };
+        let active = window.active;
+        window.tabs[active].focus = own;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            texts(&shapes, area())
+                .iter()
+                .any(|t| t == crate::viewer::view::NO_IMAGE)
+        );
+        assert!(said(&shapes), "the empty tab kept its console's word back");
+        open_in(&mut window, &ctx, own, &path);
+        assert!(
+            !said(&painted(&mut window, &ctx, vec![])),
+            "the word surfaced under the next image"
+        );
     }
 
     /// A pan latched on one console's image does not carry over to another console's when the
@@ -2268,7 +2331,7 @@ mod tests {
                 }],
             );
         }
-        crate::viewer::show_image(&mut window, true);
+        crate::viewer::show_image(&mut window);
         let before = settle(&mut window, &ctx);
         assert!(ctx.input(|i| i.pointer.middle_down()));
         travel(&mut window, &ctx, at, egui::vec2(-30.0, -45.0));
@@ -3635,7 +3698,7 @@ mod tests {
         assert_eq!(slot(&window).path(), Some(path.as_path()));
         assert_eq!(marks_of(&window).general, "the header overlaps");
         assert!(slot(&window).notice.is_none());
-        crate::viewer::show_image(&mut window, true);
+        crate::viewer::show_image(&mut window);
         let said = crate::viewer::NotOpened::Marks.to_string();
         assert!(said.contains("another image"), "{said}");
         let failure = "The copy could not be written; nothing was sent.";

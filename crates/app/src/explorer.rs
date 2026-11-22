@@ -445,14 +445,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         }
         ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
-            let opened = if crate::viewer::is_image(&path) {
-                crate::viewer::open_image_target(window, pane, path).map_err(|why| why.to_string())
-            } else if crate::viewer::open_document_target(window, pane, path, None) {
-                Ok(())
-            } else {
-                Err(crate::viewer::KEPT_DOCUMENT.into())
-            };
-            match opened {
+            match open_in_drawer(window, pane, path) {
                 Ok(()) => ui.ctx().request_repaint(),
                 Err(why) => window.explorer.message = why,
             }
@@ -461,6 +454,27 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
     window.sidebar.record(started.elapsed());
     window.timed_separately += window.sidebar.take_cost();
 }
+
+/// Opens what Files activated in the drawer, for the console `pane`, or says why it did not open:
+/// the console gone is not the review's unsent comments.
+fn open_in_drawer(
+    window: &mut crate::Window,
+    pane: usize,
+    path: std::path::PathBuf,
+) -> Result<(), String> {
+    if crate::viewer::is_image(&path) {
+        crate::viewer::open_image_target(window, pane, path).map_err(|why| why.to_string())
+    } else if !window.all_panes().any(|p| p.name == pane) {
+        Err(GONE.into())
+    } else if crate::viewer::open_document_target(window, pane, path, None) {
+        Ok(())
+    } else {
+        Err(crate::viewer::KEPT_DOCUMENT.into())
+    }
+}
+
+/// Why a file Files activated did not open: the console it was listed for has closed.
+const GONE: &str = "The console this file was listed for has closed.";
 
 /// The root Files last took for `pane`, if any.
 pub(crate) fn root_of(window: &Window, pane: usize) -> Option<PathBuf> {

@@ -216,7 +216,7 @@ pub(crate) fn toggle(window: &mut Window, tool: Tool, ctx: &egui::Context) {
         _ if active(window) == Some(tool) => close(window, ctx),
         Tool::Document => crate::viewer::activate(window, true),
         Tool::Git => crate::viewer::activate(window, false),
-        Tool::Image => crate::viewer::show_image(window, true),
+        Tool::Image => crate::viewer::show_image(window),
         _ => select(window, tool),
     }
 }

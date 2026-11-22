@@ -3,8 +3,8 @@ use super::{Kind, State};
 use eframe::egui::{self, FontId};
 use std::path::Path;
 
-/// What the drawer's body shows: the document state's, or the focused console's image, which it
-/// may not have.
+/// What the drawer's body shows: the document state's, or the focused console's image slot, which
+/// may hold no image.
 pub(super) enum Body<'a> {
     Document,
     Image(Option<(&'a mut super::image::Viewer, &'a mut super::image::Slot)>),
@@ -127,14 +127,20 @@ pub(super) fn show(
                     roles.base,
                 );
                 match image {
-                    Body::Image(Some((image, slot))) => {
+                    Body::Image(Some((image, slot))) if slot.shown() => {
                         image.show(slot, &mut body_ui, theme, state.space);
                     }
-                    Body::Image(None) => {
+                    Body::Image(slot) => {
+                        let word = slot.and_then(|(_, slot)| slot.word());
                         egui::Frame::new()
                             .inner_margin(14)
                             .show(&mut body_ui, |ui| {
                                 ui.label(NO_IMAGE);
+                                if let Some(word) = word {
+                                    let refused =
+                                        theme.panel_color(Some(panel_contract::Mark::Block), None);
+                                    ui.colored_label(refused, word);
+                                }
                             });
                     }
                     Body::Document => body_content(state, &mut body_ui, theme, unavailable),

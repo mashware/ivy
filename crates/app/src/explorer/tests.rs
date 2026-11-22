@@ -239,3 +239,20 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
         "evicting root makes the next frame reload the whole tree"
     );
 }
+
+/// A file Files activated for a console that has since closed says so, rather than blaming review
+/// comments nobody wrote; a console that is still there opens it.
+#[test]
+fn a_file_for_a_closed_console_says_the_console_closed() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let gone = window.all_panes().map(|p| p.name).max().unwrap() + 1;
+    assert_eq!(
+        open_in_drawer(&mut window, gone, PathBuf::from("/docs/guide.md")),
+        Err(GONE.to_owned())
+    );
+    let here = window.active().panes()[0].name;
+    assert_eq!(
+        open_in_drawer(&mut window, here, PathBuf::from("/docs/guide.md")),
+        Ok(())
+    );
+}
