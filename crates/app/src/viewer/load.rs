@@ -934,7 +934,9 @@ mod tests {
         let temp = Temp::new();
         let missing = temp.0.join("missing.png");
         assert_eq!(
-            decode_image(&missing, 4096, Some(|_| Ok(true))).err().unwrap(),
+            decode_image(&missing, 4096, Some(|_| Ok(true)))
+                .err()
+                .unwrap(),
             format!(
                 "{} passes through a link, and an agent's image is not opened through one",
                 missing.display()

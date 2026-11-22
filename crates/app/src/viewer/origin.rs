@@ -245,7 +245,9 @@ pub(crate) fn open_image_target(
     let Some(slot) = super::image::slot_of(&mut window.tabs, pane) else {
         return Err(NotOpened::Gone);
     };
-    window.image.open(slot, source, path, false);
+    window
+        .image
+        .open(slot, source, path, super::image::Opener::Person);
     show_image(window);
     if let Some(ctx) = window.viewer.context.clone()
         && let Some(slot) = super::image::slot_of(&mut window.tabs, pane)
@@ -295,7 +297,9 @@ pub(crate) fn open_for_an_agent(
     if slot.has_marks() {
         return Err(MARKS_NOT_SENT.to_owned());
     }
-    window.image.open(slot, source, path, true);
+    window
+        .image
+        .open(slot, source, path, super::image::Opener::Agent);
     // Set even where the drawer shows it at once: one rule, and the frame that paints it takes
     // the mark down.
     slot.mark_unseen();

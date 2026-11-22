@@ -81,6 +81,14 @@ pub(crate) struct Viewer {
 /// The platform's reader, or a test's.
 struct Links(IsLink);
 
+/// Who named the path an image is opened from: an agent's open is walked for links before the
+/// worker reads it, and a person's own is not (D120).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Opener {
+    Agent,
+    Person,
+}
+
 impl Default for Links {
     fn default() -> Self {
         Self(panel_control::image::refused_link)
@@ -91,9 +99,10 @@ struct Opened {
     id: u64,
     origin: Source,
     path: PathBuf,
-    /// Set for an agent's open: the worker refuses a path through a link before it opens it. A
-    /// person's own open is not walked (D120).
-    links: Option<IsLink>,
+    /// Who named the path, which every decode of it is held to: see [`Opener`].
+    opener: Opener,
+    /// The reader an agent's open is walked with.
+    links: IsLink,
     load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
@@ -124,9 +133,9 @@ enum Gpu {
 impl Viewer {
     /// Replaces the image `slot` held with `path`, read from `origin`'s console. A pan latched on
     /// another console's image is that image's, and an agent may open into a console the person is
-    /// not looking at, so only a pan on the image being replaced is let go. `by_agent` is whether
-    /// an agent named the path, which is what its decode is walked for.
-    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf, by_agent: bool) {
+    /// not looking at, so only a pan on the image being replaced is let go. `opener` says who named
+    /// the path, which is what decides whether its decode is walked.
+    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf, opener: Opener) {
         if self
             .painted
             .is_some_and(|(_, opening)| slot.document() == Some(opening))
@@ -134,8 +143,7 @@ impl Viewer {
             self.panning = None;
         }
         self.opened += 1;
-        let links = by_agent.then_some(self.links.0);
-        slot.open(self.opened, origin, path, links);
+        slot.open(self.opened, origin, path, opener, self.links.0);
     }
 
     /// Whether a Send is between its click and its Enter.
@@ -153,7 +161,7 @@ impl Viewer {
 impl Slot {
     /// Replaces the image with `path`, opened as `id`. A relative path is one whose console's
     /// directory is unknown: it is refused and says so.
-    fn open(&mut self, id: u64, origin: Source, path: PathBuf, links: Option<IsLink>) {
+    fn open(&mut self, id: u64, origin: Source, path: PathBuf, opener: Opener, links: IsLink) {
         self.clear();
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
@@ -164,6 +172,7 @@ impl Slot {
             id,
             origin,
             path,
+            opener,
             links,
             load,
             scale: None,
@@ -316,7 +325,11 @@ impl Slot {
                 Some((busy, _)) => Load::Failed(format!("Still reading {}…", busy.display())),
                 None => {
                     let side = ctx.input(|i| i.max_texture_side);
-                    match Job::image(document.path.clone(), side, document.links, ctx.clone()) {
+                    let links = match document.opener {
+                        Opener::Agent => Some(document.links),
+                        Opener::Person => None,
+                    };
+                    match Job::image(document.path.clone(), side, links, ctx.clone()) {
                         Ok(job) => Load::Decoding(job),
                         Err(why) => Load::Failed(why),
                     }
@@ -687,7 +700,13 @@ mod tests {
         write_png(&path, 40, 20);
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(1, source(), path.clone(), None);
+        viewer.open(
+            1,
+            source(),
+            path.clone(),
+            Opener::Person,
+            Links::default().0,
+        );
         let started = Instant::now();
         while !viewer.loaded() {
             viewer.poll(&ctx);
@@ -1284,9 +1303,12 @@ mod tests {
     /// An image holding `original`, decoded and not yet shown.
     fn ready(original: image::RgbaImage) -> Alone {
         let mut alone = Alone::default();
-        alone
-            .image
-            .open(&mut alone.slot, source(), PathBuf::from("/shot.png"), false);
+        alone.image.open(
+            &mut alone.slot,
+            source(),
+            PathBuf::from("/shot.png"),
+            Opener::Person,
+        );
         alone.slot.document.as_mut().unwrap().load = Load::Ready {
             original: Arc::new(original),
             gpu: Gpu::Waiting(egui::ColorImage::filled([4, 2], egui::Color32::RED)),
@@ -1338,7 +1360,13 @@ mod tests {
     fn a_relative_path_says_why_and_reads_nothing() {
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(1, source(), PathBuf::from("shot.png"), None);
+        viewer.open(
+            1,
+            source(),
+            PathBuf::from("shot.png"),
+            Opener::Person,
+            Links::default().0,
+        );
         viewer.poll(&ctx);
         assert!(!viewer.loaded());
         assert!(matches!(
@@ -3065,7 +3093,7 @@ mod tests {
             &mut viewer.slot,
             source(),
             PathBuf::from("/shot.png"),
-            false,
+            Opener::Person,
         );
         let at = egui::pos2(150.0, 50.0);
         // Loading, then decoded: no pass before this one painted the image.
@@ -4858,7 +4886,13 @@ mod tests {
             label: "bash".into(),
             cwd: None,
         };
-        slot.open(1, source, PathBuf::from("/a.png"), None);
+        slot.open(
+            1,
+            source,
+            PathBuf::from("/a.png"),
+            Opener::Person,
+            Links::default().0,
+        );
         slot.sent();
         assert_eq!(slot.notice.as_deref(), Some("Sent to bash."));
         slot.add("Send or clear the marks.");
@@ -6744,7 +6778,7 @@ mod tests {
             &mut alone.slot,
             source(),
             PathBuf::from("relative.png"),
-            false,
+            Opener::Person,
         );
         let ctx = egui::Context::default();
         let frame = |alone: &mut Alone| {
