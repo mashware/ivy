@@ -11601,7 +11601,8 @@ button, because any other notice can replace Cancel's — and a Send asked anywa
 before any other check, so two workers never race for one name; the decoder's abandoned read is the
 same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
 goes to standard error as well, and waits in its own console's slot until the drawer lays that
-console's image out, because the image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+console's image out, or its Image tab with no image, because the image it was for may be closed by
+then; there it joins the notice shown rather than replacing it,
 which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
 and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
