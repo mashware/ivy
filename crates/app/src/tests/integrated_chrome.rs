@@ -278,6 +278,8 @@ mod tests {
             chrome::prepare(&ctx);
             crate::pane_view::allow_focus_fades(&ctx, fades);
             let mut window = window_with("sleep 30", "sleep 30");
+            // Cursor deadlines must not be mistaken for focus-animation deadlines.
+            window.blink.ceiling = Some(false);
             window.chrome.enable();
             window.headers = window.headers.integrated(true);
             for time in [0.0, 1.0, 1.5] {
@@ -308,8 +310,7 @@ mod tests {
                 );
                 let (done, _) = pass(&mut window, &ctx, 2.2);
                 assert_eq!(done, vec![line, accent]);
-                // The cursor blink (600 ms halves) still wakes the window; a fade asks for the
-                // next frame, about 16 ms away, so anything past 100 ms is not the fade.
+                // A focus fade asks for the next frame, about 16 ms away.
                 let (_, settled) = pass(&mut window, &ctx, 2.3);
                 assert!(
                     settled > std::time::Duration::from_millis(100),
