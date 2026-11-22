@@ -204,6 +204,7 @@ try {
     }
     $Shell | Select-Object ProcessId, ParentProcessId, ExecutablePath, CommandLine | ConvertTo-Json | Set-Content (Join-Path $EvidenceDir 'shell.json')
     $ShellProcess = [Diagnostics.Process]::GetProcessById($Shell.ProcessId)
+    if ($ProvenancePublisher) { $null = $ShellProcess.Handle }
     $Activated = [IvyLaunchNative]::SetForegroundWindow($Window.Handle)
     if (-not $Activated -and [IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'shell: could not focus the application window' }
     while ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) {
@@ -268,15 +269,14 @@ try {
         $Stage = 'publication identity'
         if (-not [IvyLaunchNative]::SetWindowPos($Window.Handle, [IntPtr]::Zero, 0, 0, 960, 640, 20)) { throw 'Could not place the isolated desktop window' }
         $IdentityFile = Join-Path $EvidenceDir 'pane-identity.txt'
+        $IdentityAck = Join-Path $EvidenceDir 'identity.ack'
         $EscapedIdentity = $IdentityFile.Replace("'", "''")
+        $EscapedIdentityAck = $IdentityAck.Replace("'", "''")
         if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Identity input lost the controlled window focus' }
-        [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedIdentity', (`$env:PANEL_ID + '|' + `$env:PANEL_DIR + '|' + `$env:PANEL_SERVER_PID + '|' + `$PID))")
-        while ($true) {
-            Check-Alive
-            try { $PaneIdentity = ([IO.File]::ReadAllText($IdentityFile)).Split('|') } catch [IO.IOException] { $PaneIdentity = @() }
-            if ($PaneIdentity.Count -eq 4 -and $PaneIdentity[2] -eq "$($Process.Id)" -and $PaneIdentity[3] -eq "$($Shell.ProcessId)") { break }
-            Start-Sleep -Milliseconds 50
-        }
+        [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedIdentity', (`$env:PANEL_ID + '|' + `$env:PANEL_DIR + '|' + `$env:PANEL_SERVER_PID + '|' + `$PID)); [IO.File]::WriteAllText('$EscapedIdentityAck', '$Token')")
+        Await-Witness $IdentityAck $Token
+        $PaneIdentity = ([IO.File]::ReadAllText($IdentityFile)).Split('|')
+        if ($PaneIdentity.Count -ne 4 -or $PaneIdentity[2] -ne "$($Process.Id)" -or $PaneIdentity[3] -ne "$($Shell.ProcessId)") { throw 'Desktop witness identity did not come from this console' }
         $Stage = 'inside publication'
         Type-Publication 'OWN CONSOLE WITNESS' 'inside.ack'
         Capture-Witness 'inside'
@@ -293,21 +293,18 @@ try {
     }
     if ($ProvenancePublisher) {
         $Stage = 'second console identity'
+        $SecondShell = $Children | Where-Object { $_.ExecutablePath -ieq $Expected -and $_.ProcessId -ne $Shell.ProcessId } | Select-Object -First 1
+        if ($null -eq $SecondShell) { throw 'Second console program was not observed' }
         $SecondWitness = Join-Path $EvidenceDir 'second-shell.txt'
         $EscapedSecond = $SecondWitness.Replace("'", "''")
         if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Second console input lost the controlled window focus' }
         [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedSecond', '$Token|' + `$PID)")
-        while ($true) {
-            Check-Alive
-            try { $Second = ([IO.File]::ReadAllText($SecondWitness)).Split('|') } catch [IO.IOException] { $Second = @() }
-            if ($Second.Count -eq 2 -and $Second[0] -eq $Token -and $Second[1] -ne "$($Shell.ProcessId)" -and @($Children | Where-Object { "$($_.ProcessId)" -eq $Second[1] -and $_.ExecutablePath -ieq $Expected }).Count -eq 1) { break }
-            Start-Sleep -Milliseconds 50
-        }
+        Await-Witness $SecondWitness "$Token|$($SecondShell.ProcessId)"
         $Stage = 'outside publication'
         Type-Publication 'OTHER CONSOLE WITNESS' 'outside.ack'
         Capture-Witness 'outside'
         $Stage = 'revoked publication'
-        Stop-Process -Id ([int]$Shell.ProcessId)
+        $ShellProcess.Kill()
         while (-not $ShellProcess.HasExited) { Check-Alive; Start-Sleep -Milliseconds 50 }
         Type-Publication 'ROOT ENDED WITNESS' 'revoked.ack'
         Capture-Witness 'revoked'
