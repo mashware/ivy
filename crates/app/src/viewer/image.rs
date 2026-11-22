@@ -5244,4 +5244,26 @@ mod tests {
         assert_eq!(window.image.notice, None);
         assert_eq!(marks_of(&window).general, "keep");
     }
+
+    /// A hold whose release happened while the drawer was not shown has ended: its release went to
+    /// somebody else, and the next chord is a paste.
+    #[test]
+    fn a_hold_released_while_the_drawer_was_away_has_ended() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        let paste = || egui::Event::Paste("text".into());
+        painted(&mut window, &ctx, vec![paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        crate::viewer::suspend(&mut window);
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![]);
+        crate::viewer::origin::show_image(&mut window);
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+    }
 }
