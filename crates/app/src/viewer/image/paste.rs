@@ -35,14 +35,17 @@ pub(crate) struct Pasting {
     pub(super) key: bool,
     /// Whether the chord that asked is still held: egui-winit turns every repeat of a held chord
     /// into another text paste with no repeat flag, but lets its key's release through as a key,
-    /// which is where a hold ends — or where the window loses the keys, or a frame the viewer was
-    /// not painted in, since its release then went to somebody else.
+    /// which is where a hold ends — as it does when the window loses the keys, after which no
+    /// release comes, or after a frame the viewer did not look for the chord in, whose release went
+    /// to somebody else.
     held: bool,
     /// The frame the viewer last looked for the chord in.
     seen: Option<u64>,
     /// Who started the clipboard read outstanding; the clipboard answers every read it took.
     asked: Option<By>,
     writing: Option<Writing>,
+    /// What the empty viewer said before «a paste is already on its way» covered it.
+    covered: Option<String>,
 }
 
 /// A screenshot being encoded and written into a console's folder.
@@ -153,14 +156,6 @@ fn chord(event: &egui::Event) -> bool {
     }
 }
 
-/// Takes the paste chord out of `input`, answering whether there was one.
-#[cfg(test)]
-fn take_key(input: &mut egui::InputState) -> bool {
-    let before = input.events.len();
-    input.events.retain(|event| !chord(event));
-    input.events.len() != before
-}
-
 /// A paste for the console `pane`. Refused, before the clipboard is read, when the image shown
 /// keeps unsent marks, another paste is on its way, the console has closed, it has no folder to
 /// keep the file in, or the clipboard is busy or unavailable.
@@ -173,10 +168,14 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
     if window.image.paste.busy() {
         let retry = format!("{BUSY} {HINT}");
         match window.image.document.as_mut().map(|d| &mut d.load) {
-            Some(super::Load::Empty(text)) => *text = retry,
-            // A failed image paints no notice, and with no image the paste on its way opens one.
+            Some(super::Load::Empty(text)) if *text != retry => {
+                window.image.paste.covered = Some(std::mem::replace(text, retry));
+            }
+            Some(super::Load::Empty(_)) => {}
+            // A failed image paints no notice, and with none there is nowhere to say it; the paste
+            // on its way opens the viewer unless its console closes first.
             Some(super::Load::Failed(_)) | None => return eprintln!("{BUSY}"),
-            // A loading picture paints it once decoded.
+            // A picture, shown or still loading (painted once decoded).
             Some(_) => window.image.say(BUSY),
         }
         return origin::show_image(window);
@@ -195,12 +194,14 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
 }
 
 /// Says that the viewer's console has closed where the drawer paints it: the empty viewer's own
-/// text, or a notice beside a picture, painted once a loading one is decoded. A failed image paints
-/// no notice: standard error alone.
+/// text, or a notice beside a picture — after any not yet read when there are unsent marks —
+/// painted once a loading one is decoded. A failed image paints no notice: standard error alone.
 fn closed(viewer: &mut super::Viewer) {
+    let marks = viewer.has_marks();
     match viewer.document.as_mut().map(|d| &mut d.load) {
         Some(super::Load::Empty(text)) => *text = CLOSED.to_owned(),
         Some(super::Load::Failed(_)) | None => eprintln!("A paste for a console that has closed"),
+        Some(_) if marks => super::send::join(&mut viewer.notice, CLOSED.into()),
         Some(_) => viewer.say(CLOSED),
     }
 }
@@ -230,9 +231,14 @@ pub(crate) fn received(
             tell(window, pane, by, Said::Retry(&said));
         }
         Pasted::Unavailable(why) => {
+            // arboard's own texts are sentences: capitalised and closed.
+            let why = why.trim_end_matches('.');
+            let mut rest = why.chars();
+            let first = rest.next().map(|c| c.to_lowercase().to_string());
             let said = format!(
-                "The clipboard is unavailable: {}.",
-                why.trim_end_matches('.')
+                "The clipboard is unavailable: {}{}.",
+                first.unwrap_or_default(),
+                rest.as_str()
             );
             tell(window, pane, by, Said::Final(&said));
         }
@@ -356,6 +362,9 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
         pane, by, folder, ..
     } = window.image.paste.writing.take().expect("a paste");
     let gone = !window.all_panes().any(|p| p.name == pane);
+    if gone {
+        self::gone(&mut window.image, pane);
+    }
     let path = match written {
         Ok(path) if gone => return forsake(&path),
         Ok(path) => path,
@@ -442,6 +451,7 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     let image = &window.image;
     let kept = image.shown() && empty(image).is_none() && image.message().is_none();
     if window.image.has_marks() {
+        unbusy(&mut window.image);
         let notice = &mut window.image.notice;
         if !notice.as_deref().is_some_and(|n| n.ends_with(&alone)) {
             super::send::join(notice, alone);
@@ -455,16 +465,25 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     origin::pin_empty_image(window, pane, text);
 }
 
-/// The answer for a console that closed: said in its own viewer; another console's viewer only
-/// loses a «paste on its way» this paste had put there, which is no longer true.
+/// The end of a paste for a console that closed: said in its own viewer; another console's viewer
+/// only loses a «paste on its way» said there because of it, which is no longer true.
 fn gone(viewer: &mut super::Viewer, pane: usize) {
     if viewer.origin().is_some_and(|o| o.pane == pane) {
         return closed(viewer);
     }
-    eprintln!("A paste's answer arrived for a console that has closed");
+    eprintln!("A paste ended for a console that has closed");
+    unbusy(viewer);
+}
+
+/// Takes back «a paste is already on its way» once that paste has ended: the empty viewer says
+/// again what it said before, and the notice beside a picture goes.
+fn unbusy(viewer: &mut super::Viewer) {
     let busy = format!("{BUSY} {HINT}");
+    let covered = viewer.paste.covered.take();
     match viewer.document.as_mut().map(|d| &mut d.load) {
-        Some(super::Load::Empty(text)) if *text == busy => *text = HINT.to_owned(),
+        Some(super::Load::Empty(text)) if *text == busy => {
+            *text = covered.unwrap_or_else(|| HINT.to_owned());
+        }
         _ if viewer.notice.as_deref() == Some(BUSY) => viewer.notice = None,
         _ => {}
     }
@@ -555,14 +574,10 @@ mod tests {
             (vec![], vec![insert, ctrl_insert])
         };
         for event in windows_taken {
-            let mut input = egui::InputState::default();
-            input.events = vec![event.clone()];
-            assert!(take_key(&mut input), "{event:?} was not taken");
+            assert!(chord(&event), "{event:?} is not the chord");
         }
         for event in windows_kept {
-            let mut input = egui::InputState::default();
-            input.events = vec![event.clone()];
-            assert!(!take_key(&mut input), "{event:?} was taken");
+            assert!(!chord(&event), "{event:?} is the chord");
         }
         let kept = [
             repeat,
@@ -577,16 +592,10 @@ mod tests {
             },
         ];
         for event in taken {
-            let mut input = egui::InputState::default();
-            input.events = vec![event.clone()];
-            assert!(take_key(&mut input), "{event:?} was not taken");
-            assert!(input.events.is_empty());
+            assert!(chord(&event), "{event:?} is not the chord");
         }
         for event in kept {
-            let mut input = egui::InputState::default();
-            input.events = vec![event.clone()];
-            assert!(!take_key(&mut input), "{event:?} was taken");
-            assert_eq!(input.events, vec![event]);
+            assert!(!chord(&event), "{event:?} is the chord");
         }
     }
 }

@@ -5038,13 +5038,15 @@ mod tests {
         );
     }
 
-    /// A clipboard that answers unavailable is said without the hint, with its cause, once.
+    /// A clipboard that answers unavailable is said without the hint, with its cause as part of
+    /// the sentence: lowercased, one full stop.
     #[test]
     fn an_unavailable_clipboard_answer_says_its_cause() {
         let (mut window, ctx, harness, name, _folder) = window_to_paste();
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
-        let stopped = crate::clipboard::Pasted::Unavailable("not offered here.".into());
+        // As arboard words it: a capitalised sentence of its own.
+        let stopped = crate::clipboard::Pasted::Unavailable("Not offered here.".into());
         paste::received(&mut window, name, stopped, &ctx);
         assert_eq!(
             paste::empty(&window.image),
@@ -5265,5 +5267,63 @@ mod tests {
         painted(&mut window, &ctx, vec![paste()]);
         painted(&mut window, &ctx, vec![]);
         assert_eq!(harness.requested_image(), Some(name));
+    }
+
+    /// A «paste on its way» said in a viewer is taken back when that paste ends because its console
+    /// closed: the viewer says again what it said before, a final text included.
+    #[test]
+    fn a_paste_on_its_way_is_taken_back_when_its_console_closes() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let bare = window.active().panes()[0].name;
+        // The bare console's viewer: it has no folder, a final text.
+        paste::ask(&mut window, bare, paste::By::Button);
+        let no_folder = "This console has no folder to keep the screenshot in.";
+        assert_eq!(paste::empty(&window.image), Some(no_folder));
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, bare, paste::By::Button);
+        let busy = format!("A paste is already on its way. {}", paste::HINT);
+        assert_eq!(paste::empty(&window.image), Some(busy.as_str()));
+        window.close_a_pane_called(name, &ctx).unwrap();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(window.image.origin().map(|o| o.pane), Some(bare));
+        assert_eq!(paste::empty(&window.image), Some(no_folder));
+    }
+
+    /// A console that closes before its answer, over its own image with unsent marks, is said
+    /// closed after the notice not yet read, not in its place.
+    #[test]
+    fn a_closed_console_is_said_after_an_unread_notice_over_marks() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        marks_mut(&mut window).general = "keep".into();
+        window.image.say("Unread.");
+        window.close_a_pane_called(name, &ctx).unwrap();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("Unread. This console has closed.")
+        );
+    }
+
+    /// A paste asked while another is on its way, over a picture still loading, is said beside it,
+    /// for when it is decoded.
+    #[test]
+    fn a_second_paste_over_a_loading_picture_is_said_beside_it() {
+        let (mut window, _ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        let _stalled = window.image.stall();
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, name, paste::By::Button);
+        assert!(!window.image.loaded());
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("A paste is already on its way.")
+        );
     }
 }

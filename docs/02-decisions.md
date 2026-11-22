@@ -11809,12 +11809,15 @@ takes a screenshot from:
   leaves only an image — and turns every paste chord into `Event::Paste` when it does; both are
   taken once per hold: egui-winit turns a held chord's repeats into more text pastes with no repeat
   flag, but lets the key's release through, and that release ends the hold — as does the window
-  losing the keys, or a frame the viewer did not look, since the release then went elsewhere. Over a picture already
+  losing the keys, after which no release comes, or a frame the viewer did not look in, whose
+  release went elsewhere. Over a picture already
   shown or still loading, a chord that finds no image only says so, replacing the drawer's notice
   rather than the picture. A paste asked while another is on its way is said where the drawer
   paints it — the empty viewer's text, or beside a picture, shown or still loading — never by
   opening another console's empty viewer; over a failed image or none, on standard error, since
-  the paste on its way opens the viewer.
+  the paste on its way opens the viewer unless its console closes first. When that paste ends
+  because its console closed, the «on its way» is taken back and the viewer says again what it
+  said before.
 - **Every answer is shown, and takes the keys** — the drawer's document tab, as opening a clicked
   image does — however late it comes (decided with the owner). An answer is normally there within
   milliseconds; late means a stuck clipboard owner, at most the 10 s deadline, and then what the
