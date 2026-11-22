@@ -40,12 +40,10 @@ public static class IvyLaunchNative {
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int left, top, right, bottom; }
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT rect);
     [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
-    [DllImport("dwmapi.dll")] static extern int DwmFlush();
-    public static int[] Frame(IntPtr window) {
+    public static int[] CaptureBounds(IntPtr window) {
         UIntPtr result;
         if (SendMessageTimeout(window, 0, IntPtr.Zero, IntPtr.Zero, 2, 2000, out result) == IntPtr.Zero)
-            throw new Exception("Window did not dispatch the frame barrier");
-        if (DwmFlush() != 0) throw new Exception("Desktop compositor did not flush");
+            throw new Exception("Window did not answer the responsiveness check");
         RECT rect;
         if (!GetWindowRect(window, out rect)) throw new Exception("Window rectangle unavailable");
         return new int[] { rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top };
@@ -241,19 +239,27 @@ try {
     }
     function Capture-Witness([string]$Name) {
         Add-Type -AssemblyName System.Drawing
-        $Rect = [IvyLaunchNative]::Frame($Window.Handle)
-        if ($Rect[2] -lt 100 -or $Rect[3] -lt 100) { throw 'Publication window is too small' }
-        $Bitmap = [Drawing.Bitmap]::new($Rect[2], $Rect[3])
-        $Graphics = [Drawing.Graphics]::FromImage($Bitmap)
-        try {
-            $Graphics.CopyFromScreen($Rect[0], $Rect[1], 0, 0, $Bitmap.Size)
-            $Bitmap.Save((Join-Path $EvidenceDir "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
-        } finally { $Graphics.Dispose(); $Bitmap.Dispose() }
+        # Responsiveness is not proof of a fresh Ivy frame. Collect evidence samples; acceptance
+        # still requires reviewing the expected caption/notice in the panel, not console echo.
+        for ($Sample = 0; $Sample -lt 3; $Sample++) {
+            Check-Alive
+            if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Publication capture lost the controlled window focus' }
+            $Rect = [IvyLaunchNative]::CaptureBounds($Window.Handle)
+            if ($Rect[2] -lt 100 -or $Rect[3] -lt 100) { throw 'Publication window is too small' }
+            $Bitmap = [Drawing.Bitmap]::new($Rect[2], $Rect[3])
+            $Graphics = [Drawing.Graphics]::FromImage($Bitmap)
+            try {
+                $Graphics.CopyFromScreen($Rect[0], $Rect[1], 0, 0, $Bitmap.Size)
+                $Bitmap.Save((Join-Path $EvidenceDir "$Name-$Sample.png"), [Drawing.Imaging.ImageFormat]::Png)
+            } finally { $Graphics.Dispose(); $Bitmap.Dispose() }
+            if ($Sample -lt 2) { Start-Sleep -Milliseconds 100 }
+        }
     }
     function Type-Publication([string]$Body, [string]$AckName) {
         $Ack = Join-Path $EvidenceDir $AckName
         $Publisher = ([IO.Path]::GetFullPath($ProvenancePublisher)).Replace("'", "''")
         $EscapedAck = $Ack.Replace("'", "''")
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Publication input lost the controlled window focus' }
         [IvyLaunchNative]::Type("& '$Publisher' -PanelId '$($PaneIdentity[0])' -ServerPid $($Process.Id) -Text '$Body' -Ack '$EscapedAck'")
         Await-Witness $Ack 'published'
     }
@@ -263,6 +269,7 @@ try {
         if (-not [IvyLaunchNative]::SetWindowPos($Window.Handle, [IntPtr]::Zero, 0, 0, 960, 640, 20)) { throw 'Could not place the isolated desktop window' }
         $IdentityFile = Join-Path $EvidenceDir 'pane-identity.txt'
         $EscapedIdentity = $IdentityFile.Replace("'", "''")
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Identity input lost the controlled window focus' }
         [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedIdentity', (`$env:PANEL_ID + '|' + `$env:PANEL_DIR + '|' + `$env:PANEL_SERVER_PID + '|' + `$PID))")
         while ($true) {
             Check-Alive
@@ -288,6 +295,7 @@ try {
         $Stage = 'second console identity'
         $SecondWitness = Join-Path $EvidenceDir 'second-shell.txt'
         $EscapedSecond = $SecondWitness.Replace("'", "''")
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Second console input lost the controlled window focus' }
         [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedSecond', '$Token|' + `$PID)")
         while ($true) {
             Check-Alive
@@ -303,7 +311,7 @@ try {
         while (-not $ShellProcess.HasExited) { Check-Alive; Start-Sleep -Milliseconds 50 }
         Type-Publication 'ROOT ENDED WITNESS' 'revoked.ack'
         Capture-Witness 'revoked'
-        [IO.File]::WriteAllText((Join-Path $EvidenceDir 'provenance.json'), (@{ app_pid=$Process.Id; root_pid=$Shell.ProcessId; inside='OWN CONSOLE WITNESS'; outside='OTHER CONSOLE WITNESS'; revoked='ROOT ENDED WITNESS' } | ConvertTo-Json))
+        [IO.File]::WriteAllText((Join-Path $EvidenceDir 'provenance.json'), (@{ app_pid=$Process.Id; root_pid=$Shell.ProcessId; inside='OWN CONSOLE WITNESS'; outside='OTHER CONSOLE WITNESS'; revoked='ROOT ENDED WITNESS'; visual_review_required=$true } | ConvertTo-Json))
     }
     $Stage = 'close'
     if ($Control -ne 'deadline') {

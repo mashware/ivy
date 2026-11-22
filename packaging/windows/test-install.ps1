@@ -77,7 +77,7 @@ if ($SoftwareOpenGL) {
 # the run before anyone learns whether Ivy starts at all.
 & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'normal')
 # A separate trial keeps the established startup deadline unchanged. Each publication has an ack;
-# screenshots follow a native window-dispatch/compositor barrier and are reviewed as visual proof.
+# screenshots are sampled after acknowledgements and require review of the expected panel captions.
 & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'provenance') -TimeoutSeconds 90 -ProvenancePublisher (Join-Path $PSScriptRoot 'publish-provenance-witness.ps1')
 foreach ($Control in 'crash', 'shell', 'layout', 'deadline') {
     $Rejected = $false
