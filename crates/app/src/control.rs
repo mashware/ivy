@@ -31,6 +31,7 @@ use crate::{Pane, Window};
 
 mod applying;
 mod channel;
+mod handles;
 mod retiring;
 pub(crate) use channel::control_hwnd;
 pub(crate) use channel::open_with_authority;
@@ -671,78 +672,6 @@ impl Window {
             .record(handle.clone(), origin, connection, name);
         Ok(Some(handle))
     }
-
-    /// The console a handle names, **if this connection opened it and the person has not taken it
-    /// over**, with the refusal as the caller is to read it.
-    ///
-    /// **One place resolves a handle**, so reading and closing cannot drift into answering
-    /// differently about the same console: a revoked handle answers with the reason and not with a
-    /// bare error (**AC15**), which is what lets an agent tell «the person took it» from «you never
-    /// had it».
-    fn a_console_this_connection_owns(
-        &mut self,
-        origin: usize,
-        connection: u64,
-        handle: &str,
-    ) -> Result<usize, String> {
-        let pane_name = self
-            .opened_by_agents
-            .reachable(origin, connection, handle)?;
-        let Some(pane) = self.all_panes().find(|pane| pane.name == pane_name) else {
-            return Err("that console is gone".to_owned());
-        };
-        match &pane.taken_over {
-            Some(why) => Err(why.clone()),
-            None => Ok(pane_name),
-        }
-    }
-
-    /// What a console this connection opened is showing.
-    fn reading_for_a_connection(
-        &mut self,
-        origin: usize,
-        connection: u64,
-        handle: &str,
-        scrollback: bool,
-    ) -> Answer {
-        let pane_name = match self.a_console_this_connection_owns(origin, connection, handle) {
-            Ok(name) => name,
-            Err(why) => return Answer::Refused(why),
-        };
-        let Some(pane) = self.all_panes().find(|pane| pane.name == pane_name) else {
-            return Answer::Refused("that console is gone".to_owned());
-        };
-        // **The visible screen unless the scrollback was asked for**, which is the contract's default
-        // and not a policy: the small read is what an agent usually wants, and the whole history is a
-        // lot of bytes to hand over by accident.
-        let text = if scrollback {
-            pane.screen.scrollback_text()
-        } else {
-            pane.screen.to_text()
-        };
-        Answer::Text(text)
-    }
-
-    /// Closes a console this connection opened.
-    fn closing_for_a_connection(
-        &mut self,
-        origin: usize,
-        connection: u64,
-        handle: &str,
-        ctx: &egui::Context,
-    ) -> Answer {
-        let pane_name = match self.a_console_this_connection_owns(origin, connection, handle) {
-            Ok(name) => name,
-            Err(why) => return Answer::Refused(why),
-        };
-        match self.close_a_pane_called(pane_name, ctx) {
-            Ok(()) => {
-                self.opened_by_agents.forget(pane_name);
-                Answer::Taken
-            }
-            Err(why) => Answer::Refused(why),
-        }
-    }
 }
 
 fn answer_windows_requests(
@@ -803,11 +732,15 @@ fn answer_windows_requests(
                     },
                 )
                 .map_or_else(Answer::Refused, Answer::Opened),
-            What::Read { pane, scrollback } => {
-                window.reading_for_a_connection(origin, delivery.connection, &pane, scrollback)
-            }
+            What::Read { pane, scrollback } => handles::reading_for_a_connection(
+                window,
+                origin,
+                delivery.connection,
+                &pane,
+                scrollback,
+            ),
             What::Close { pane } => {
-                window.closing_for_a_connection(origin, delivery.connection, &pane, ctx)
+                handles::closing_for_a_connection(window, origin, delivery.connection, &pane, ctx)
             }
             What::Retire => window.retiring_for_a_connection(origin, delivery.connection, ctx),
             // **A closed connection takes its handles with it**, which is what D44 promises and

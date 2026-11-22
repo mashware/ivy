@@ -951,6 +951,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/control/retiring.rs"),
     ),
     (
+        "app/src/control/handles.rs",
+        include_str!("../src/control/handles.rs"),
+    ),
+    (
         "app/src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
     ),
