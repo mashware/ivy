@@ -11780,3 +11780,35 @@ boundaries already in place (D107, D110).
 
 **Verification.** The code/image folder cases must run on Windows; a Linux pass does not exercise
 this open flag. Native desktop interaction remains separate from those loader tests.
+
+## D117 — Windows process observations describe ancestry, never foreground authority
+
+**Decided for #166.** Windows gains console-bound diagnostic ancestry and separate, handle-owned
+process observations. A descendant is not called foreground: `inspect` and `inspect_descendant`
+remain unsupported there. The explicit Ivy-owned agent launch approved for #185 remains the
+separate prerequisite for Windows hook authority. No observation converts into the Unix
+foreground evidence used for hooks or recovery.
+
+**Why.** ConPTY has no Unix foreground process group. Giving every shell descendant that meaning
+would let background programs claim the same authority. The user chose process identification
+and provenance while preserving the existing authorization boundary. D91's labels remain
+diagnostic: incomplete evidence is unknown and does not refuse a publication.
+
+The Windows scope pins its original child and revokes on console close or root exit. A validated
+peer chain reaching that exact root is inside; one reaching its verified, pinned Ivy parent first
+is outside. A coherent parent-PID-zero boundary is outside too. Missing or dead history is unknown;
+PID 1 and UTC birth ordering are not Windows outside boundaries. Handles, creation identities and
+revalidation protect against stale observations and PID reuse, without claiming an atomic tree.
+
+Executable and lifetime inspection use process handles. Directory and structural argument/script
+inspection are separate, bounded, best-effort reads of mutable process parameters, initially for
+native x64 only. Unsupported layouts are explicit. They grant no authority and expose no command
+line or prompt payload. #165 must supply exact connected-peer evidence before publication labels
+can be enabled. These are design decisions, not a claim of implemented or Windows-tested support.
+
+**Discarded.** Fabricated Unix group/session fields misrepresent evidence; ancestry-as-foreground
+changes the approved authority boundary; treating a missing parent as outside invents certainty;
+UTC timestamps are not a monotonic exclusion proof; whole-tree scans and elevated helpers are
+unnecessary for one diagnostic chain; raw command-line getters expose data the consumer did not
+request. The next implementation must prove native supported-runtime argument parsing rather
+than assume one parser represents every Windows program.
