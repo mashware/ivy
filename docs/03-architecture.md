@@ -157,14 +157,17 @@ Ordinary Bash, Zsh and Fish consoles install a function after user startup that 
 ### Publication ancestry diagnostics
 
 The panel listener captures kernel peer identity independently of session authorization. On its
-connection worker, before reading requests, a pane-bound callback classifies the peer's ancestry
-as inside, outside or unknown. The callback is installed after the PTY child is spawned and before
-the listener opens, including when session restoration is disabled. The PTY's revocable lifetime
-invalidates observations after closure; the callback cannot keep the pane alive.
+connection worker, before reading requests, a pane-bound native scope classifies the peer's
+ancestry as inside, outside or unknown. Unix installs its existing callback; Windows carries the
+concrete scope through callback-free worker services. Both are installed after the PTY child is
+spawned and before the listener opens, including when session restoration is disabled. The PTY's
+revocable lifetime invalidates observations after closure; retaining a scope cannot keep the pane alive.
 
 `term-core` walks at most 64 ancestors using native birth identities and stable parent snapshots:
 Linux uses `/proc` and pidfds; macOS uses `LOCAL_PEERPID` with `PROC_PIDTBSDINFO` start seconds and
-microseconds. Missing, exited, reused or unstable processes yield unknown. The Linux session peer
+microseconds. Windows retains the verified fresh-pipe peer's process handle (D117), follows
+handle-bound parent identities, and pins the actual console root and its verified Ivy parent as
+boundaries (D118). Missing, exited, reused or unstable processes yield unknown. The Linux session peer
 and foreground checks retain their existing authorization rules.
 
 The app stores publication origin beside the current panel document. Only confirmed outside

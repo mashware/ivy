@@ -11852,6 +11852,13 @@ native x64 only. Unsupported layouts are explicit. They grant no authority and e
 line or prompt payload. #165 must supply exact connected-peer evidence before publication labels
 can be enabled. These are design decisions, not a claim of implemented or Windows-tested support.
 
+The Windows channel receives that scope as a concrete capability, not a caller callback. The
+Windows-only `panel-control` dependency on `term-core` reuses the same bounded native ancestry
+reader; the channel brackets classification with its pinned peer and scope liveness. Reads and
+wakeups remain concrete snapshots/native messages. A generic callback on a joined worker could
+block shutdown; duplicating the ancestry reader would let its identity rules drift. Unix keeps its
+existing inspector callback. No process-parameter read or UI lock enters classification.
+
 **Discarded.** Fabricated Unix group/session fields misrepresent evidence; ancestry-as-foreground
 changes the approved authority boundary; treating a missing parent as outside invents certainty;
 UTC timestamps are not a monotonic exclusion proof; whole-tree scans and elevated helpers are
