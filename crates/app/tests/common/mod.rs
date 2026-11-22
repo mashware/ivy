@@ -16,7 +16,10 @@ use std::path::Path;
 
 /// Census names use `/` even when the checkout's native separator is `\`.
 pub fn slash_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    path.iter()
+        .map(|part| part.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Lowercase, and Spanish accents folded onto ASCII.

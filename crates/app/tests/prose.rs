@@ -2611,18 +2611,32 @@ fn no_line_of_the_prototypes_reads_as_spanish() {
 
 #[test]
 fn nested_prototype_names_match_the_census_on_every_platform() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prototypes");
-    let relative = Path::new("chrome-demo").join("index.html");
-    assert_eq!(slash_path(&relative), "chrome-demo/index.html");
-    let declared: Vec<_> = PROTOTYPES.iter().map(|(name, _, _)| *name).collect();
+    let root = std::env::temp_dir().join(format!("ivy-prototype-census-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("nested")).expect("fixture directory");
+    for name in [
+        root.join("nested").join("source"),
+        root.join("runner"),
+        root.join("NOTES.MD"),
+    ] {
+        std::fs::write(name, "").expect("fixture source");
+    }
+    let declared = ["prototypes/nested/source", "prototypes/runner"];
     let mut on_disk = prototypes_on_disk(&root, &root);
-    assert!(on_disk.contains("prototypes/flow-panel"));
+    // On Unix this is a third file, not another spelling of the nested source.
+    let extra = if cfg!(windows) {
+        "undeclared"
+    } else {
+        r"nested\source"
+    };
+    std::fs::write(root.join(extra), "").expect("undeclared fixture source");
+    let with_extra = prototypes_on_disk(&root, &root);
+    std::fs::remove_dir_all(&root).expect("remove fixture directory");
     assert!(list_against_disk("PROTOTYPES", &declared, &on_disk).is_ok());
-    assert!(on_disk.remove("prototypes/chrome-demo/index.html"));
+    assert!(on_disk.remove("prototypes/nested/source"));
     assert!(list_against_disk("PROTOTYPES", &declared, &on_disk).is_err());
-    on_disk.insert("prototypes/chrome-demo/index.html".to_owned());
-    on_disk.insert("prototypes/undeclared".to_owned());
-    assert!(list_against_disk("PROTOTYPES", &declared, &on_disk).is_err());
+    assert_eq!(with_extra.len(), 3);
+    assert!(list_against_disk("PROTOTYPES", &declared, &with_extra).is_err());
 }
 
 // ── The stored knowledge, which is the last thing this milestone translated ──────────────────────
