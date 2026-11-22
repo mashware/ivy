@@ -34,9 +34,15 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(test)]
+struct DeliveryTest {
+    capacity: usize,
+    full: Option<SyncSender<()>>,
+}
+
+#[cfg(test)]
 thread_local! {
     // Transferred from the spawning test to its own reader; never shared across consoles.
-    static DELIVERY_FULL_PROBE: std::cell::RefCell<Option<SyncSender<()>>> = const {
+    static DELIVERY_TEST: std::cell::RefCell<Option<DeliveryTest>> = const {
         std::cell::RefCell::new(None)
     };
 }
@@ -808,16 +814,22 @@ impl Pty {
         #[cfg(not(windows))]
         let master = pair.master;
 
-        let (tx, output) = sync_channel(READS_IN_FLIGHT);
+        #[cfg(test)]
+        let delivery_test = DELIVERY_TEST.with(|test| test.borrow_mut().take());
+        #[cfg(test)]
+        let capacity = delivery_test
+            .as_ref()
+            .map_or(READS_IN_FLIGHT, |test| test.capacity);
+        #[cfg(not(test))]
+        let capacity = READS_IN_FLIGHT;
+        let (tx, output) = sync_channel(capacity);
         let stop_for_thread = Arc::clone(&stop);
         let (ended, reader_ended) = channel::<()>();
         let ending = Arc::new(OnceLock::new());
         let ending_for_thread = Arc::clone(&ending);
-        #[cfg(test)]
-        let full_probe = DELIVERY_FULL_PROBE.with(|probe| probe.borrow_mut().take());
         let reader = thread::spawn(move || {
             #[cfg(test)]
-            DELIVERY_FULL_PROBE.with(|probe| *probe.borrow_mut() = full_probe);
+            DELIVERY_TEST.with(|test| *test.borrow_mut() = delivery_test);
             // Moved in and never used: what closing reads is this being dropped when the thread ends.
             let _ended = ended;
             #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
@@ -1204,8 +1216,10 @@ fn deliver(
             Ok(()) => return Ok(()),
             Err(TrySendError::Full(returned)) => {
                 #[cfg(test)]
-                DELIVERY_FULL_PROBE.with(|probe| {
-                    if let Some(probe) = probe.borrow_mut().take() {
+                DELIVERY_TEST.with(|test| {
+                    if let Some(probe) =
+                        test.borrow_mut().as_mut().and_then(|test| test.full.take())
+                    {
                         let _ = probe.try_send(());
                     }
                 });
@@ -2503,10 +2517,35 @@ mod tests {
     fn closing_with_the_channel_full_ends_reader_without_draining() {
         use std::sync::mpsc;
 
+        const CHILD: &str = "IVY_TEST_FULL_DELIVERY_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            // A native executable on every platform, with real printable output for ConPTY.
+            let mut output = std::io::stdout().lock();
+            for counter in 0u64.. {
+                writeln!(output, "delivery fixture {counter:020} running").unwrap();
+            }
+            unreachable!();
+        }
         let (full, observed_full) = mpsc::sync_channel(1);
-        DELIVERY_FULL_PROBE.with(|probe| *probe.borrow_mut() = Some(full));
-        let (mut pty, output) =
-            Pty::spawn("cat", &["/dev/zero"], Size::default()).expect("launch cat");
+        // This tests closing a full queue, not its capacity or ConPTY's output coalescing.
+        DELIVERY_TEST.with(|test| {
+            *test.borrow_mut() = Some(DeliveryTest {
+                capacity: 1,
+                full: Some(full),
+            });
+        });
+        let executable = std::env::current_exe().unwrap();
+        let (mut pty, output) = Pty::spawn_with_env(
+            executable.to_str().unwrap(),
+            &[
+                "--exact",
+                "tests::closing_with_the_channel_full_ends_reader_without_draining",
+                "--nocapture",
+            ],
+            Size::default(),
+            &[(CHILD, Some(OsStr::new("1")))],
+        )
+        .expect("launch native delivery fixture");
         observed_full
             .recv_timeout(Duration::from_secs(2))
             .expect("the actual reader reached a full delivery queue");
