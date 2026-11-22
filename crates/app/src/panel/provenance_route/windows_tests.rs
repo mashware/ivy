@@ -87,7 +87,12 @@ fn launch(
         ctx,
         crate::opening::Launch {
             program: &program,
-            args: &["-NoLogo", "-NoProfile", "-Command", &script],
+            args: &[
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                script,
+            ],
             directory: None,
             path: None,
         },
