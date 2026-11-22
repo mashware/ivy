@@ -12091,11 +12091,16 @@ worker would otherwise authenticate to a remote host over SMB on an agent's word
 allowlist because a refusal list let `\\?\GLOBALROOT\…` and a lowercase `\\?\unc\…` through. A
 mapped drive letter passes: it is the user's own mapping, not a host the agent chose. The MCP
 bridge also `stat`s the file in the agent's own process, so a missing file, a folder, something
-that is not a regular file or a file over 32 MiB is refused at once. The interface pass never
+that is not a regular file or a file over 32 MiB is refused at once. It then reads the file's
+first bytes and refuses anything that begins as neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a
+JPEG (`FF D8 FF`), a file too short to say included, with `<path> is not a PNG or JPEG image`,
+before the pane is reached (owner, 22 November 2026): told «opened» for a file the drawer cannot
+show, the agent would wait for marks that never come. The interface pass never
 touches the file. **Those bridge checks are advisory**: the bridge and the window may see different
 files (another mount namespace, a file replaced in between), and a hand-written line skips the
 bridge. The image worker's own checks stay the enforcement, and their refusal is painted in the
-drawer. The format is decided by the file's bytes, never by its extension. Unsent marks on that
+drawer. The format is decided by the file's bytes, never by its extension; a hand-written line that
+skips the bridge still reaches the window, which paints «This file is not a PNG or JPEG image». Unsent marks on that
 console's image refuse the call with a sentence the agent can act on; another console's marks never
 do.
 

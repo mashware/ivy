@@ -731,7 +731,8 @@ replaces it.
   (`C:\…`, `\\?\C:\…`, `\\?\Volume{…}\…`) is refused too: a share, a device or another name in
   the object namespace (`\\host\share\…`, `\\?\UNC\…`, `\\?\GLOBALROOT\…`, `\\.\…`). A mapped
   drive letter passes, because it is the user's own mapping. No extension is asked for: the file's bytes decide whether it is a PNG or
-  a JPEG, and one that is neither is opened and says so in the drawer. The line's own bound is the
+  a JPEG. `panel-mcp` refuses one that is neither (below); a hand-written line that skips it is
+  opened, and the drawer says the file is not a PNG or JPEG image. The line's own bound is the
   only bound on the path's length.
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
   person is working in` where the drawer opened on it, and `opened; the person is not looking at this
@@ -743,7 +744,9 @@ replaces it.
   `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
   not absolute` or `an image_open's "path" is not on this machine`, and the connection lives on.
 - **`panel-mcp` checks the file first**, in the agent's own process: a missing file, a folder,
-  something that is not a regular file and a file over 32 MiB are refused before the window is asked.
+  something that is not a regular file, a file over 32 MiB and a file whose first bytes are neither
+  a PNG's signature nor a JPEG's `FF D8 FF` (`<path> is not a PNG or JPEG image`, a file too short to
+  say included) are refused before the window is asked.
   Those checks are a courtesy; the window's read is the enforcement.
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that

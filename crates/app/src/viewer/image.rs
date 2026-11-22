@@ -6384,8 +6384,9 @@ mod tests {
         );
     }
 
-    /// The bytes decide the format: a `.png` holding text is opened, and the drawer says why it
-    /// cannot be shown.
+    /// The bytes decide the format: a `.png` holding text that reaches the window — the bridge
+    /// refuses it, but a hand-written line skips the bridge (D120) — is opened, and the drawer says
+    /// why it cannot be shown.
     #[test]
     fn an_agents_file_that_is_not_an_image_is_opened_and_says_why_in_the_drawer() {
         let folder = Folder::new();

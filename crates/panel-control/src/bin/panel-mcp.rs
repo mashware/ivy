@@ -727,8 +727,28 @@ fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
             panel_control::image::MAX_BYTES / (1024 * 1024)
         ));
     }
+    // The first bytes decide, not the extension (D120): an agent told «opened» for a file the
+    // drawer cannot show would wait for marks that never come.
+    let mut head = Vec::with_capacity(PNG_SIGNATURE.len());
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(
+            std::fs::File::open(&file).map_err(|why| format!("cannot open {path}: {why}"))?,
+            PNG_SIGNATURE.len() as u64,
+        ),
+        &mut head,
+    )
+    .map_err(|why| format!("cannot read {path}: {why}"))?;
+    if !head.starts_with(PNG_SIGNATURE) && !head.starts_with(JPEG_START) {
+        return Err(format!("{path} is not a PNG or JPEG image"));
+    }
     Ok(file)
 }
+
+/// How every PNG file begins.
+const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// How every JPEG file begins: the start-of-image marker and the first byte of the next one.
+const JPEG_START: &[u8] = &[0xFF, 0xD8, 0xFF];
 
 /// What one tool call asks for, **already read and validated**.
 ///
@@ -1732,6 +1752,21 @@ mod tests {
             refused(open_an_image(serde_json::json!(shown(&oversize)))),
             format!("{} is over 32 MiB", shown(&oversize))
         );
+        // Not an image by its first bytes, whatever its name: text, a JPEG cut before its third
+        // byte, a PNG signature missing its last byte, and nothing at all.
+        for (name, bytes) in [
+            ("notes.png", b"not an image at all".as_slice()),
+            ("cut.jpg", &[0xFF, 0xD8]),
+            ("cut.png", &PNG_SIGNATURE[..7]),
+            ("empty.png", &[]),
+        ] {
+            let file = folder.join(name);
+            std::fs::write(&file, bytes).unwrap();
+            assert_eq!(
+                refused(open_an_image(serde_json::json!(shown(&file)))),
+                format!("{} is not a PNG or JPEG image", shown(&file))
+            );
+        }
         assert_eq!(
             refused(open_an_image(serde_json::json!(""))),
             "image_open's \"path\" is empty"
@@ -1750,6 +1785,26 @@ mod tests {
             refused(ask(call)["result"].clone()),
             "image_open needs a \"path\""
         );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// **A PNG or a JPEG passes the bridge by its first bytes alone**, whatever its name: the
+    /// signature is what the bridge reads, and the decode stays the window's.
+    #[test]
+    fn an_image_that_begins_as_a_png_or_a_jpeg_passes_the_bridge() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-head-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        for (name, bytes) in [
+            ("shot", png.as_slice()),
+            ("photo.txt", &[0xFF, 0xD8, 0xFF]),
+            ("photo.jpg", &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]),
+        ] {
+            let file = folder.join(name);
+            std::fs::write(&file, bytes).unwrap();
+            assert_eq!(image_to_open(file.to_str().unwrap()), Ok(file.clone()), "{name}");
+        }
         let _ = std::fs::remove_dir_all(&folder);
     }
 
