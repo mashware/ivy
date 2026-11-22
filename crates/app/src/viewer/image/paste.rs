@@ -12,6 +12,8 @@ pub(crate) const NO_IMAGE: &str = "The clipboard holds no image.";
 pub(crate) const NO_FOLDER: &str = "This console has no folder to keep the screenshot in.";
 pub(crate) const EXPIRED: &str = "The clipboard did not answer in time.";
 const BUSY: &str = "A paste is already on its way.";
+const BUSY_ELSEWHERE: &str =
+    "Another console's paste is on its way; press Paste screenshot again once it has opened.";
 
 /// A paste from the read to the opened image; one at a time.
 #[derive(Default)]
@@ -53,6 +55,11 @@ impl Pasting {
     fn says_busy(&self, pane: usize) -> bool {
         self.asked_again == Some(pane) && self.busy()
     }
+
+    /// The console the paste on its way is for.
+    fn for_pane(&self) -> Option<usize> {
+        self.asked.or(self.writing.as_ref().map(|w| w.pane))
+    }
 }
 
 /// What the drawer paints of the console `pane`'s word, beside its image or in its empty tab:
@@ -67,9 +74,15 @@ pub(in crate::viewer) fn shown<'a>(
     if !pane.is_some_and(|pane| paste.says_busy(pane)) {
         return word.map(Into::into);
     }
+    // Asked for this console while another's was on its way: this one was not read.
+    let busy = if paste.for_pane() == pane {
+        BUSY
+    } else {
+        BUSY_ELSEWHERE
+    };
     Some(match word {
-        Some(word) => format!("{BUSY} {word}").into(),
-        None => BUSY.into(),
+        Some(word) => format!("{busy} {word}").into(),
+        None => busy.into(),
     })
 }
 
@@ -226,7 +239,8 @@ fn write(
     ctx: &egui::Context,
 ) -> Result<(), String> {
     let console = window.all_panes().find(|p| p.name == pane);
-    let folder = console.and_then(|c| c.panel.as_ref().map(|dir| dir.path().to_owned()));
+    let console = console.ok_or("its console has closed")?;
+    let folder = console.panel.as_ref().map(|dir| dir.path().to_owned());
     let folder = folder.ok_or(NO_FOLDER)?;
     if decodes_too_large(image.width(), image.height()) {
         return Err(too_large(DECODE_LIMIT));
@@ -381,14 +395,19 @@ fn forsake_folder(folder: &Path, failed: Option<&str>) {
     }
 }
 
-/// Says what became of a paste in its own console's image, after any word not yet read there, and
-/// shows that console's image tab with the keys, however late the answer (D120). A console that
-/// closed meanwhile took its slot with it: standard error alone.
+/// Says what became of a paste in its own console's image, and shows that console's image tab
+/// with the keys, however late the answer (D120). It replaces what the tab said, unless the image
+/// keeps unsent marks, whose words — a failed Send among them — are kept and it follows them. A
+/// console that closed meanwhile took its slot with it: standard error alone.
 fn tell(window: &mut crate::Window, pane: usize, said: &str) {
     let Some(slot) = super::slot_of(&mut window.tabs, pane) else {
         return eprintln!("A paste ended for a console that has closed: {said}");
     };
-    slot.add(said);
+    if slot.has_marks() {
+        slot.add(said);
+    } else {
+        slot.say(said);
+    }
     origin::focus(window, pane);
     origin::show_image(window);
 }

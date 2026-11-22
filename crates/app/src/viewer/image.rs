@@ -5946,11 +5946,9 @@ mod tests {
         let held = crate::clipboard::Pasted::Failed("Held by another party.".into());
         harness.reply_image(name, held);
         painted(&mut window, &ctx, vec![]);
-        let said = format!(
-            "{} The clipboard could not be read: held by another party.",
-            paste::EXPIRED
-        );
-        assert_eq!(word_of(&mut window, name), Some(said));
+        // The new answer replaces the old one rather than piling up after it.
+        let said = "The clipboard could not be read: held by another party.";
+        assert_eq!(word_of(&mut window, name).as_deref(), Some(said));
     }
 
     /// A paste asked again while one is on its way is painted in that console's tab, ahead of what
@@ -5973,6 +5971,22 @@ mod tests {
         assert_eq!(window.active().focus, name);
         assert!(said.iter().any(|t| t == paste::NO_IMAGE), "{said:?}");
         assert!(!said.iter().any(|t| t.contains("on its way")), "{said:?}");
+    }
+
+    /// A paste asked for another console while one is on its way says that console's paste was not
+    /// read, rather than that one is on its way for it.
+    #[test]
+    fn a_paste_asked_for_another_console_says_it_was_not_read() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let other = window.active().panes()[0].name;
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, other);
+        assert_eq!(harness.requested_image(), None);
+        assert_eq!(window.active().focus, other);
+        let said = drawer_texts(&mut window, &ctx);
+        let elsewhere = "Another console's paste is on its way; press Paste screenshot again once it has opened.";
+        assert!(said.iter().any(|t| t == elsewhere), "{said:?}");
     }
 
     /// An answer for a console that closed meanwhile is said nowhere but standard error: the other

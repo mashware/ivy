@@ -11997,9 +11997,11 @@ takes a screenshot from, into the image a console holds since #198 (D72's amendm
   opened through the same entry as a clicked image path (D72, D113) in that console's slot. Not
   found, that console's empty Image tab says so after how to open an image, which now names the
   paste too: «… or copy a screenshot and press Paste screenshot or Ctrl+V here.» (Cmd+V on macOS).
-  Every refusal is said there, in that console's own slot, after any word not yet read: no folder,
-  an image too large, a read that failed or ran out of time, a clipboard busy with another read or
-  unavailable, each with its cause.
+  Every refusal is said there, in that console's own slot, in place of what the tab said — after
+  it only over unsent marks, whose words, a failed Send among them, stay — so presses do not pile
+  answers up: no folder, an image too large, a read that failed or ran out of time (a decoder that
+  panics on another program's image included, which fails that read and not the worker), a
+  clipboard busy with another read or unavailable, each with its cause.
 - **The paste chord in the Image tab** does the same for the focused console, the one the tab
   shows — **only while the drawer holds the keys and no text field has the keyboard**, so a note
   being typed keeps its text paste, and not while a Send is on its way. A console that holds the
@@ -12017,7 +12019,9 @@ takes a screenshot from, into the image a console holds since #198 (D72's amendm
   tab says where. A console that closed before its answer took its slot with it: standard error
   only, never another console's tab.
 - **«A paste is already on its way» is painted, never written**: ahead of the word in the tab of
-  the console it was asked again for, while that paste is on its way. The slot's notice is written
+  the console it was asked again for, while that paste is on its way — or, asked for another
+  console than the one being read, that its paste was not read and to press again once the first
+  has opened, since one read runs at a time. The slot's notice is written
   by Send, the marks' refusal and every answer, so a status written into it and restored later went
   stale with each of them — lost, brought back after it stopped being true, or piled up — in three
   review rounds of #199's first PR.

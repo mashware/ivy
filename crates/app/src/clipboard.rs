@@ -333,12 +333,22 @@ fn run(
             pane: read.pane,
             content: match (backend.as_mut(), read.wanted) {
                 (Ok(backend), Wanted::Text) => Content::Text(backend.load(read.source)),
-                (Ok(backend), Wanted::Image) => Content::Image(pasted(backend.0.get_image())),
+                (Ok(backend), Wanted::Image) => Content::Image(image(&mut backend.0)),
                 (Err(error), Wanted::Text) => Content::Text(Err(error.clone())),
                 (Err(error), Wanted::Image) => Content::Image(Pasted::Unavailable(error.clone())),
             },
         })
     });
+}
+
+/// The clipboard's image, decoded by arboard from whatever another program put there: a decoder
+/// that panics on it fails this read, not the worker every later paste needs.
+fn image(clipboard: &mut arboard::Clipboard) -> Pasted {
+    let read = std::panic::AssertUnwindSafe(|| clipboard.get_image());
+    std::panic::catch_unwind(read).map_or_else(
+        |_| Pasted::Failed("its image could not be decoded".into()),
+        pasted,
+    )
 }
 
 fn run_with(
