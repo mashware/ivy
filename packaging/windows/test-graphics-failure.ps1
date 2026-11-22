@@ -5,6 +5,9 @@ $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:IVY_DISPOSABLE_RUNNER -ne 'yes') {
     throw 'Graphics failure checks require a disposable GitHub Windows runner.'
 }
+if (-not ('IvyLaunchNative' -as [type])) {
+    throw 'Run the native launch control before the graphics failure trial.'
+}
 $Executable = (Resolve-Path $Executable).Path
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 if (Test-Path $EvidenceDir) { throw 'Graphics evidence directory must be fresh.' }
@@ -23,10 +26,10 @@ public static class IvyGraphicsTrial {
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
-    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
-    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr h);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, StringBuilder text, uint flags, uint timeout, out IntPtr result);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
@@ -41,6 +44,15 @@ public static class IvyGraphicsTrial {
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+    public static string Controls(IntPtr dialog) {
+        var parts = new List<string>();
+        EnumChildWindows(dialog, (h, unused) => {
+            var name = new StringBuilder(256); GetClassName(h, name, name.Capacity);
+            parts.Add("handle=" + h + " parent=" + GetParent(h) + " id=" + GetDlgCtrlID(h) + " class=" + name);
+            return true;
+        }, IntPtr.Zero);
+        return string.Join("\n", parts);
     }
     public static string Text(IntPtr dialog) {
         var parts = new List<string>();
@@ -94,10 +106,13 @@ try {
         $Text -cnotmatch 'Detected OpenGL version: (unavailable|[0-9][^\r\n]*)' -or
         $Text -cnotmatch 'Details:') { throw "Incomplete native graphics notice: $Text" }
     Set-Content (Join-Path $EvidenceDir 'dialog.txt') $Text -Encoding utf8NoBOM
-    $Button = [IvyGraphicsTrial]::GetDlgItem($Dialog, 1)
-    if ($Button -eq [IntPtr]::Zero) { throw 'The native graphics notice has no OK button.' }
+    Set-Content (Join-Path $EvidenceDir 'controls.txt') ([IvyGraphicsTrial]::Controls($Dialog)) -Encoding utf8NoBOM
     if (-not [IvyGraphicsTrial]::SetForegroundWindow($Dialog) -and [IvyGraphicsTrial]::GetForegroundWindow() -ne $Dialog) {
         throw 'Could not activate the native graphics notice.'
+    }
+    while ([IvyGraphicsTrial]::GetForegroundWindow() -ne $Dialog) {
+        if ($Process.HasExited -or $Clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Native graphics notice did not become the foreground window.' }
+        Start-Sleep -Milliseconds 50
     }
     Add-Type -AssemblyName System.Drawing
     $Bounds = [IvyGraphicsTrial+Rect]::new()
@@ -109,11 +124,11 @@ try {
         finally { $Graphics.Dispose() }
         $Bitmap.Save((Join-Path $EvidenceDir 'dialog.png'), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $Bitmap.Dispose() }
-    # Activate the actual OK control so its own notification, with its control handle,
-    # reaches the dialog.
-    if (-not [IvyGraphicsTrial]::PostMessage($Button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not click the native OK button.' }
+    # Reuse the real keyboard driver already proven by the supported launch. Native dialog
+    # control IDs and hierarchy are not an application contract.
+    [IvyLaunchNative]::Chord([ushort]13)
     if (-not $Process.WaitForExit(5000)) {
-        if ([IvyGraphicsTrial]::Dialog($Process.Id) -ne [IntPtr]::Zero) { throw 'The native graphics notice stayed open after OK button activation.' }
+        if ([IvyGraphicsTrial]::Dialog($Process.Id) -ne [IntPtr]::Zero) { throw 'The native graphics notice stayed open after Enter.' }
         throw 'The native notice closed, but Ivy did not exit.'
     }
     if ($Process.ExitCode -ne 1) { throw "Expected graphics failure exit 1, got $($Process.ExitCode)." }
