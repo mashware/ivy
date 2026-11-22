@@ -58,6 +58,8 @@ const LABEL_FLOOR: f32 = 24.0;
 const SUMMARY_LABEL_FLOOR: f32 = 8.0;
 /// The air between the label and the dots.
 const LABEL_AIR: f32 = 8.0;
+/// The «new image» glyph, the size of the header's (D120).
+const UNSEEN: f32 = 12.0;
 /// The close target's width at the card's right edge.
 const CLOSE_WIDTH: f32 = 26.0;
 /// The narrowest card the title bar keeps before turning compact. The value is the pill era's
@@ -124,6 +126,9 @@ pub(super) struct Layout {
     /// One dot's slot, only where the dots did not fit: the tab's loudest claim, ringed (D96,
     /// amended for #113). Reserved whether or not anything claims, so a claim never moves the label.
     pub summary: Option<Rect>,
+    /// The «new image» glyph, at the label's right end, while one of the tab's consoles holds an
+    /// image its agent opened that nobody has seen (D120). It gives way before the label's floor.
+    pub unseen: Option<Rect>,
 }
 
 /// The air a card keeps on each side: the kit's on a roomy card, less on a narrow one.
@@ -149,11 +154,16 @@ fn shows_close(ui: &egui::Ui, card: Rect, active: bool) -> bool {
             .is_some_and(|p| card.contains(p))
 }
 
-/// How many consoles a tab holds, counted without collecting them.
-fn pane_count(tab: &Tab) -> usize {
+/// How many consoles a tab holds, and whether one holds an image nobody has seen, in one walk
+/// that collects nothing.
+fn pane_count(tab: &Tab) -> (usize, bool) {
     let mut count = 0;
-    tab.root.walk(&mut |_| count += 1);
-    count
+    let mut unseen = false;
+    tab.root.walk(&mut |pane| {
+        count += 1;
+        unseen |= pane.image.unseen();
+    });
+    (count, unseen)
 }
 
 /// Every card in tab order with its rectangle and its layout: the one walk painting and pointer
@@ -169,7 +179,8 @@ pub(super) fn cards<'a>(
     let count = window.tabs.len();
     window.tabs.iter().enumerate().map(move |(which, tab)| {
         let card = card(band, which, count);
-        let mut layout = Layout::new(card, pane_count(tab), count > 1);
+        let (panes, unseen) = pane_count(tab);
+        let mut layout = Layout::new(card, panes, count > 1, unseen);
         if !shows_close(ui, card, which == window.active) {
             layout.close = None;
             layout.body = card;
@@ -179,7 +190,7 @@ pub(super) fn cards<'a>(
 }
 
 impl Layout {
-    pub fn new(card: Rect, dots: usize, close: bool) -> Self {
+    pub fn new(card: Rect, dots: usize, close: bool, unseen: bool) -> Self {
         let padding = padding(card);
         let close = (close && card.width() >= CLOSE_MIN_WIDTH).then(|| {
             Rect::from_min_max(
@@ -210,7 +221,7 @@ impl Layout {
         } else {
             None
         };
-        let label = Rect::from_min_max(
+        let mut label = Rect::from_min_max(
             pos2(label_left, body.top()),
             pos2(
                 all.or(summary)
@@ -219,12 +230,23 @@ impl Layout {
                 body.bottom(),
             ),
         );
+        let floor = if all.is_some() {
+            LABEL_FLOOR
+        } else {
+            SUMMARY_LABEL_FLOOR
+        };
+        let unseen = (unseen && label.width() - UNSEEN - LABEL_AIR >= floor).then(|| {
+            let glyph = Rect::from_min_max(pos2(label.right() - UNSEEN, body.top()), label.max);
+            label.max.x = glyph.left() - LABEL_AIR;
+            glyph
+        });
         Self {
             body,
             close,
             label,
             dots: all,
             summary,
+            unseen,
         }
     }
 }
@@ -236,7 +258,7 @@ pub(crate) fn label_dots_summary(
     dots: usize,
     close: bool,
 ) -> (Rect, Option<Rect>, Option<Rect>) {
-    let layout = Layout::new(card, dots, close);
+    let layout = Layout::new(card, dots, close, false);
     (layout.label, layout.dots, layout.summary)
 }
 
@@ -395,6 +417,16 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 clip.galley(at, galley, ink);
             }
         }
+        // News, not a claim: in the label's own ink, and not counted among the rings.
+        if let Some(glyph) = layout.unseen {
+            crate::ui::icons::paint(
+                &painter,
+                glyph.center(),
+                crate::ui::icons::Icon::File(crate::ui::icons::FileKind::Image),
+                UNSEEN,
+                ink,
+            );
+        }
         if let Some(dots) = layout.dots {
             let mut n = 0;
             let mut ringed = false;
@@ -496,9 +528,11 @@ mod tests {
                     if which + 1 < count {
                         assert!(card.right() <= super::card(band, which + 1, count).left());
                     }
-                    for close in [false, true] {
+                    for (close, unseen) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
                         for n in [0, 1, 4] {
-                            let layout = Layout::new(card, n, close);
+                            let layout = Layout::new(card, n, close, unseen);
                             assert!(card.contains_rect(layout.body));
                             // The label starts at the padding the card's width earns.
                             assert_eq!(
@@ -532,6 +566,16 @@ mod tests {
                                 assert_eq!(summary.right(), dots_end(&layout));
                                 assert_eq!(summary.width(), 2.0 * RING_REACH);
                             }
+                            // The glyph sits between the label and the dots, touching neither, and
+                            // never takes the label under the floor its dots leave it.
+                            assert!(unseen || layout.unseen.is_none());
+                            if let Some(glyph) = layout.unseen {
+                                assert!(glyph.left() >= layout.label.right() + LABEL_AIR);
+                                let next = layout.dots.or(layout.summary);
+                                assert!(next.is_none_or(|d| glyph.right() + LABEL_AIR <= d.left()));
+                                assert!(glyph.right() <= layout.body.right());
+                                assert!(layout.label.width() >= SUMMARY_LABEL_FLOOR);
+                            }
                         }
                     }
                 }
@@ -542,8 +586,14 @@ mod tests {
         }
         // No slot is left of the label: it starts at the card's padding.
         let wide = Rect::from_min_size(pos2(0.0, 6.0), vec2(1200.0, 34.0));
-        let layout = Layout::new(card(wide, 0, 1), 0, false);
+        let layout = Layout::new(card(wide, 0, 1), 0, false, false);
         assert_eq!(layout.label.left(), PADDING);
+        // A roomy card always has the glyph's room.
+        assert!(
+            Layout::new(card(wide, 0, 1), 4, true, true)
+                .unseen
+                .is_some()
+        );
     }
 
     /// Where the dots end: the body's right edge with the cross, its padding short of it without
@@ -563,18 +613,18 @@ mod tests {
     #[test]
     fn four_dots_fit_down_to_128_points_and_one_summary_slot_down_to_the_narrowest_card() {
         let at = |width: f32| Rect::from_min_size(pos2(0.0, 6.0), vec2(width, 34.0));
-        let fits = Layout::new(at(128.0), 4, true);
+        let fits = Layout::new(at(128.0), 4, true, false);
         let dots = fits.dots.expect("128 points hold four dots");
         assert_eq!(fits.summary, None);
         assert_eq!(dots.width(), 60.0);
         assert_eq!(dot_center(dots, 1).x - dot_center(dots, 0).x, 16.0);
-        let short = Layout::new(at(127.0), 4, true);
+        let short = Layout::new(at(127.0), 4, true, false);
         assert_eq!(short.dots, None);
         let summary = short.summary.expect("127 points hold one summary slot");
         assert_eq!(summary.right(), 127.0 - CLOSE_WIDTH);
         assert_eq!(summary.width(), 12.0);
         for tenth in (MIN_CARD * 10.0) as u32..1270 {
-            let layout = Layout::new(at(tenth as f32 / 10.0), 4, true);
+            let layout = Layout::new(at(tenth as f32 / 10.0), 4, true, false);
             assert!(layout.dots.is_none() && layout.summary.is_some(), "{tenth}");
         }
     }

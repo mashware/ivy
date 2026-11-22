@@ -291,6 +291,9 @@ pub(crate) fn open_for_an_agent(
         return Err(MARKS_NOT_SENT.to_owned());
     }
     window.image.open(slot, source, path);
+    // Set even where the drawer opens on it at once: one rule, and the frame that paints it
+    // takes the mark down.
+    slot.mark_unseen();
     if !working_in(window, pane, room.ctx) {
         return Ok(MARKED_FOR_THE_PERSON);
     }
