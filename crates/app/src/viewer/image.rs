@@ -6556,6 +6556,50 @@ mod tests {
         assert_eq!(decoded_or_why(&mut window, &ctx, name), Ok(()));
     }
 
+    /// **On a real Windows disk, the window's own reader refuses an agent's image through a
+    /// junction** — which needs no privilege to make — and lets the same PNG by its own folder
+    /// through (D120). Nothing is handed in: what is pinned is the reader the window is built with,
+    /// which the portable test above replaces.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_an_agents_image_through_a_junction_is_refused_by_the_window() {
+        let folder = Folder::new();
+        let plain = folder.0.join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let direct = plain.join("shot.png");
+        write_png(&direct, 64, 32);
+        let junction = folder.0.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let through = junction.join("shot.png");
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &direct);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        assert_eq!(decoded_or_why(&mut window, &ctx, focused), Ok(()));
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &through);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        assert_eq!(
+            decoded_or_why(&mut window, &ctx, focused),
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                through.display()
+            ))
+        );
+    }
+
     /// Where the «new image» glyph was painted: the labels of the tab cards it sits on, and the
     /// consoles of the tab on show whose header it sits in.
     fn new_image_marks(

@@ -323,11 +323,17 @@ mod tests {
     /// it. Here `/home/gone` is not there and `/home/me` is a link.
     #[test]
     fn a_path_with_a_parent_step_is_refused_before_anything_is_asked() {
-        for path in ["/home/gone/../me/a.png", "/home/me/a.png/..", "/../home/me/a.png"] {
+        for path in [
+            "/home/gone/../me/a.png",
+            "/home/me/a.png/..",
+            "/../home/me/a.png",
+        ] {
             let (said, asked) = walk(path, &[("/home/gone", gone), ("/home/me", link)]);
             assert_eq!(
                 said,
-                Err(format!("{path} has a «..» in it; give the path without one")),
+                Err(format!(
+                    "{path} has a «..» in it; give the path without one"
+                )),
                 "{path}"
             );
             assert_eq!(asked, paths(&[]), "{path}");
