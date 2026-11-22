@@ -11625,7 +11625,9 @@ another console's image.
 another console's Send is between its click and its Enter, this console's button reads «Waiting for
 the Send to <console>…»: the label and whether the button answers are read from one value, so no
 button greyed by a Send reads «Send to … and press Enter»; one greyed for want of a folder keeps
-that label and says why in the line under it. **A console that closes with its Send in flight
+that label and says why in the line under it. The Send's own image, once its line is typed and the
+Enter is owed, reads «Sending…» with no Cancel beside it: nothing is left that Cancel could take
+back, and it does not wait for itself. **A console that closes with its Send in flight
 takes that Send back as Cancel would**, on the next input pass and whichever way it closed — the
 console, its tab, a split or a retirement: its Cancel went with its image, and otherwise every
 console's Send stayed greyed, with no Cancel anywhere, until the worker ended. Its worker is parked

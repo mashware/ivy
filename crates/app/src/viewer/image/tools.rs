@@ -585,6 +585,22 @@ fn compose(path: &std::path::Path, marks: &Marks) -> String {
 mod tests {
     use super::*;
 
+    /// Each Send button names what it stands for: its own Send still on its way once its line is
+    /// typed, never a wait for itself.
+    #[test]
+    fn a_send_button_says_what_it_stands_for() {
+        assert_eq!(send_label("bash", Button::Sending), "Sending…");
+        assert_eq!(send_label("bash", Button::Entering), "Sending…");
+        assert_eq!(
+            send_label("bash", Button::Waiting("claude (Console 2)")),
+            "Waiting for the Send to claude (Console 2)…"
+        );
+        assert_eq!(
+            send_label("bash", Button::Finishing("claude (Console 2)")),
+            "Still finishing the copy for claude (Console 2)…"
+        );
+    }
+
     fn body(width: f32) -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(width, 400.0))
     }
