@@ -298,13 +298,15 @@ pub(crate) fn aim(window: &mut crate::Window) {
     // A Send on its way keeps the name its line showed: the first free name is no longer it once
     // the worker creates the copy, and the line painted must stay the line that will be typed.
     let shown = window.image.document();
+    // So does the console it names: the request already carries it.
     let kept = (window.image.send.in_flight())
         .filter(|r| Some(r.document) == shown)
-        .map(|r| r.path.clone());
-    window.image.send.target = match kept {
-        Some(path) => Some(Ok(path)),
-        None => to.as_ref().map(|(pane, _)| copy_path(window, *pane)),
+        .map(|r| (r.path.clone(), (r.pane, r.label.clone())));
+    let (target, to) = match kept {
+        Some((path, to)) => (Some(Ok(path)), Some(to)),
+        None => (to.as_ref().map(|(pane, _)| copy_path(window, *pane)), to),
     };
+    window.image.send.target = target;
     window.image.send.to = to;
     window.image.send.consoles = consoles;
 }

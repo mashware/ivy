@@ -414,7 +414,9 @@ pub(crate) fn keys(
     window.viewer_other.context = Some(ui.ctx().clone());
     if blocked {
         window.viewer.space = false;
+        window.viewer.keys = false;
         window.viewer_other.space = false;
+        window.viewer_other.keys = false;
     }
     let owned = !blocked && before_keys(window, ui, metrics);
     delivery::deliver(window, ui.ctx());
@@ -439,7 +441,9 @@ pub(crate) fn before_keys(
         let held = window.viewer.space || window.viewer_other.space;
         for state in [&mut window.viewer, &mut window.viewer_other] {
             state.events = None;
+            // Nor the keys: whatever pass returns early, the drawer did not hold them in it.
             state.space = false;
+            state.keys = false;
         }
         if window.settings_editor.is_open() || window.pane_view.is_modal() {
             return false;

@@ -8,7 +8,7 @@ const DEADLINE: Duration = Duration::from_secs(2);
 /// 1.5–4 s under load (#178): the text deadline would expire on an ordinary capture.
 const IMAGE_DEADLINE: Duration = Duration::from_secs(10);
 const BUSY: &str = "The clipboard is still answering an earlier read; try again shortly.";
-const UNAVAILABLE: &str = "The clipboard is unavailable.";
+const UNAVAILABLE: &str = "The clipboard is unavailable; restart Ivy to paste a screenshot.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
@@ -52,8 +52,27 @@ pub(crate) enum Pasted {
     Image(image::RgbaImage),
     Absent,
     Failed(String),
+    /// No clipboard to read from — it could not be opened, or its worker stopped — which asking
+    /// again does not mend.
+    Unavailable(String),
     /// The clipboard's owner did not answer in time; whatever it answers later is discarded.
     Expired,
+}
+
+/// Why an image read was not even asked: busy is worth a retry, unavailable is not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refused {
+    Busy,
+    Unavailable,
+}
+
+impl Refused {
+    pub(crate) fn says(self) -> &'static str {
+        match self {
+            Self::Busy => BUSY,
+            Self::Unavailable => UNAVAILABLE,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -122,14 +141,13 @@ impl Service {
             wanted: Wanted::Text,
         };
         let asked = self.ask(read, now);
-        asked
-            .map_err(|why| eprintln!("{why} This paste was not requested."))
-            .is_ok()
+        let said = |why: Refused| eprintln!("{} This paste was not requested.", why.says());
+        asked.map_err(said).is_ok()
     }
 
     /// Asks for the image on the ordinary clipboard, for the console `pane`; refused, it says why
     /// in words a person reads.
-    pub(crate) fn request_image(&mut self, pane: usize, now: Instant) -> Result<(), &'static str> {
+    pub(crate) fn request_image(&mut self, pane: usize, now: Instant) -> Result<(), Refused> {
         let read = Read {
             pane,
             source: Source::Clipboard,
@@ -138,12 +156,12 @@ impl Service {
         self.ask(read, now)
     }
 
-    fn ask(&mut self, read: Read, now: Instant) -> Result<(), &'static str> {
+    fn ask(&mut self, read: Read, now: Instant) -> Result<(), Refused> {
         if self.pending.is_some() {
-            return Err(BUSY);
+            return Err(Refused::Busy);
         }
-        let worker = self.worker.as_ref().ok_or(UNAVAILABLE)?;
-        let mut mailbox = worker.mailbox.lock().map_err(|_| UNAVAILABLE)?;
+        let worker = self.worker.as_ref().ok_or(Refused::Unavailable)?;
+        let mut mailbox = worker.mailbox.lock().map_err(|_| Refused::Unavailable)?;
         let (pane, wanted) = (read.pane, read.wanted);
         mailbox.read = Some(read);
         if matches!(
@@ -151,7 +169,7 @@ impl Service {
             Err(mpsc::TrySendError::Disconnected(()))
         ) {
             mailbox.read = None;
-            return Err(UNAVAILABLE);
+            return Err(Refused::Unavailable);
         }
         drop(mailbox);
         let deadline = match wanted {
@@ -210,9 +228,9 @@ impl Service {
             Err(mpsc::TryRecvError::Disconnected) => {
                 eprintln!("Clipboard worker stopped");
                 self.worker = None;
-                // An image read is answered, or the paste waiting on it waits for ever.
-                let pending = self.pending.take()?;
-                let stopped = Pasted::Failed("the clipboard stopped answering".into());
+                // An image read is answered once: one already said expired was answered.
+                let pending = self.pending.take().filter(|p| !p.expired)?;
+                let stopped = Pasted::Unavailable("the clipboard stopped answering".into());
                 return (pending.wanted == Wanted::Image)
                     .then_some(Delivered::Image(pending.pane, stopped));
             }
@@ -268,6 +286,9 @@ pub(crate) fn deliver(window: &mut crate::Window, context: &egui::Context) {
             }
         }
         Some(Delivered::Image(name, pasted)) => {
+            if let Pasted::Failed(why) | Pasted::Unavailable(why) = &pasted {
+                eprintln!("Clipboard image read failed: {why}");
+            }
             crate::viewer::image::paste::received(window, name, pasted, context);
             context.request_repaint();
         }
@@ -309,7 +330,7 @@ fn run(
                 (Ok(backend), Wanted::Text) => Content::Text(backend.load(read.source)),
                 (Ok(backend), Wanted::Image) => Content::Image(pasted(backend.0.get_image())),
                 (Err(error), Wanted::Text) => Content::Text(Err(error.clone())),
-                (Err(error), Wanted::Image) => Content::Image(Pasted::Failed(error.clone())),
+                (Err(error), Wanted::Image) => Content::Image(Pasted::Unavailable(error.clone())),
             },
         })
     });
@@ -831,10 +852,26 @@ mod tests {
             service.poll(now),
             Some(Delivered::Image(
                 5,
-                Pasted::Failed("the clipboard stopped answering".into())
+                Pasted::Unavailable("the clipboard stopped answering".into())
             ))
         );
-        assert_eq!(service.request_image(5, now), Err(UNAVAILABLE));
+        assert_eq!(service.request_image(5, now), Err(Refused::Unavailable));
+    }
+
+    /// A read already said expired is not answered again when its worker then stops: the paste
+    /// that waited on it has ended, and a second answer would open a viewer nobody asked for.
+    #[test]
+    fn an_expired_read_is_not_answered_again_when_the_worker_stops() {
+        let (mut service, requests, replies) = connected();
+        let now = Instant::now();
+        assert!(service.request_image(5, now).is_ok());
+        requests.try_recv().unwrap();
+        assert_eq!(
+            service.poll(now + IMAGE_DEADLINE),
+            Some(Delivered::Image(5, Pasted::Expired))
+        );
+        drop(replies);
+        assert_eq!(service.poll(now + IMAGE_DEADLINE), None);
     }
 
     /// A refused image read says why, in words for the drawer: busy is worth a retry, gone is not.
@@ -844,8 +881,11 @@ mod tests {
         let now = Instant::now();
         assert!(service.request_image(1, now).is_ok());
         requests.try_recv().unwrap();
-        assert_eq!(service.request_image(2, now), Err(BUSY));
-        assert_eq!(Service::default().request_image(2, now), Err(UNAVAILABLE));
+        assert_eq!(service.request_image(2, now), Err(Refused::Busy));
+        assert_eq!(
+            Service::default().request_image(2, now),
+            Err(Refused::Unavailable)
+        );
     }
 
     /// arboard's answer, as a paste reads it: an empty clipboard is no image, not a failure, and

@@ -307,7 +307,8 @@ impl Viewer {
         // aimed yet, and its Send is the image's own until the next.
         let to = (sending.to.clone()).unwrap_or_else(|| (origin.pane, origin.label.clone()));
         let send = something_to_send.then(|| (to.1.as_str(), sending.busy(), sending.parked()));
-        let choose = something_to_send && sending.consoles.len() > 1;
+        // Any other open console can take the Send, the image's own closed included.
+        let choose = something_to_send && sending.consoles.iter().any(|(open, _)| *open != to.0);
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send, choose);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
@@ -4726,6 +4727,10 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         window.close_a_pane_called(other, &ctx).unwrap();
         let shapes = painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            window.image.send.chosen, None,
+            "a closed console stayed picked"
+        );
         let own_label = window.image.origin().unwrap().label.clone();
         let wanted = format!("Send to {own_label} and press Enter");
         assert!(
@@ -4779,6 +4784,25 @@ mod tests {
             window.image.notice.as_deref(),
             Some("The clipboard holds no image.")
         );
+        // Again, after letting the keys go (egui calls a press of a key still down a repeat):
+        // the notice says it once, it does not pile up.
+        let released = egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        painted(&mut window, &ctx, vec![released]);
+        painted(&mut window, &ctx, vec![chord()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("The clipboard holds no image.")
+        );
     }
 
     /// The chord belongs to the drawer only while it holds the keys: a console that holds them
@@ -4787,7 +4811,14 @@ mod tests {
     fn a_paste_into_a_console_is_not_taken_by_the_viewer() {
         let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
         crate::viewer::blur(&mut window);
-        for event in [egui::Event::Paste("text".into()), chord()] {
+        let shifted = egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        };
+        for event in [egui::Event::Paste("text".into()), chord(), shifted] {
             painted(&mut window, &ctx, vec![event.clone()]);
             painted(&mut window, &ctx, vec![]);
             assert_eq!(harness.requested_image(), None, "{event:?}");
@@ -4825,10 +4856,17 @@ mod tests {
         let own = window.image.origin().unwrap().pane;
         marks_mut(&mut window).general = "x".into();
         window.close_a_pane_called(own, &ctx).unwrap();
-        let shapes = painted(&mut window, &ctx, vec![]);
-        let (line, _) = text_rect(&shapes, |t| t.contains("nothing can be sent"))
+        ctx.enable_accesskit();
+        painted(&mut window, &ctx, vec![]);
+        let output = pass(&mut window, &ctx, vec![]);
+        let (line, _) = text_rect(&output.shapes, |t| t.contains("nothing can be sent"))
             .expect("the refusal is painted");
         assert!(line.starts_with("The console has closed"), "{line}");
+        // The other console can still take the Send.
+        assert!(
+            accesskit_at(&output, tools::PICK).is_some(),
+            "no picker to send elsewhere"
+        );
     }
 
     /// AC7: a console that closes while its screenshot is written takes the file and its folder
@@ -4868,20 +4906,18 @@ mod tests {
         let other = window.active().panes()[0].name;
         ctx.enable_accesskit();
         let named = |output: &egui::FullOutput, wanted: &str| {
-            let update = output.platform_output.accesskit_update.as_ref()?;
-            update.nodes.iter().find_map(|(_, node)| {
-                let bounds = node.bounds()?;
-                (node.label() == Some(wanted)).then(|| {
-                    egui::pos2(
-                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
-                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
-                    )
-                })
-            })
+            accesskit_at(output, wanted).map(|bounds| bounds.center())
         };
         pass(&mut window, &ctx, vec![]);
         let output = pass(&mut window, &ctx, vec![]);
         let arrow = named(&output, tools::PICK).expect("the picker is named");
+        // Send's label is laid out in what the picker leaves of the row.
+        let picker = accesskit_at(&output, tools::PICK).unwrap();
+        let (_, label) = text_rect(&output.shapes, |t| t.starts_with("Send to ")).unwrap();
+        assert!(
+            label.right() <= picker.left(),
+            "{label:?} runs under {picker:?}"
+        );
         click(&mut window, &ctx, arrow);
         let other_label = {
             let pane = window.all_panes().find(|p| p.name == other).unwrap();
@@ -4895,5 +4931,83 @@ mod tests {
         let shapes = painted(&mut window, &ctx, vec![]);
         let wanted = format!("Send to {other_label} and press Enter");
         assert!(text_rect(&shapes, |t| t == wanted).is_some());
+    }
+
+    /// Where AccessKit says the widget named `wanted` is.
+    fn accesskit_at(output: &egui::FullOutput, wanted: &str) -> Option<egui::Rect> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        update.nodes.iter().find_map(|(_, node)| {
+            let b = node.bounds()?;
+            (node.label() == Some(wanted)).then(|| {
+                egui::Rect::from_min_max(
+                    egui::pos2(b.x0 as f32, b.y0 as f32),
+                    egui::pos2(b.x1 as f32, b.y1 as f32),
+                )
+            })
+        })
+    }
+
+    /// Marks drawn while the clipboard was being read are kept: what the read found is said beside
+    /// them, once, and the image stays.
+    #[test]
+    fn marks_drawn_during_a_read_are_kept() {
+        let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        marks_mut(&mut window).general = "keep".into();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(window.image.path(), Some(path.as_path()));
+        assert_eq!(marks_of(&window).general, "keep");
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("The clipboard holds no image.")
+        );
+    }
+
+    /// A screenshot written while marks were drawn on the image shown is kept, and the drawer says
+    /// where it went.
+    #[test]
+    fn a_screenshot_saved_beside_unsent_marks_says_where() {
+        let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        // Drawn while the read and the write are on their way.
+        marks_mut(&mut window).general = "keep".into();
+        harness.reply_image(name, crate::clipboard::Pasted::Image(screenshot()));
+        painted(&mut window, &ctx, vec![]);
+        let started = Instant::now();
+        while window.image.paste.pending() {
+            assert!(started.elapsed() < Duration::from_secs(30));
+            painted(&mut window, &ctx, vec![]);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(window.image.path(), Some(path.as_path()));
+        let notice = window.image.notice.clone().unwrap_or_default();
+        assert!(notice.contains("pasted-1.png"), "{notice}");
+        assert!(notice.ends_with("send or clear the marks on this image to open it."));
+    }
+
+    /// The clipboard's own refusals reach the drawer: busy with the hint to try again, unavailable
+    /// without it, because pressing again cannot mend it.
+    #[test]
+    fn the_clipboards_refusals_are_said_with_or_without_the_hint() {
+        let (mut window, _ctx, _harness, name, _folder) = window_to_paste();
+        let source = crate::clipboard::Source::Clipboard;
+        assert!(window.clipboard.request(name, source, Instant::now()));
+        paste::ask(&mut window, name, paste::By::Button);
+        let busy = format!(
+            "The clipboard is still answering an earlier read; try again shortly. {}",
+            paste::HINT
+        );
+        assert_eq!(paste::empty(&window.image), Some(busy.as_str()));
+        window.clipboard = crate::clipboard::Service::default();
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(
+            paste::empty(&window.image),
+            Some("The clipboard is unavailable; restart Ivy to paste a screenshot.")
+        );
     }
 }

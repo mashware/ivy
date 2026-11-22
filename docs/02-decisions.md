@@ -11788,7 +11788,7 @@ Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so 
 takes a screenshot from:
 
 - **«Paste screenshot» in every console's header** (Phosphor's image glyph, between the review and
-  the panel, and the first control a narrow header gives up, before the splits) reads the
+  the panel; a narrow header gives up the splits first, then this, and keeps the rest) reads the
   clipboard's image for that console. Found, it is written as
   `pasted-<n>.png` into that console's `PANEL_DIR` — the first `n` nothing there takes, a dangling
   link included, created with `create_new` on a worker, mode 0600 on Unix — and opened through the
@@ -11796,16 +11796,20 @@ takes a screenshot from:
   opens an **empty viewer pinned to that console** saying «Copy a screenshot and press Paste
   screenshot again, or press Ctrl+V here.» (Cmd+V on macOS) — alone when the clipboard simply held
   no image, after what went wrong when a retry can mend it (a read that failed or ran out of time,
-  a paste already on its way), and what went wrong alone when it cannot (no folder, an image too
-  large, a clipboard that is unavailable).
+  a paste already on its way, a clipboard still busy with another read), and what went wrong alone
+  when it cannot (no folder, an image too large, a clipboard that is unavailable — never opened, or
+  its worker stopped — which only restarting Ivy mends).
 - **The paste chord inside the viewer** does the same for the console the viewer is pinned to —
   **only while the drawer holds the keys and no text field has the keyboard**, the condition D113
   gives Ctrl+Z, so a note being typed keeps its text paste, and not while a Send is on its way. The
   vendored egui-winit lets the chord through as a key when the clipboard holds no text — Ctrl+V or
   Ctrl+Shift+V (Cmd on macOS), the Paste key, and Shift+Insert on Windows, where Win+Shift+S
   leaves only an image — and turns every paste chord into `Event::Paste` when it does; both are
-  taken. Over a document already shown, a chord that finds no image only says so, rather than
-  replacing the document; over unsent marks, any paste says what it found beside them.
+  taken, but not a held chord's repeats. Over a picture already shown, a chord that finds no image
+  only says so, replacing the drawer's notice rather than the picture, and without taking the
+  keyboard back from a console the person moved to meanwhile. A paste asked over unsent marks is
+  refused before the clipboard is read; marks drawn while it was being read are kept, and what
+  the read found is said beside them, once.
 - **The file is the console's**: it joins the annotated copies the console removes when it closes
   (D113's cleanup, the same field). A console that closes while its screenshot is written takes the
   file when the write ends, and its folder if nothing else is in it. A screenshot written while
@@ -11820,16 +11824,18 @@ takes a screenshot from:
   not answer in time.` — because a button pressed for nothing visible reads as a button that does
   not work. The read stays on the clipboard's one worker, one read at a time, keyed by console: a text
   paste asked while a screenshot is being read is refused, as it already was behind another text
-  read, and said on standard error. A worker that stops answers the read it held as failed, so
-  the paste waiting on it ends.
+  read, and said on standard error. A worker that stops answers the read it held, unless that
+  read was already said expired — each read is answered once — so the paste waiting on it ends.
 - **Beside Send, an arrow picks another open console** to send to, in case the wrong header was
   pressed — listed by name, and where two share one, by tab and place as well, because several
   agents' consoles often carry the same title; the arrow is named for assistive technology and
   hidden while a Send is on its way. It changes only where Send goes: the copy is written into the picked console's folder
   and the line typed there, and the image, its file, its marks and its notes stay as they are. A
   picked console that closes gives Send back to the image's own. One function answers which
-  console that is for every place that names or uses it — the button, the line, the request, the
-  ready check after a Cancel, «Sent to …».
+  console that is before the drawer paints — the button, the line, the request, the ready check
+  after a Cancel, «Sent to …» — and a Send on its way keeps the console its request named. The
+  arrow is offered whenever another open console could take the Send, the image's own closed
+  included.
 
 **Amends D113**: the copies field also holds pasted screenshots, and Send's console is the picked
 one when there is one.

@@ -186,7 +186,7 @@ fn layout(strip: egui::Rect, offer: Offer) -> Layout {
         };
     }
     // What is not essential goes first when the header is narrow: the splits, which are also in
-    // the titlebar, and before them the paste (D117), which a wider console still offers.
+    // the titlebar, then the paste (D117); the controls in `base` stay.
     let spare = ((room / CELL) as usize).saturating_sub(base.len());
     if spare > 0 {
         base.insert(2, Target::Paste);
