@@ -46,10 +46,36 @@ impl Pasting {
     }
 }
 
+/// What the empty viewer says, when no image was pasted into it.
+pub(crate) fn empty(viewer: &super::Viewer) -> Option<&str> {
+    match &viewer.document.as_ref()?.load {
+        super::Load::Empty(text) => Some(text),
+        _ => None,
+    }
+}
+
+/// Replaces whatever image was shown with an empty viewer for `origin`'s console, saying `text`.
+pub(in crate::viewer) fn pin(
+    viewer: &mut super::Viewer,
+    origin: crate::viewer::Source,
+    text: String,
+) {
+    viewer.start(origin, PathBuf::new(), super::Load::Empty(text));
+}
+
+/// The paste chord reaches the viewer only while the drawer holds the keys, as Ctrl+Z does; a note
+/// being typed keeps it for its own text. Taken here, it is asked for in the next input pass.
+pub(super) fn take_chord(viewer: &mut super::Viewer, ui: &mut egui::Ui) {
+    if !viewer.send.busy() && !ui.ctx().text_edit_focused() && ui.input_mut(take_key) {
+        viewer.paste.key = true;
+        ui.ctx().request_repaint();
+    }
+}
+
 /// Takes the paste chord out of `input`: as a key when the clipboard held no text — the vendored
 /// egui-winit lets it through then — or as the text paste egui-winit made of it otherwise. Shift
 /// is not looked at: egui-winit does not, so both chords reach here as the same paste.
-pub(super) fn take_key(input: &mut egui::InputState) -> bool {
+fn take_key(input: &mut egui::InputState) -> bool {
     let before = input.events.len();
     input.events.retain(|event| match event {
         egui::Event::Paste(_) => false,
@@ -216,7 +242,12 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
         ctx.request_repaint_after(Duration::from_millis(50));
         return;
     };
-    let (pane, by, _) = window.image.paste.writing.take().expect("a paste being written");
+    let (pane, by, _) = window
+        .image
+        .paste
+        .writing
+        .take()
+        .expect("a paste being written");
     let path = match written {
         Ok(path) => path,
         Err(why) => return tell(window, pane, by, Some(&why)),
@@ -255,7 +286,7 @@ fn forsake(path: &Path) {
 /// else opens the viewer for that console, empty, with the hint after what is said.
 fn tell(window: &mut crate::Window, pane: usize, by: Asked, said: Option<&str>) {
     if by == Asked::Key
-        && window.image.loaded_picture()
+        && window.image.original().is_some()
         && let Some(said) = said
     {
         window.image.say(said);
@@ -304,7 +335,10 @@ mod tests {
         let written = write_new(folder, b"png").unwrap();
         assert_eq!(written, folder.join("pasted-3.png"));
         assert_eq!(std::fs::read(&written).unwrap(), b"png");
-        assert_eq!(std::fs::read(folder.join("pasted-2.png")).unwrap(), b"theirs");
+        assert_eq!(
+            std::fs::read(folder.join("pasted-2.png")).unwrap(),
+            b"theirs"
+        );
         assert!(!folder.join("nowhere").exists());
         for name in ["pasted-1.png", "pasted-2.png", "pasted-3.png"] {
             let _ = std::fs::remove_file(folder.join(name));

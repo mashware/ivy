@@ -28,8 +28,12 @@ pub(crate) enum Icon {
     Expand,
     Collapse,
     Refresh,
-    Folder { open: bool },
-    Caret { open: bool },
+    Folder {
+        open: bool,
+    },
+    Caret {
+        open: bool,
+    },
     CaretUp,
     CollapseAll,
     File(FileKind),

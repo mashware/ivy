@@ -133,12 +133,6 @@ impl Service {
         self.ask(read, now)
     }
 
-    /// Whether a read is still outstanding, which refuses another until it ends.
-    #[cfg(test)]
-    pub(crate) fn busy(&self) -> bool {
-        self.pending.is_some()
-    }
-
     fn ask(&mut self, read: Read, now: Instant) -> bool {
         if self.pending.is_some() {
             eprintln!("Clipboard is busy; this paste was not requested");
@@ -214,15 +208,7 @@ impl Service {
                     Content::Text(Ok(_)) => {}
                     Content::Text(Err(error)) => eprintln!("Clipboard read failed: {error}"),
                     Content::Image(found) => {
-                        let pasted = match found {
-                            Ok(Some(image)) => Pasted::Image(image),
-                            Ok(None) => Pasted::Absent,
-                            Err(error) => {
-                                eprintln!("Clipboard image read failed: {error}");
-                                Pasted::Failed(error)
-                            }
-                        };
-                        return Some(Delivered::Image(reply.pane, pasted));
+                        return Some(Delivered::Image(reply.pane, pasted(found)));
                     }
                 }
             }
@@ -248,9 +234,20 @@ impl Service {
     }
 }
 
+fn pasted(found: Result<Option<image::RgbaImage>, String>) -> Pasted {
+    match found {
+        Ok(Some(image)) => Pasted::Image(image),
+        Ok(None) => Pasted::Absent,
+        Err(error) => {
+            eprintln!("Clipboard image read failed: {error}");
+            Pasted::Failed(error)
+        }
+    }
+}
+
 /// An image read that ran out of time is said once; a text one only on standard error, as before.
 fn expired(pending: &Pending) -> Option<Delivered> {
-    (pending.wanted == Wanted::Image).then(|| Delivered::Image(pending.pane, Pasted::Expired))
+    (pending.wanted == Wanted::Image).then_some(Delivered::Image(pending.pane, Pasted::Expired))
 }
 
 pub(crate) fn deliver(window: &mut crate::Window, context: &egui::Context) {
@@ -769,7 +766,10 @@ mod tests {
         let cases = [
             (Ok(Some(image.clone())), Pasted::Image(image)),
             (Ok(None), Pasted::Absent),
-            (Err("owner gone".into()), Pasted::Failed("owner gone".into())),
+            (
+                Err("owner gone".into()),
+                Pasted::Failed("owner gone".into()),
+            ),
         ];
         for (found, expected) in cases {
             let (mut service, requests, replies) = connected();
@@ -780,7 +780,10 @@ mod tests {
             assert_eq!(read.source, Source::Clipboard);
             replies.send(image_reply(read.pane, found)).unwrap();
             assert_eq!(service.poll(now), Some(Delivered::Image(6, expected)));
-            assert!(!service.busy(), "a delivered image read still holds the clipboard");
+            assert!(
+                service.pending.is_none(),
+                "a delivered image read still holds the clipboard"
+            );
         }
     }
 
@@ -792,17 +795,23 @@ mod tests {
         let now = Instant::now();
         assert!(service.request_image(4, now));
         let read = requests.try_recv().unwrap();
-        assert_eq!(service.poll(now + DEADLINE), None, "expired at the text deadline");
+        assert_eq!(
+            service.poll(now + DEADLINE),
+            None,
+            "expired at the text deadline"
+        );
         assert_eq!(
             service.poll(now + IMAGE_DEADLINE),
             Some(Delivered::Image(4, Pasted::Expired))
         );
         assert_eq!(service.poll(now + IMAGE_DEADLINE), None, "said twice");
-        assert!(service.busy(), "a stuck owner was asked again");
+        assert!(service.pending.is_some(), "a stuck owner was asked again");
         let late = image::RgbaImage::new(1, 1);
-        replies.send(image_reply(read.pane, Ok(Some(late)))).unwrap();
+        replies
+            .send(image_reply(read.pane, Ok(Some(late))))
+            .unwrap();
         assert_eq!(service.poll(now + IMAGE_DEADLINE), None);
-        assert!(!service.busy());
+        assert!(service.pending.is_none());
     }
 
     /// A late image whose deadline passed with no frame polling in between is said as expired,
@@ -814,7 +823,9 @@ mod tests {
         assert!(service.request_image(2, now));
         let read = requests.try_recv().unwrap();
         let late = image::RgbaImage::new(1, 1);
-        replies.send(image_reply(read.pane, Ok(Some(late)))).unwrap();
+        replies
+            .send(image_reply(read.pane, Ok(Some(late))))
+            .unwrap();
         assert_eq!(
             service.poll(now + IMAGE_DEADLINE),
             Some(Delivered::Image(2, Pasted::Expired))

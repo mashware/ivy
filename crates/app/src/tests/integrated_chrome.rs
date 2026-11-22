@@ -1059,9 +1059,18 @@ mod tests {
         frame(&mut window, &ctx, area, vec![]);
         let names = names_in_order(&window);
         let dir = crate::PanelDir::create().unwrap();
-        window.all_panes_mut().find(|p| p.name == names[1]).unwrap().panel = Some(dir);
+        window
+            .all_panes_mut()
+            .find(|p| p.name == names[1])
+            .unwrap()
+            .panel = Some(dir);
         let paste = control(&window, &ctx, area, 1, 87.5);
-        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(paste)]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(paste)],
+        );
         frame(&mut window, &ctx, area, click_at(paste));
         assert_eq!(harness.requested_image(), Some(names[1]));
         assert_ne!(window.active().focus, names[1], "the paste took the focus");

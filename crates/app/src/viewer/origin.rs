@@ -278,7 +278,7 @@ pub(crate) fn pin_empty_image(
         return Err(NotOpened::Marks);
     }
     replace_document(window, Keep::Image);
-    window.image.pin(source, text);
+    super::image::paste::pin(&mut window.image, source, text);
     show_image(window);
     Ok(())
 }

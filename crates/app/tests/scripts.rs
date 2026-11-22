@@ -483,6 +483,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/image/send.rs"),
     ),
     (
+        "app/src/viewer/image/paste.rs",
+        include_str!("../src/viewer/image/paste.rs"),
+    ),
+    (
         "app/src/viewer/image/flatten.rs",
         include_str!("../src/viewer/image/flatten.rs"),
     ),

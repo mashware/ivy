@@ -11780,3 +11780,59 @@ boundaries already in place (D107, D110).
 
 **Verification.** The code/image folder cases must run on Windows; a Linux pass does not exercise
 this open flag. Native desktop interaction remains separate from those loader tests.
+
+## D117 — A screenshot on the clipboard is pasted into a console's own folder and opened in the drawer
+
+**22 November 2026 — #199.** The system's own screenshot tools already copy to the clipboard —
+Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so that is where Ivy
+takes a screenshot from:
+
+- **«Paste screenshot» in every console's header** (Phosphor's image glyph, between the review and
+  the panel) reads the clipboard's image for that console. Found, it is written as
+  `pasted-<n>.png` into that console's `PANEL_DIR` — the first `n` nothing there takes, a dangling
+  link included, created with `create_new` on a worker, mode 0600 on Unix — and opened through the
+  same entry as a clicked image path (D72, D113), pinned to that console. Not found, the drawer
+  opens an **empty viewer pinned to that console** saying «Copy a screenshot and press Paste
+  screenshot again, or press Ctrl+V here.» (Cmd+V on macOS), after whatever went wrong: no image,
+  no folder, a clipboard that did not answer, a read that failed.
+- **The paste chord inside the viewer** (Ctrl+V or Ctrl+Shift+V, Cmd on macOS) does the same for
+  the console the viewer is pinned to — **only while no text field has the keyboard**, the condition
+  D113 gives Ctrl+Z, so a note being typed keeps its text paste. The vendored egui-winit already lets
+  the chord through as a key when the clipboard holds no text, and turns it into `Event::Paste`
+  when it does; both are taken. Over an image already shown, a chord that finds no image only says
+  so, rather than replacing the image.
+- **The file is the console's**: it joins the annotated copies the console removes when it closes
+  (D113's cleanup, the same field). A console that closes while its screenshot is written takes the
+  file and its folder when the write ends.
+- **The same limits as an opened image** — a decode over 256 MiB, a PNG over 32 MiB — refuse it
+  **before** a file is written, with `The clipboard image is too large to open (limit: … MiB).`
+- **An image read has a deadline of its own, 10 s**: arboard decodes the clipboard's PNG inside the
+  read, and a debug build decoded a 2400×1600 PNG in 1.5–4 s under load (#178), so the 2 s text
+  deadline would expire on an ordinary capture. Expiring is said in the drawer — `The clipboard did
+  not answer in time.` — because a button pressed for nothing visible reads as a button that does
+  not work. The read stays on the clipboard's one worker, one read at a time, keyed by console.
+- **Beside Send, an arrow picks another open console** to send to, in case the wrong header was
+  pressed. It changes only where Send goes: the copy is written into the picked console's folder
+  and the line typed there, and the image, its file, its marks and its notes stay as they are. A
+  picked console that closes gives Send back to the image's own. One function answers which
+  console that is for every place that names or uses it — the button, the line, the request, the
+  ready check after a Cancel, «Sent to …».
+
+**Amends D113**: the copies field also holds pasted screenshots, and Send's console is the picked
+one when there is one.
+
+Discarded: watching the system's screenshots folder, whose path changes with the system and its
+language and which means watching a folder of the person's all the time; «Open with Ivy» and an
+`ivy open <file>` command, which need the running app to take orders from outside; a capture
+button inside Ivy, which needs each platform's capture API (the desktop portal on Linux) — the
+three by the owner's choice in #199. Opening the clipboard's pixels in memory with no file, because
+the ticket wants the file in the console's folder and one entry keeps the refusals in one place;
+a picker that moves the image and its marks to another console, which is the unsent-marks problem
+#199 named and fights #198's one image per console; dropping the picker and Ctrl+V (pressing the
+right console's button again instead), which cuts two things the owner asked for by name; a
+second clipboard thread for images, against one outstanding read keyed by console so a late reply
+cannot land as another console's paste; a picker row above Send, which took the notes' height in
+a narrow drawer.
+
+**Verification.** The clipboard formats on macOS and Windows are compiled but only checked by hand
+there.

@@ -162,7 +162,11 @@ impl Fixed {
             |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
         // The picker takes its width off the button's, so the label wraps to what is left.
         let chooser = choose && send.is_some();
-        let beside = if chooser { PICKER + style.spacing.item_spacing.x } else { 0.0 };
+        let beside = if chooser {
+            PICKER + style.spacing.item_spacing.x
+        } else {
+            0.0
+        };
         let send = send.map(|(console, busy, parked)| {
             let font = egui::TextStyle::Button.into();
             let label = send_label(console, busy, parked).into();
@@ -399,7 +403,10 @@ pub(super) fn notes(
     // Not while a cancelled Send's worker may yet create the copy this one would name.
     let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
     let foot = fixed.send.as_ref().filter(|_| !squeezed);
-    let to = sending.to.clone().unwrap_or((origin.pane, origin.label.clone()));
+    let to = sending
+        .to
+        .clone()
+        .unwrap_or((origin.pane, origin.label.clone()));
     let mut picked = None;
     let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);

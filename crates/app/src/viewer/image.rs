@@ -40,7 +40,7 @@ pub(crate) struct Viewer {
     /// Why the last thing asked of the marks was refused, or what became of them.
     notice: Option<String>,
     send: send::Sending,
-    paste: paste::Pasting,
+    pub(super) paste: paste::Pasting,
     /// How many images were opened, which names each opening: see [`send::Request::document`].
     opened: u64,
 }
@@ -88,11 +88,6 @@ impl Viewer {
             Load::Pending
         };
         self.start(origin, path, load);
-    }
-
-    /// Replaces whatever image was shown with an empty viewer for `origin`'s console, saying `text`.
-    pub(super) fn pin(&mut self, origin: Source, text: String) {
-        self.start(origin, PathBuf::new(), Load::Empty(text));
     }
 
     fn start(&mut self, origin: Source, path: PathBuf, load: Load) {
@@ -179,7 +174,7 @@ impl Viewer {
     }
 
     pub(super) fn file_name(&self) -> Option<String> {
-        if self.empty().is_some() {
+        if paste::empty(self).is_some() {
             return Some("Paste screenshot".into());
         }
         self.path()?
@@ -193,24 +188,6 @@ impl Viewer {
             Load::Failed(why) => Some(why),
             _ => None,
         }
-    }
-
-    /// What the empty viewer says, when no image was pasted into it.
-    pub(crate) fn empty(&self) -> Option<&str> {
-        match &self.document.as_ref()?.load {
-            Load::Empty(text) => Some(text),
-            _ => None,
-        }
-    }
-
-    /// Whether a picture is shown, where a notice is laid out beside it.
-    pub(super) fn loaded_picture(&self) -> bool {
-        self.original().is_some()
-    }
-
-    /// Whether a paste has a screenshot being written, for the input pass.
-    pub(super) fn paste_pending(&self) -> bool {
-        self.paste.pending()
     }
 
     /// The decoded image at full resolution, once it has arrived.
@@ -281,32 +258,9 @@ impl Viewer {
                 document.marks.cancel();
             }
         }
-        // The paste chord reaches here only while the drawer holds the keys, as Ctrl+Z does; a
-        // note being typed keeps it for its own text.
-        if !self.send.busy() && !ui.ctx().text_edit_focused() && ui.input_mut(paste::take_key) {
-            self.paste.key = true;
-            ui.ctx().request_repaint();
-        }
+        paste::take_chord(self, ui);
         let Some(size) = self.size() else {
-            let message = self.message();
-            let empty = self.empty();
-            egui::Frame::new()
-                .inner_margin(14)
-                .show(ui, |ui| match (message, empty) {
-                    (Some(why), _) => {
-                        ui.colored_label(
-                            theme.panel_color(Some(panel_contract::Mark::Block), None),
-                            why,
-                        );
-                    }
-                    (None, Some(hint)) => {
-                        ui.label(hint);
-                    }
-                    (None, None) => {
-                        ui.label("Loading…");
-                    }
-                });
-            return;
+            return unloaded(ui, self.message(), paste::empty(self), theme);
         };
         // Taken up only by a frame that lays the column out, where the notice is painted.
         if let Some(said) = self.send.unshown.take() {
@@ -344,7 +298,10 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let to = sending.to.as_ref().map_or(origin.label.as_str(), |(_, l)| l.as_str());
+        let to = sending
+            .to
+            .as_ref()
+            .map_or(origin.label.as_str(), |(_, l)| l.as_str());
         let send = something_to_send.then(|| (to, sending.busy(), sending.parked()));
         let choose = something_to_send && sending.consoles.len() > 1;
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send, choose);
@@ -482,6 +439,32 @@ impl Viewer {
         self.document.as_mut().unwrap().load = Load::Decoding(job);
         sender
     }
+}
+
+/// What the drawer says where no picture is shown: why it cannot be, what the empty viewer asks
+/// for, or that it is on its way.
+fn unloaded(
+    ui: &mut egui::Ui,
+    message: Option<&str>,
+    empty: Option<&str>,
+    theme: crate::theme::Theme,
+) {
+    egui::Frame::new()
+        .inner_margin(14)
+        .show(ui, |ui| match (message, empty) {
+            (Some(why), _) => {
+                ui.colored_label(
+                    theme.panel_color(Some(panel_contract::Mark::Block), None),
+                    why,
+                );
+            }
+            (None, Some(hint)) => {
+                ui.label(hint);
+            }
+            (None, None) => {
+                ui.label("Loading…");
+            }
+        });
 }
 
 /// Whether the Space held now is the drawer's: it is when it went down while the drawer `holds`
@@ -4477,7 +4460,11 @@ mod tests {
         let name = window.active().panes()[1].name;
         let dir = crate::PanelDir::create().unwrap();
         let folder = dir.path().to_owned();
-        window.all_panes_mut().find(|p| p.name == name).unwrap().panel = Some(dir);
+        window
+            .all_panes_mut()
+            .find(|p| p.name == name)
+            .unwrap()
+            .panel = Some(dir);
         (window, ctx, harness, name, folder)
     }
 
@@ -4495,7 +4482,7 @@ mod tests {
                 started.elapsed() < Duration::from_secs(30),
                 "{:?} {:?}",
                 window.image.message(),
-                window.image.empty()
+                paste::empty(&window.image)
             );
             painted(window, ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
@@ -4547,15 +4534,26 @@ mod tests {
         // The reply is taken in one pass's input; the drawer it opens is painted by the next.
         painted(&mut window, &ctx, vec![]);
         let shapes = painted(&mut window, &ctx, vec![]);
-        assert_eq!(window.image.empty(), Some(paste::HINT));
+        assert_eq!(paste::empty(&window.image), Some(paste::HINT));
         assert_eq!(window.image.origin().unwrap().pane, name);
         assert!(crate::viewer::origin::showing_image(&window));
-        assert!(text_rect(&shapes, |t| t == paste::HINT).is_some(), "the hint is not painted");
+        assert!(
+            text_rect(&shapes, |t| t == paste::HINT).is_some(),
+            "the hint is not painted"
+        );
         assert!(entries(&folder).is_empty(), "{:?}", entries(&folder));
         let doc = folder.join("notes.md");
         std::fs::write(&doc, "# notes").unwrap();
-        assert!(crate::viewer::open_document_target(&mut window, name, doc.clone(), None));
-        assert!(!window.image.shown(), "the empty viewer stayed beside a document");
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            doc.clone(),
+            None
+        ));
+        assert!(
+            !window.image.shown(),
+            "the empty viewer stayed beside a document"
+        );
         let _ = std::fs::remove_file(doc);
     }
 
@@ -4582,7 +4580,11 @@ mod tests {
             harness.reply_image(name, Ok(None));
             painted(&mut window, &ctx, vec![]);
             let said = format!("{} {}", paste::NO_IMAGE, paste::HINT);
-            assert_eq!(window.image.empty(), Some(said.as_str()), "{event:?}");
+            assert_eq!(
+                paste::empty(&window.image),
+                Some(said.as_str()),
+                "{event:?}"
+            );
         }
     }
 
@@ -4631,11 +4633,11 @@ mod tests {
         paste::ask(&mut window, bare, paste::Asked::Button);
         assert_eq!(harness.requested_image(), None);
         let said = format!("{} {}", paste::NO_FOLDER, paste::HINT);
-        assert_eq!(window.image.empty(), Some(said.as_str()));
+        assert_eq!(paste::empty(&window.image), Some(said.as_str()));
         assert_eq!(window.image.origin().unwrap().pane, bare);
         paste::received(&mut window, name, crate::clipboard::Pasted::Expired, &ctx);
         let said = format!("{} {}", paste::EXPIRED, paste::HINT);
-        assert_eq!(window.image.empty(), Some(said.as_str()));
+        assert_eq!(paste::empty(&window.image), Some(said.as_str()));
         assert_eq!(window.image.origin().unwrap().pane, name);
     }
 
@@ -4658,7 +4660,11 @@ mod tests {
         assert_ne!(other, origin);
         let dir = crate::PanelDir::create().unwrap();
         let other_dir = dir.path().to_owned();
-        window.all_panes_mut().find(|p| p.name == other).unwrap().panel = Some(dir);
+        window
+            .all_panes_mut()
+            .find(|p| p.name == other)
+            .unwrap()
+            .panel = Some(dir);
         let label = |window: &crate::Window, name: usize| {
             let pane = window.all_panes().find(|p| p.name == name).unwrap();
             crate::pane_view::display_label(pane).into_owned()
@@ -4670,13 +4676,21 @@ mod tests {
             .send
             .answer(Some(tools::Asked::Aim(other)), &mut image.notice);
         let shapes = painted(&mut window, &ctx, vec![]);
-        assert_eq!(marks_of(&window).numbered().count(), before, "the pick took marks");
+        assert_eq!(
+            marks_of(&window).numbered().count(),
+            before,
+            "the pick took marks"
+        );
         let wanted = format!("Send to {other_label} and press Enter");
         let (_, button) = text_rect(&shapes, |t| t == wanted).expect("the button names the pick");
         let (line, _) = text_rect(&shapes, |t| t.starts_with("Annotated screenshot: ")).unwrap();
         let copy = other_dir.join("annotated-1.png");
         assert!(line.contains(&copy.display().to_string()), "{line}");
-        painted(&mut window, &ctx, vec![egui::Event::PointerMoved(button.center())]);
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::PointerMoved(button.center())],
+        );
         click(&mut window, &ctx, button.center());
         until_written(&mut window, &ctx);
         assert_eq!(window.image.notice, Some(format!("Sent to {other_label}.")));
@@ -4684,7 +4698,10 @@ mod tests {
         assert!(!own_dir.join("annotated-1.png").exists());
         let typed = picked.wait_for(line.len(), Duration::from_secs(5));
         assert_eq!(String::from_utf8_lossy(&typed), line);
-        assert!(own.so_far().is_empty(), "the line went to the image's own console");
+        assert!(
+            own.so_far().is_empty(),
+            "the line went to the image's own console"
+        );
         assert_eq!(window.image.origin().unwrap().pane, origin);
         // AC6: the picked console closes, and Send names the image's own again.
         marks_mut(&mut window).general = "again".into();
@@ -4697,6 +4714,9 @@ mod tests {
         let shapes = painted(&mut window, &ctx, vec![]);
         let own_label = window.image.origin().unwrap().label.clone();
         let wanted = format!("Send to {own_label} and press Enter");
-        assert!(text_rect(&shapes, |t| t == wanted).is_some(), "Send kept a closed console");
+        assert!(
+            text_rect(&shapes, |t| t == wanted).is_some(),
+            "Send kept a closed console"
+        );
     }
 }

@@ -5,7 +5,7 @@ use eframe::egui;
 pub(super) fn deliver(window: &mut crate::Window, ctx: &egui::Context) {
     if window.viewer.pending_send.is_none()
         && !window.image.send_pending()
-        && !window.image.paste_pending()
+        && !window.image.paste.pending()
     {
         return;
     }
