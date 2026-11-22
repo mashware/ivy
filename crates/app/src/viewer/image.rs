@@ -5403,14 +5403,20 @@ mod tests {
     #[test]
     fn on_its_way_is_painted_only_while_that_paste_is() {
         let (mut window, ctx, harness, name, _folder) = window_to_paste();
-        paste::ask(&mut window, name, paste::By::Button);
-        assert_eq!(harness.requested_image(), Some(name));
-        paste::ask(&mut window, name, paste::By::Button);
         let busy = format!("A paste is already on its way. {}", paste::HINT);
         let shown = |window: &crate::Window| {
             let text = paste::empty(&window.image).unwrap_or_default();
             paste::shown_empty(&window.image.paste, text).into_owned()
         };
+        // The empty viewer first, where a paste asked again is said.
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(shown(&window), busy);
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
         assert_eq!(shown(&window), paste::HINT);
