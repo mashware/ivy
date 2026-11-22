@@ -4,6 +4,7 @@ mod code_header;
 mod delivery;
 mod diff;
 mod drawer;
+mod focus;
 mod highlight;
 pub(crate) mod image;
 mod load;
@@ -425,7 +426,7 @@ pub(crate) fn before_keys(
         let returned = holds
             && !window.viewer.held
             && !window.sidebar.maximized
-            && return_to_console(window, &ctx, geometry.consoles, metrics);
+            && focus::return_to_console(window, &ctx, geometry.consoles, metrics);
         if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
             window.viewer.keyboard = over && !returned;
             window.viewer.held = over && !returned;
@@ -486,46 +487,6 @@ pub(crate) fn before_keys(
     window.viewer.record(started.elapsed());
     window.timed_separately += window.viewer.take_cost();
     owned
-}
-
-fn return_to_console(
-    window: &mut crate::Window,
-    ctx: &egui::Context,
-    area: egui::Rect,
-    metrics: &crate::painter::CellMetrics,
-) -> bool {
-    let at = ctx.input(|i| {
-        i.events.iter().find_map(|event| match event {
-            egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers,
-            } if modifiers.is_none() && area.contains(*pos) => Some(*pos),
-            _ => None,
-        })
-    });
-    let Some(at) = at else { return false };
-    let tiling = crate::pane_view::view_tiling(window, area, metrics);
-    let now = std::time::SystemTime::now();
-    let target = window
-        .active()
-        .panes()
-        .into_iter()
-        .zip(&tiling.parts)
-        .find_map(|(pane, rect)| {
-            pane.console_within(*rect, metrics, now, window.headers)
-                .contains(at)
-                .then_some(pane.name)
-        });
-    let Some(target) = target else { return false };
-    window.active_mut().focus = target;
-    ctx.memory_mut(|m| {
-        if let Some(editor) = m.focused() {
-            m.surrender_focus(editor);
-        }
-    });
-    true
 }
 
 /// Paint the active viewer after the console tree has reached its final geometry for this pass.
