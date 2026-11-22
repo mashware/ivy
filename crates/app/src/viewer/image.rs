@@ -1366,6 +1366,95 @@ mod tests {
         assert!(image_rect(&painted(&mut window, &ctx, vec![])).is_none());
     }
 
+    /// Clicks the strip's `action` where the drawer painted it.
+    fn click_strip(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        action: crate::viewer::StripAction,
+    ) {
+        let dock = window.sidebar.last_dock.unwrap();
+        let at = crate::viewer::strip_place(window, dock, action)
+            .unwrap_or_else(|| panic!("{action:?} is not in the strip"));
+        click(window, ctx, at);
+    }
+
+    /// Closing the image's tab forgets the focused console's image only: the other console's image
+    /// is painted where it was once that console has the focus again.
+    #[test]
+    fn closing_the_image_tab_forgets_only_the_focused_consoles_image() {
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let kept = slot(&window).origin().unwrap().pane;
+        let kept_rect = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+        let first = window.active().panes()[0].name;
+        let small = folder.0.join("small.png");
+        write_png(&small, 120, 60);
+        open_in(&mut window, &ctx, first, &small);
+        click_strip(&mut window, &ctx, StripAction::CloseImage);
+        assert!(!slot(&window).shown(), "the focused console's image stayed");
+        let active = window.active;
+        window.tabs[active].focus = kept;
+        painted(&mut window, &ctx, vec![]);
+        click_strip(&mut window, &ctx, StripAction::Image);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let rect = image_rect(&shapes).expect("the other console's image was forgotten");
+        assert!(same_place(rect, kept_rect), "{rect:?} {kept_rect:?}");
+    }
+
+    /// With the image the drawer's only tab, closing it closes the drawer; with the document and
+    /// Changes beside it, the drawer moves to the document. Closing the document while the image is
+    /// shown keeps the drawer's keys and a Space held for a pan.
+    #[test]
+    fn closing_the_image_tab_moves_to_the_document_or_closes_the_drawer() {
+        use crate::sidebar::{Tool, active};
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let place = |window: &crate::Window, action| {
+            crate::viewer::strip_place(window, window.sidebar.last_dock.unwrap(), action)
+        };
+        // The image alone: no review was opened first.
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        open_in(&mut window, &ctx, name, &path);
+        assert!(place(&window, StripAction::Changes).is_none());
+        assert!(place(&window, StripAction::Document).is_none());
+        click_strip(&mut window, &ctx, StripAction::CloseImage);
+        assert_eq!(active(&window), None, "the drawer stayed on an empty tab");
+        // The image beside the document and Changes.
+        let (mut window, ctx, _) = window_with_image(&path);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        let name = slot(&window).origin().unwrap().pane;
+        assert!(crate::viewer::open_document_target(&mut window, name, guide, None));
+        painted(&mut window, &ctx, vec![]);
+        click_strip(&mut window, &ctx, StripAction::Image);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(place(&window, StripAction::Changes).is_some());
+        window.viewer.space = true;
+        window.viewer.held = true;
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(window.viewer.keyboard, "the drawer gave the keys away");
+        assert!(window.viewer.space && window.viewer.held, "a held Space was forgotten");
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            folder.0.join("guide.md"),
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        click_strip(&mut window, &ctx, StripAction::Image);
+        click_strip(&mut window, &ctx, StripAction::CloseImage);
+        assert_eq!(active(&window), Some(Tool::Document));
+    }
+
     /// The wheel over the image pans it and Ctrl+wheel zooms it, and neither reaches a console,
     /// which the same wheel scrolls back through its history when the pointer is over it.
     #[test]

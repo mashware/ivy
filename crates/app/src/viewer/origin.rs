@@ -135,11 +135,18 @@ pub(crate) fn open_document_target(
     true
 }
 
-/// Forgets what `state` showed, keeping only which tab it is and the window's context.
+/// Forgets what `state` showed, keeping which tab it is, the window's context and the drawer's
+/// own input flags: the image tab takes its input through the document state's, so closing the
+/// document beside it is not closing the drawer. A tab change suspends those flags anyway.
 pub(super) fn forget(state: &mut super::State) {
     *state = super::State {
         context: state.context.take(),
         tool_markdown: state.tool_markdown,
+        open: state.open,
+        keyboard: state.keyboard,
+        space: state.space,
+        held: state.held,
+        blocked_frame: state.blocked_frame,
         ..super::State::default()
     };
 }
@@ -293,13 +300,7 @@ pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::C
             state.message = "Send or clear the review comments before closing the review.".into();
             return;
         }
-        // The image tab borrows the document state's open and keyboard flags.
-        let (open, keyboard) = (state.open, state.keyboard);
         forget(state);
-        if markdown && crate::sidebar::active(window) == Some(Tool::Image) {
-            window.viewer.open = open;
-            window.viewer.keyboard = keyboard;
-        }
     }
     if crate::sidebar::active(window) == Some(closed) {
         match next {
