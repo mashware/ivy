@@ -259,3 +259,99 @@ fn windows_foreground_sequence_agrees_with_telemetry_and_creation_order() {
     drop(pty);
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn windows_foreground_wow64_parameters_are_unsupported_without_losing_native_evidence() {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let executable = std::path::PathBuf::from(format!(
+        r"{root}\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+    ));
+    assert!(
+        executable.is_file(),
+        "native WOW64 fixture unavailable: {}",
+        executable.display()
+    );
+    let base = directory();
+    let marker = base.join("wow64.ready");
+    let release = base.join("wow64.release");
+    let script = base.join("wow64.ps1");
+    std::fs::write(&script, format!(
+        "$deadline=[DateTime]::UtcNow.AddSeconds(60); [IO.File]::WriteAllText('{}', ('{{0}}:{{1}}' -f $PID,[IntPtr]::Size)); while (!(Test-Path -LiteralPath '{}') -and [DateTime]::UtcNow -lt $deadline) {{ Start-Sleep -Milliseconds 25 }}",
+        escaped(&marker), escaped(&release)
+    )).unwrap();
+    let (mut pty, output) = Pty::spawn(
+        executable.to_str().unwrap(),
+        &["-NoLogo", "-NoProfile", "-File", script.to_str().unwrap()],
+        Size::default(),
+    )
+    .unwrap();
+    let scope = pty.foreground_scope().unwrap();
+    let pid = pty.child.as_ref().unwrap().process_id().unwrap();
+    let expected_marker = format!("{pid}:4");
+    wait_until(&mut pty, &output, || {
+        std::fs::read_to_string(&marker).is_ok_and(|value| value == expected_marker)
+    });
+    assert_eq!(scope.classify_ancestry(pid), Ancestry::Inside);
+    let observation = scope.observe_process(pid).unwrap();
+    assert_eq!(observation.identity().pid, pid);
+    assert!(observation.identity().birth > 0);
+    assert_eq!(
+        std::fs::canonicalize(observation.executable().unwrap()).unwrap(),
+        std::fs::canonicalize(&executable).unwrap()
+    );
+    assert!(observation.is_alive());
+    let lifetime = observation.lifetime().unwrap();
+    // SAFETY: this owned process handle remains open throughout both native waits.
+    assert_eq!(
+        unsafe { WaitForSingleObject(lifetime.as_raw_handle(), 0) },
+        WAIT_TIMEOUT
+    );
+    assert_eq!(
+        observation.working_directory().unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
+    assert_eq!(
+        observation.matches_arguments(&[&[]]).unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
+    assert_eq!(
+        observation.runs_script(&script).unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
+    assert_eq!(scope.classify_ancestry(pid), Ancestry::Inside);
+    assert!(observation.executable().is_ok() && observation.is_alive());
+    std::fs::write(&release, "go").unwrap();
+    // SAFETY: lifetime still owns the same process handle after the child exits.
+    assert_eq!(
+        unsafe { WaitForSingleObject(lifetime.as_raw_handle(), 30_000) },
+        WAIT_OBJECT_0
+    );
+    assert!(!observation.is_alive());
+    assert!(!scope.is_open());
+    drop(pty);
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn windows_foreground_observation_returns_the_exact_launched_executable() {
+    let base = directory();
+    let (pty, _output) = console(&base, "executable");
+    let pid = pty.child.as_ref().unwrap().process_id().unwrap();
+    let scope = pty.foreground_scope().unwrap();
+    let observation = scope.observe_process(pid).unwrap();
+    assert_eq!(
+        std::fs::canonicalize(observation.executable().unwrap()).unwrap(),
+        std::fs::canonicalize(powershell()).unwrap()
+    );
+    assert!(observation.is_alive());
+    drop(pty);
+    assert_eq!(
+        observation.executable().unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    let _ = std::fs::remove_dir_all(base);
+}

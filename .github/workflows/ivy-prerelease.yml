@@ -151,6 +151,8 @@ jobs:
                             'windows_foreground_descendant_lifetime_signals_exit_259',
                             'windows_foreground_nested_descendant_is_inside',
                             'windows_foreground_sequence_agrees_with_telemetry_and_creation_order',
+                            'windows_foreground_wow64_parameters_are_unsupported_without_losing_native_evidence',
+                            'windows_foreground_observation_returns_the_exact_launched_executable',
                             'current_process_directory_and_arguments_agree_with_runtime') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
