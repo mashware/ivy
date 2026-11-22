@@ -1,6 +1,30 @@
-# Ivy 0.1.0-alpha.14
+# Ivy 0.1.0-alpha.15
 
 ## New in this alpha
+
+- Screenshots printed in a console open in the drawer, with zoom and pan. Each console keeps its own screenshot in an Image tab, and you can paste one from the clipboard into it.
+- Annotate a screenshot in the drawer and send it to its console. The annotation drawer stays usable when short, undoes one note at a time and offers a way out of a stuck send.
+- Open any file from Files as read-only, coloured code. Its header shows where the file lives and opens it safely.
+- Search the console and Files with regular expressions.
+- Each project gets a clearly different colour, and the focused console is outlined in green.
+- Console header buttons linger, then fade out instead of vanishing.
+- One click focuses a console after using the drawer, and a narrow drawer hides inactive tabs before the active one.
+- Ivy keeps a log of its own failures and crashes, which you can find from Settings.
+- A panel published over MCP no longer warns that its file is gone.
+- On macOS, Codex keeps Ivy's panel after Ivy was launched from a temporary copy.
+
+### Windows
+
+- Ivy no longer closes on launch, and graphics startup failures are explained.
+- Consoles run on Microsoft's own console host, shipped with Ivy. They end with their program, close without freezing, and say when their output was lost.
+- Agents can publish status panels and use Ivy's MCP tools through a private, per-user channel.
+- Clipboard shortcuts behave like a terminal's, while text fields keep their own.
+- Emoji are drawn in colour.
+- Review and links find a console's folder, and paths are handled in Windows' own form.
+- The diagnostics log stays bounded even after a failed rotation.
+- Real Windows desktop trials are still pending for this alpha.
+
+## Previously in 0.1.0-alpha.14
 
 - On macOS, closing a console no longer freezes Ivy when its program cannot be stopped right away.
 - On macOS, Codex publishes its status panel to its own console instead of another one.
@@ -94,7 +118,7 @@
 - Install on Windows 11 x64 with a per-user installer, Start menu shortcut and uninstaller.
 - Updates and removal preserve existing preferences and saved layouts.
 - Downloads for Ubuntu, Arch, macOS and Windows are unsigned and experimental.
-- Windows installer lifecycle checks pass in CI; real Windows desktop trials are still pending. The Windows MCP/control listener is not available yet.
+- Windows installer lifecycle checks pass in CI; real Windows desktop trials are still pending.
 
 ## Work across consoles
 
@@ -126,12 +150,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.14_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha14-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.14-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.14-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.14-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.15_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha15-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.15-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.15-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.15-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.14/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.15/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
