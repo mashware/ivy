@@ -691,18 +691,18 @@ fn tools() -> serde_json::Value {
     })
 }
 
-/// What `image_open` tells the agent it does: the tool's own description, worded for the agent
-/// and not copied from the contract (D120).
+/// What `image_open` tells the agent it does, worded for the agent; docs/04 states the same rules
+/// for the verb (D120).
 const IMAGE_OPEN: &str = "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.";
 
 /// The file `path` names, if an agent may hand it to the window: refused with the sentence the agent
 /// reads otherwise.
 ///
-/// **A courtesy, not the enforcement** (D120): it answers at once, in the bridge's own process —
-/// the agent's, or the shared daemon when Codex's calls are routed — so a stuck filesystem stalls
-/// the bridge and never the window; but the window may see another file (another mount namespace, a
-/// file replaced meanwhile), so its own read checks again. A path on another machine is refused
-/// before anything is asked of it: asking is what reaches that host.
+/// **A courtesy, not the enforcement** (D120): it answers at once, in the bridge's own process,
+/// which is not always the agent's, so a stuck filesystem stalls the bridge and never the window;
+/// but the window may see another file (another mount namespace, a file replaced meanwhile), so
+/// its own read checks again. A path on another machine is refused before anything is asked of it:
+/// asking is what reaches that host.
 fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
     if path.is_empty() {
         return Err("image_open's \"path\" is empty".to_owned());
@@ -1679,11 +1679,11 @@ mod tests {
         );
     }
 
-    /// **`image_open` is advertised as the contract writes it** (D120): its schema, its whole
-    /// description, and the clause that keeps a subagent off it — which lives in the description
+    /// **`image_open` is advertised whole, with the words `IMAGE_OPEN` holds** (D120): its schema,
+    /// its whole description, and the clause that keeps a subagent off it — which lives in the description
     /// and not in the handshake, whose instructions name only what publishing needs (D88).
     #[test]
-    fn image_open_is_advertised_as_the_contract_writes_it_and_tells_a_subagent_to_leave_it_alone() {
+    fn image_open_is_advertised_whole_and_tells_a_subagent_to_leave_it_alone() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
         let tool = answered["result"]["tools"]
             .as_array()

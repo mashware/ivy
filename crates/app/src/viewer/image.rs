@@ -6348,6 +6348,39 @@ mod tests {
         }
     }
 
+    /// With the Image tab already selected for that console, a window too short for the drawer
+    /// still keeps the image out of sight: the agent is told the person is not looking, and the
+    /// mark stays up.
+    #[test]
+    fn an_agents_image_on_an_image_tab_with_no_room_is_not_shown() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let first = folder.0.join("first.png");
+        write_png(&first, 64, 32);
+        let second = folder.0.join("second.png");
+        write_png(&second, 32, 16);
+        let (mut window, ctx, _) = window_with_image(&first);
+        assert_eq!(active(&window), Some(Tool::Image));
+        let focused = window.active().focus;
+        let short = (100..700)
+            .step_by(20)
+            .rev()
+            .map(|h| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, h as f32)))
+            .find(|&screen| {
+                pass_on(&mut window, &ctx, screen, vec![], |_| {});
+                window.sidebar.last_dock.is_none()
+            })
+            .expect("no height leaves the drawer without a dock");
+        let (answer, _) = agent_pass_on(&mut window, &ctx, short, vec![], focused, &second);
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+        assert_eq!(active(&window), Some(Tool::Image));
+        pass_on(&mut window, &ctx, short, vec![], |_| {});
+        assert!(
+            slot(&window).unseen,
+            "a drawer with no room took the mark down"
+        );
+    }
+
     /// Unsent marks refuse an agent's image in their own console, with the sentence the agent
     /// reads and with the image and its marks still painted; another console's open, the agent's
     /// or the person's, is not theirs to refuse.

@@ -744,8 +744,8 @@ replaces it.
   marks, then call image_open again`) and when the console that asked is gone. Malformed lines say
   `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
   not absolute` or `an image_open's "path" is not on this machine`, and the connection lives on.
-- **`panel-mcp` checks the file first**, in its own process — the agent's, or the shared daemon
-  when Codex's calls are routed: a missing file, a folder, something that is not a regular file, a
+- **`panel-mcp` checks the file first**, in its own process, which is not always the
+  agent's: a missing file, a folder, something that is not a regular file, a
   file over 32 MiB and a file whose first bytes are neither a PNG's signature nor a JPEG's
   `FF D8 FF` (`<path> is not a PNG or JPEG image`, a file too short to say included) are refused
   before the window is asked. Those checks are a courtesy; the window's read is the enforcement.
