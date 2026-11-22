@@ -167,7 +167,7 @@ revocable lifetime invalidates observations after closure; retaining a scope can
 Linux uses `/proc` and pidfds; macOS uses `LOCAL_PEERPID` with `PROC_PIDTBSDINFO` start seconds and
 microseconds. Windows retains the verified fresh-pipe peer's process handle (D117), follows
 handle-bound parent identities, and pins the actual console root and its verified Ivy parent as
-boundaries (D118). Missing, exited, reused or unstable processes yield unknown. The Linux session peer
+boundaries (D119). Missing, exited, reused or unstable processes yield unknown. The Linux session peer
 and foreground checks retain their existing authorization rules.
 
 The app stores publication origin beside the current panel document. Only confirmed outside

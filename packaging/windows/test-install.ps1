@@ -100,6 +100,11 @@ foreach ($Control in 'crash', 'shell', 'layout', 'deadline') {
     if (-not $Rejected) { throw "Launch control '$Control' incorrectly passed" }
 }
 foreach ($File in $Borrowed) { Remove-Item $File }
+if ($SoftwareOpenGL) {
+    # The same installed binary must explain the original no-driver failure once the borrowed
+    # renderer is removed. The separate profile preserves the installer's user-data witnesses.
+    & (Join-Path $PSScriptRoot 'test-graphics-failure.ps1') -Executable $Installed -EvidenceDir (Join-Path $Evidence 'graphics-failure')
+}
 # Repeat installation to exercise replacement without claiming an older-version upgrade trial.
 Install-Candidate
 $Process = Start-Process (Join-Path $Destination 'unins000.exe') -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru

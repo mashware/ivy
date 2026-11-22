@@ -11827,7 +11827,34 @@ This supplies a Windows process witness. It does not by itself implement Windows
 native client recognition or complete recovery/hook authorization. Native Windows process/pipe
 witnesses are required; cross-compilation is not runtime evidence.
 
-## D118 — Windows process observations describe ancestry, never foreground authority
+## D118 — Windows graphics startup failures have a native explanation
+
+**Decided.** Returned graphics initialization errors show one native Windows message box before
+the process exits with failure. The original error still goes through D114's log. The notice says
+that OpenGL 2.0 or later is required, includes the observed context version when available, and
+says explicitly when it is unavailable. A configuration, shader or context failure is described
+as a graphics initialization failure, never automatically as an insufficient OpenGL version.
+
+**Why.** Installed-launch trials exposed machines whose system OpenGL cannot initialize the
+painter. The root window is hidden until its first frame; the Start menu does not show stderr.
+Keeping an error in a file helps support but leaves the person with no visible explanation.
+
+The current egui_glow initializer reads GL_VERSION before its low-version rejection, but erases
+it from PainterError. A Windows-only log observer accepts only that initializer's Debug version
+record, retaining at most 256 bytes of the version and no renderer/vendor. It installs before
+startup and stops retaining records when app creation begins successfully. It never replaces an
+existing logger: missing evidence yields unavailable. This is a pinned dependency diagnostic
+format, not a new provider-state contract. Measured runs install no observer.
+
+**Discarded.** stderr alone is invisible from the Start menu. A second WGL probe adds a window
+and context and can observe a different adapter. Vendoring the whole painter for one diagnostic
+adds maintenance without changing the visible result. A renderer fallback or shipping Mesa is a
+separate product decision. Native driver process termination after drawing begins is not a
+returned startup error and is not covered.
+
+**Evidence limit.** Routing and formatting tests do not establish visibility on a real Windows
+desktop; that requires launching the installed app with insufficient and supported graphics.
+## D119 — Windows process observations describe ancestry, never foreground authority
 
 **Decided for #166.** Windows gains console-bound diagnostic ancestry and separate, handle-owned
 process observations. A descendant is not called foreground: `inspect` and `inspect_descendant`

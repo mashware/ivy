@@ -356,6 +356,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/diagnostics_log.rs"),
     ),
     (
+        "src/diagnostics_log/graphics.rs",
+        include_str!("../src/diagnostics_log/graphics.rs"),
+    ),
+    (
         "src/diagnostics_log/sink.rs",
         include_str!("../src/diagnostics_log/sink.rs"),
     ),
