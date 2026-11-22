@@ -232,7 +232,9 @@ fn fixture_read_failure_preserves_child_traceback_and_stage() {
         "/usr/bin/python3",
         &[
             "-c",
-            "import json; print(json.dumps({'ready':1}), flush=True); raise RuntimeError('fixture diagnostic witness')",
+            // Python 3.13+ colours a traceback written to a terminal, which splits the witness
+            // with escapes; the text, not its colour, is what this test is about.
+            "import json, os; os.environ['PYTHON_COLORS'] = '0'; print(json.dumps({'ready':1}), flush=True); raise RuntimeError('fixture diagnostic witness')",
         ],
         Size::default(),
     )
