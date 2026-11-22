@@ -256,12 +256,14 @@ pub(crate) fn open_image_target(
 }
 
 /// What an agent's open answers when the drawer shows the image: it opened on it, or its Image
-/// tab was already on show for that console (D120).
-pub(crate) const SHOWN_TO_THE_PERSON: &str =
-    "opened and shown in the drawer of this console, which the person is working in";
+/// tab was already on show for that console (D120). The answer comes before the worker has
+/// decoded the file, and a truncated or corrupt PNG or JPEG begins like a whole one, so it says
+/// where a file that cannot be shown is explained instead of promising pixels (owner, D120).
+pub(crate) const SHOWN_TO_THE_PERSON: &str = "opened and shown in the drawer of this console, which the person is working in; if the drawer cannot show it, it says why there";
 
-/// What an agent's open answers when nothing moved and the mark says it (D120).
-pub(crate) const MARKED_FOR_THE_PERSON: &str = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do";
+/// What an agent's open answers when nothing moved and the mark says it (D120). Its last clause
+/// is the one `SHOWN_TO_THE_PERSON` ends with, for the same reason.
+pub(crate) const MARKED_FOR_THE_PERSON: &str = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there";
 
 /// Why an agent's open was refused over the person's unsent marks, worded for the agent.
 pub(crate) const MARKS_NOT_SENT: &str = "the image open in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the marks, then call image_open again";

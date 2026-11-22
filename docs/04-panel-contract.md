@@ -450,7 +450,7 @@ is that **a channel has somebody to tell** what that tolerance dropped — see
 → {"tool":"split_close","pane":"<opaque handle>"}
 ← {"ok":true}
 → {"tool":"image_open","path":"/home/me/shots/login.png"}
-← {"ok":true,"text":"opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do"}
+← {"ok":true,"text":"opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there"}
 ← {"ok":false,"error":"..."}
 ```
 
@@ -735,10 +735,13 @@ replaces it.
   hand-written line that skips it is opened, and the drawer says the file is not a PNG or JPEG
   image. The line's own bound is the only bound on the path's length.
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
-  person is working in` where the drawer shows the image — it opened on it, or its Image tab was
-  already on show for that console — and `opened; the person is not looking at this console's
-  drawer, so its tab and header mark a new image until they do` everywhere else, a window too short
-  for the drawer included. The keyboard never moves.
+  person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
+  image — it opened on it, or its Image tab was already on show for that console — and `opened; the
+  person is not looking at this console's drawer, so its tab and header mark a new image until they
+  do; if the drawer cannot show it, it says why there` everywhere else, a window too short for the
+  drawer included. The keyboard never moves. The answer comes before the file is decoded, and a
+  truncated or corrupt PNG or JPEG begins like a whole one, so both sentences say where such a file
+  is explained instead of promising the picture.
 - **It is refused** while that console's image carries marks the person has not sent (`the image open
   in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the
   marks, then call image_open again`) and when the console that asked is gone. Malformed lines say

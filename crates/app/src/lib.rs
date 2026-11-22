@@ -6994,7 +6994,7 @@ mod tests {
         let typed = |window: &mut Window| window.pane_called(typing).unwrap().keystrokes.clone();
         one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("a".into())]);
         assert!(
-            matches!(answer.try_recv(), Ok(panel_control::Answer::Text(said)) if said.starts_with("opened and shown")),
+            matches!(answer.try_recv(), Ok(panel_control::Answer::Text(said)) if said == "opened and shown in the drawer of this console, which the person is working in; if the drawer cannot show it, it says why there"),
             "the drain of this frame did not show it"
         );
         assert_eq!(sidebar::active(&window), Some(sidebar::Tool::Image));

@@ -995,7 +995,10 @@ mod tests {
                 "is not a drive path; give it as C:\\…",
             ),
             (r"\\.\C:\a.png", "is not a drive path; give it as C:\\…"),
-            (r"\\.\PhysicalDrive0", "is not a drive path; give it as C:\\…"),
+            (
+                r"\\.\PhysicalDrive0",
+                "is not a drive path; give it as C:\\…",
+            ),
         ] {
             assert_eq!(
                 one(&image_open_line(std::path::Path::new(remote), "")),

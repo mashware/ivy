@@ -6172,7 +6172,15 @@ mod tests {
                 typing,
                 &path,
             );
-            assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+            // The contract's sentence word for word (docs/04): an answer given before the decode
+            // says where a file that cannot be shown is explained.
+            assert_eq!(
+                answer,
+                Ok(
+                    "opened and shown in the drawer of this console, which the person is working \
+                     in; if the drawer cannot show it, it says why there"
+                )
+            );
             assert_eq!(typed(&window, typing), b"a");
             assert_eq!(active(&window), Some(Tool::Image));
             painted(&mut window, &ctx, vec![egui::Event::Text("b".into())]);
@@ -6210,7 +6218,15 @@ mod tests {
         let before = grids(&window);
         for pane in [beside, behind] {
             let (answer, _) = agent_pass(&mut window, &ctx, vec![], pane, &path);
-            assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+            // The contract's sentence word for word (docs/04).
+            assert_eq!(
+                answer,
+                Ok(
+                    "opened; the person is not looking at this console's drawer, so its tab and \
+                     header mark a new image until they do; if the drawer cannot show it, it says \
+                     why there"
+                )
+            );
             assert_eq!(active(&window), None, "the drawer opened");
             assert_eq!((window.active, window.active().focus), (0, focused));
         }

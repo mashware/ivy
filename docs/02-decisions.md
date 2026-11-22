@@ -12083,7 +12083,13 @@ modal surface — the new image takes the place of the last and nothing has to m
 keys, Files' keys and a maximized drawer included. Anywhere else nothing moves. The console's tab
 card and its header then show an image glyph until the drawer paints that image or its refusal.
 «Loading…» is not seeing it. The reply says «shown» where the drawer shows the image, whether it
-opened on it or its Image tab was already on show, and «marked» everywhere else. A window that runs
+opened on it or its Image tab was already on show, and «marked» everywhere else; both end «if the
+drawer cannot show it, it says why there» (owner, 22 November 2026), because the reply comes before
+the worker decodes the file and a truncated or corrupt PNG or JPEG passes every check made before
+it — answering «shown» alone would tell the agent the person sees a picture the drawer cannot
+paint. Reading the image's header in the bridge to refuse those too was discarded: it would be a
+second decoder to keep in step with the window's, for a reply that already says where to look.
+A window that runs
 no pass answers nothing within the listener's five seconds and still applies the open on its next
 pass, as `split_open` does.
 
@@ -12098,13 +12104,13 @@ refused prefix is answered «is not a drive path; give it as C:\…», because i
 whether it stays here — `\\.\C:\…` and `\\?\GLOBALROOT\Device\HarddiskVolume3\…` do,
 `\\?\GLOBALROOT\Device\Mup\…` does not — and the agent can act on the form where it could not act
 on a false «elsewhere». A mapped drive letter passes: it is the user's own mapping, not a host the
-agent chose. The MCP
-bridge also `stat`s the file in its own process, which is not always the agent's, so a missing file, a folder, something that is not a regular file or a file
-over 32 MiB is refused at once. It then reads the file's first bytes and refuses anything that
-begins as neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to
-say included, with `<path> is not a PNG or JPEG image`, before the pane is reached (owner, 22
-November 2026): told «opened» for a file the drawer cannot show, the agent would wait for marks
-that never come. **Those bridge checks are advisory**: the bridge and the window may see different
+agent chose. The MCP bridge also `stat`s the file in its own process, which is not always the
+agent's, so a missing file, a folder, something that is not a regular file or a file over 32 MiB
+is refused at once. It then reads the file's first bytes and refuses anything that begins as
+neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to say
+included, with `<path> is not a PNG or JPEG image`, before the pane is reached (owner, 22 November
+2026): told «opened» for a file that is not an image at all, the agent would wait for marks that
+never come. **Those bridge checks are advisory**: the bridge and the window may see different
 files (another mount namespace, a file replaced in between), and a hand-written line skips the
 bridge. The window's interface pass never touches the file either: the image worker's thread reads
 it, its checks stay the enforcement, and their refusal is painted in the drawer. The format is

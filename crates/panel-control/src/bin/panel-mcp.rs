@@ -729,8 +729,9 @@ fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
             panel_control::image::MAX_BYTES / (1024 * 1024)
         ));
     }
-    // The first bytes decide, not the extension (D120): an agent told «opened» for a file the
-    // drawer cannot show would wait for marks that never come.
+    // The first bytes decide, not the extension (D120): a file that is not a PNG or JPEG at all is
+    // refused here, before the agent is told «opened». A truncated or corrupt one begins like a
+    // whole one and passes; the window's answer says the drawer explains what it cannot show.
     let mut head = Vec::with_capacity(PNG_SIGNATURE.len());
     std::io::Read::read_to_end(
         &mut std::io::Read::take(
@@ -1848,7 +1849,10 @@ mod tests {
                 "is not a drive path; give it as C:\\…",
             ),
             (r"\\.\C:\a.png", "is not a drive path; give it as C:\\…"),
-            (r"\\.\PhysicalDrive0", "is not a drive path; give it as C:\\…"),
+            (
+                r"\\.\PhysicalDrive0",
+                "is not a drive path; give it as C:\\…",
+            ),
         ] {
             let result = open_an_image(serde_json::json!(remote));
             assert_eq!(result["isError"], true, "{remote}");
@@ -1859,7 +1863,7 @@ mod tests {
     /// The window's sentence is what the agent reads: the bridge adds no word of its own.
     #[test]
     fn an_image_opened_answers_with_the_windows_sentence() {
-        let said = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do";
+        let said = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there";
         let result = result_of(
             what_it_did(&Ask::ImageOpen(std::env::temp_dir())),
             Answered::Text(said.to_owned()),
