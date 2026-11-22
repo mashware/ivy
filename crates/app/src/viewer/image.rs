@@ -259,6 +259,8 @@ impl Viewer {
         // A drag whose release came while the image was not painted must not resume on return.
         if self.painted.is_none_or(|last| frame > last + 1) {
             self.panning = None;
+            // Nor a paste chord held while it was not: its release went to somebody else.
+            self.paste.held = false;
             if let Some(document) = self.document.as_mut() {
                 document.marks.cancel();
             }
@@ -4966,14 +4968,13 @@ mod tests {
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
         marks_mut(&mut window).general = "keep".into();
-        // The person moves to a console before the answer comes.
+        // The person moves to a console before the answer comes; the answer is shown and the
+        // drawer takes the keys, as opening an image does (D117).
         crate::viewer::blur(&mut window);
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
-        assert!(
-            !window.viewer.keyboard,
-            "the answer took the keys from the console"
-        );
+        assert!(window.viewer.keyboard, "the answer was not shown");
+        assert!(crate::viewer::origin::showing_image(&window));
         assert_eq!(window.image.path(), Some(path.as_path()));
         assert_eq!(marks_of(&window).general, "keep");
         assert_eq!(
@@ -4990,7 +4991,7 @@ mod tests {
         let name = window.image.origin().unwrap().pane;
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
-        // Drawn while the read and the write are on their way; the person then types elsewhere.
+        // Drawn while the read and the write are on their way; the person then moves elsewhere.
         marks_mut(&mut window).general = "keep".into();
         crate::viewer::blur(&mut window);
         harness.reply_image(name, crate::clipboard::Pasted::Image(screenshot()));
@@ -5001,10 +5002,8 @@ mod tests {
             painted(&mut window, &ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(
-            !window.viewer.keyboard,
-            "the write took the keys from the console"
-        );
+        assert!(window.viewer.keyboard, "the saved screenshot was not shown");
+        assert!(crate::viewer::origin::showing_image(&window));
         assert_eq!(window.image.path(), Some(path.as_path()));
         let saved = origin_pane(&mut window)
             .panel
@@ -5050,7 +5049,7 @@ mod tests {
         paste::received(&mut window, name, stopped, &ctx);
         assert_eq!(
             paste::empty(&window.image),
-            Some("The clipboard is unavailable (stopped); restart Ivy to paste.")
+            Some("The clipboard is unavailable (stopped).")
         );
     }
 
@@ -5080,8 +5079,7 @@ mod tests {
         let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
         let name = window.image.origin().unwrap().pane;
         let paste = || egui::Event::Paste("text".into());
-        let command = egui::Event::ModifiersChanged(egui::Modifiers::COMMAND);
-        painted(&mut window, &ctx, vec![command, paste()]);
+        painted(&mut window, &ctx, vec![paste()]);
         painted(&mut window, &ctx, vec![]);
         assert_eq!(harness.requested_image(), Some(name));
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
@@ -5091,11 +5089,16 @@ mod tests {
             painted(&mut window, &ctx, vec![]);
         }
         assert_eq!(harness.requested_image(), None, "a repeat pasted again");
-        // Let go, then press again: a new paste.
-        let released = egui::Event::ModifiersChanged(egui::Modifiers::NONE);
+        // V let go — Ctrl may stay down — and pressed again: a new paste.
+        let released = egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
         painted(&mut window, &ctx, vec![released]);
-        let command = egui::Event::ModifiersChanged(egui::Modifiers::COMMAND);
-        painted(&mut window, &ctx, vec![command, paste()]);
+        painted(&mut window, &ctx, vec![paste()]);
         painted(&mut window, &ctx, vec![]);
         assert_eq!(harness.requested_image(), Some(name));
     }
@@ -5104,15 +5107,51 @@ mod tests {
     /// the other console's empty viewer, which the first paste's answer would then undo.
     #[test]
     fn a_second_paste_on_another_console_does_not_take_the_viewer() {
-        let (mut window, _ctx, harness, name, _folder) = window_to_paste();
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
         let other = window.active().panes()[0].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == other)
+            .unwrap()
+            .panel = Some(crate::PanelDir::create().unwrap());
+        paste::ask(&mut window, name, paste::By::Button);
+        harness.requested_image();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
         paste::ask(&mut window, other, paste::By::Button);
-        assert_ne!(window.image.origin().map(|o| o.pane), Some(other));
-        assert_eq!(
-            window.image.notice.as_deref(),
-            Some("A paste is already on its way.")
+        assert_eq!(window.image.origin().map(|o| o.pane), Some(name));
+        let said = format!("A paste is already on its way. {}", paste::HINT);
+        painted(&mut window, &ctx, vec![]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            text_rect(&shapes, |t| t == said).is_some(),
+            "the refusal is not painted"
         );
+    }
+
+    /// A console that closes before its paste is answered is said closed nowhere but in its own
+    /// viewer: another console's viewer, shown meanwhile, is left as it was.
+    #[test]
+    fn a_late_answer_for_a_closed_console_leaves_another_consoles_viewer() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let other = window.active().panes()[0].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == other)
+            .unwrap()
+            .panel = Some(crate::PanelDir::create().unwrap());
+        paste::ask(&mut window, name, paste::By::Button);
+        harness.requested_image();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        paste::ask(&mut window, other, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(other));
+        window.close_a_pane_called(other, &ctx).unwrap();
+        harness.reply_image(other, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(window.image.origin().map(|o| o.pane), Some(name));
+        assert_eq!(paste::empty(&window.image), Some(paste::HINT));
     }
 }

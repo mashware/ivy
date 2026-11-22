@@ -52,8 +52,8 @@ pub(crate) enum Pasted {
     Image(image::RgbaImage),
     Absent,
     Failed(String),
-    /// No clipboard to read from — it could not be opened, or its worker stopped — which asking
-    /// again does not mend.
+    /// No clipboard to read from — it could not be opened, the system does not offer one, or its
+    /// worker stopped — which asking again does not mend.
     Unavailable(String),
     /// The clipboard's owner did not answer in time; whatever it answers later is discarded.
     Expired,

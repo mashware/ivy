@@ -11798,25 +11798,34 @@ takes a screenshot from:
   screenshot again, or press Ctrl+V here.» (Cmd+V on macOS) — alone when the clipboard simply held
   no image, after what went wrong when a retry can mend it (a read that failed or ran out of time,
   a paste already on its way, a clipboard still busy with another read), and what went wrong alone
-  when it cannot (no folder, an image too large, a clipboard that is unavailable — never opened, or
-  its worker stopped — which only restarting Ivy mends, and says so).
+  when it cannot (no folder, an image too large, a clipboard that is unavailable — never opened, not
+  offered by the system, or its worker stopped — said with its cause; a paste refused because
+  the clipboard's worker is gone adds that restarting Ivy mends it).
 - **The paste chord inside the viewer** does the same for the console the viewer is pinned to —
   **only while the drawer holds the keys and no text field has the keyboard**, the condition D113
   gives Ctrl+Z, so a note being typed keeps its text paste, and not while a Send is on its way. The
   vendored egui-winit lets the chord through as a key when the clipboard holds no text — Ctrl+V or
   Ctrl+Shift+V (Cmd on macOS), the Paste key, and Shift+Insert on Windows, where Win+Shift+S
   leaves only an image — and turns every paste chord into `Event::Paste` when it does; both are
-  taken once per hold: egui-winit turns a held chord's repeats into more text pastes, so the hold
-  ends when its modifier, or the Paste key, is let go. Over a picture already shown or still
-  loading, a chord that finds no image only says so, replacing the drawer's notice rather than the
-  picture; a late answer brings the drawer's document tab into view but never takes the keyboard
-  back from a console the person moved to meanwhile. A paste asked while another is on its way is
-  refused beside what is shown, never by opening another console's empty viewer. A paste asked over unsent marks is
+  taken once per hold: egui-winit turns a held chord's repeats into more text pastes with no repeat
+  flag, but lets the key's release through, and that release ends the hold. Over a picture already
+  shown or still loading, a chord that finds no image only says so, replacing the drawer's notice
+  rather than the picture. A paste asked while another is on its way is said where the drawer
+  paints it — the empty viewer's text, or beside a picture — never by opening another console's
+  empty viewer; with neither shown it says nothing, since the paste on its way opens the viewer.
+- **Every answer is shown, and takes the keys** — the drawer's document tab, as opening a clicked
+  image does — however late it comes (decided with the owner). An answer is normally there within
+  milliseconds; late means a stuck clipboard owner, at most the 10 s deadline, and then what the
+  person types next goes to the drawer. Shown without taking the keys was tried and dropped: an
+  answer arriving while the person typed in Files or the Git review switched the drawer's tab,
+  which suspends both, and the keys went to the focused console — the rest of the line, Enter
+  included, into a shell. A paste asked over unsent marks is
   refused before the clipboard is read; marks drawn while it was being read are kept, and what
   the read found is said beside them, once.
 - **The file is the console's**: it joins the annotated copies the console removes when it closes
   (D113's cleanup, the same field). A console that closes while its screenshot is written takes the
-  file when the write ends, and its folder if nothing else is in it. A screenshot written while
+  file when the write ends, and its folder if nothing else is in it; one that closes before its
+  read is answered is said closed in its own viewer only. A screenshot written while
   marks were drawn on the image shown is kept, and the drawer says where.
 - **The same limits as an opened image** — a decode over 256 MiB, a PNG over 32 MiB — refuse it
   **before** a file is written, with `The clipboard image is too large to open (limit: … MiB).`
