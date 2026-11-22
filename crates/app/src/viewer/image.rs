@@ -163,6 +163,14 @@ impl Slot {
         self.notice = Some(notice.into());
     }
 
+    /// Says `said` after the notice rather than in its place, unless it already says it: the
+    /// notice may be a failed Send nobody has read yet.
+    pub(super) fn add(&mut self, said: &str) {
+        if !self.notice.as_deref().is_some_and(|n| n.contains(said)) {
+            send::join(&mut self.notice, said.to_owned());
+        }
+    }
+
     /// What the copy is drawn from: the original at full resolution and the marks as they are.
     fn to_flatten(&self) -> Option<(Arc<image::RgbaImage>, Vec<marks::Shape>)> {
         let marks = self.document.as_ref()?.marks.marks().to_vec();
@@ -1432,7 +1440,12 @@ mod tests {
         let guide = folder.0.join("guide.md");
         std::fs::write(&guide, "# Guide\n").unwrap();
         let name = slot(&window).origin().unwrap().pane;
-        assert!(crate::viewer::open_document_target(&mut window, name, guide, None));
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide,
+            None
+        ));
         painted(&mut window, &ctx, vec![]);
         click_strip(&mut window, &ctx, StripAction::Image);
         assert_eq!(active(&window), Some(Tool::Image));
@@ -1442,7 +1455,10 @@ mod tests {
         crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
         assert_eq!(active(&window), Some(Tool::Image));
         assert!(window.viewer.keyboard, "the drawer gave the keys away");
-        assert!(window.viewer.space && window.viewer.held, "a held Space was forgotten");
+        assert!(
+            window.viewer.space && window.viewer.held,
+            "a held Space was forgotten"
+        );
         assert!(crate::viewer::open_document_target(
             &mut window,
             name,
@@ -3591,8 +3607,9 @@ mod tests {
     }
 
     /// Unsent marks keep the image: opening another image over it, or closing its tab, is refused
-    /// with a message, the image and its marks stay, and once the marks are cleared the same open
-    /// goes through. A Markdown file opens beside it, refused by nothing.
+    /// with a message after a failure nobody read yet, said once however often it is refused, the
+    /// image and its marks stay, and once the marks are cleared the same open goes through. A
+    /// Markdown file opens beside it, refused by nothing.
     #[test]
     fn unsent_marks_keep_the_image_until_they_are_cleared() {
         use crate::viewer::StripAction;
@@ -3621,6 +3638,9 @@ mod tests {
         crate::viewer::show_image(&mut window, true);
         let said = crate::viewer::NotOpened::Marks.to_string();
         assert!(said.contains("another image"), "{said}");
+        let failure = "The copy could not be written; nothing was sent.";
+        slot_mut(&mut window).say(failure);
+        let said = format!("{failure} {said}");
         assert_eq!(
             crate::viewer::open_image_target(&mut window, name, other.clone()),
             Err(crate::viewer::NotOpened::Marks)
@@ -3629,9 +3649,9 @@ mod tests {
         crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
         kept(&window);
         let shapes = painted(&mut window, &ctx, vec![]);
-        let notice = slot(&window).notice.clone().unwrap();
+        assert_eq!(slot(&window).notice.as_deref(), Some(said.as_str()));
         assert!(
-            texts(&shapes, area()).contains(&notice),
+            texts(&shapes, area()).contains(&said),
             "the refusal is not painted"
         );
         marks_mut(&mut window).clear();
@@ -4523,7 +4543,8 @@ mod tests {
     }
 
     /// A cancelled Send whose worker fails after its console closed has no image left to say it
-    /// under: it goes to standard error, and the console left hears nothing of it.
+    /// under: it goes to standard error naming its console, and the console left hears nothing of
+    /// it, under its image or under the next one opened there.
     #[cfg(unix)]
     #[test]
     fn a_cancelled_send_whose_worker_fails_after_its_console_closed_says_nothing_under_another() {
@@ -4541,14 +4562,42 @@ mod tests {
             .expect("the copy is being written");
         let cancel = place_of(&mut window, &ctx, "Cancel");
         press(&mut window, &ctx, cancel);
-        let name = slot(&window).origin().unwrap().pane;
+        let (name, label) = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
         window.close_a_pane_called(name, &ctx).unwrap();
+        let left = window.active().focus;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, left, &other);
+        send::TOLD.with(|told| told.borrow_mut().clear());
         sender.send(Err("disk full".into())).unwrap();
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area())
+                .iter()
+                .any(|t| t.contains("disk full"))
+        };
         for _ in 0..3 {
-            painted(&mut window, &ctx, vec![]);
+            assert!(
+                !said(&painted(&mut window, &ctx, vec![])),
+                "said under another console's image"
+            );
         }
         assert!(!window.image.send.parked());
-        assert_eq!(slot(&window).notice, None);
+        open_in(&mut window, &ctx, left, &path);
+        assert!(
+            !said(&painted(&mut window, &ctx, vec![])),
+            "said under the next image opened"
+        );
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [format!(
+                "Send to {label}: The origin console has closed, and the cancelled copy's worker \
+                 reported: disk full."
+            )]
+        );
     }
 
     /// Clicks Send, takes the copy's write over once it `started`, and replaces the image, as the

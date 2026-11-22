@@ -171,7 +171,7 @@ pub(super) fn keeps_marks(window: &mut Window, pane: usize) -> bool {
     let Some(slot) = super::image::slot_of(&mut window.tabs, pane).filter(|s| s.has_marks()) else {
         return false;
     };
-    slot.say(UNSENT_MARKS);
+    slot.add(UNSENT_MARKS);
     show_image(window, true);
     true
 }
