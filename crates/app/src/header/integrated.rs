@@ -273,7 +273,7 @@ struct Appearance<'a> {
     /// How far this header has turned to the focus green, 0 to 1 (see `pane_view::focus_mix`).
     green: f32,
     project: Option<&'a crate::project_view::Badge>,
-    /// Whether this console holds an image its agent opened that nobody has seen (D120).
+    /// Whether this console holds an image its agent opened that nobody has seen (D121).
     unseen_image: bool,
 }
 

@@ -1708,7 +1708,7 @@ mod tests {
     /// **An `image_open` waits for the window and wakes it**, as the `split_*` verbs do: the window
     /// is what holds the console's image, and a request queued during painting with no wake would
     /// be answered by no pass at all, its caller told after five seconds that the window did not
-    /// answer (D120).
+    /// answer (D121).
     #[test]
     fn an_image_open_waits_for_the_window_and_wakes_it() {
         use std::io::Write;

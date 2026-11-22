@@ -258,12 +258,12 @@ pub(crate) fn open_image_target(
 }
 
 /// What an agent's open answers when the drawer shows the image: it opened on it, or its Image
-/// tab was already on show for that console (D120). The answer comes before the worker has
+/// tab was already on show for that console (D121). The answer comes before the worker has
 /// decoded the file, and a truncated or corrupt PNG or JPEG begins like a whole one, so it says
-/// where a file that cannot be shown is explained instead of promising pixels (owner, D120).
+/// where a file that cannot be shown is explained instead of promising pixels (owner, D121).
 pub(crate) const SHOWN_TO_THE_PERSON: &str = "opened and shown in the drawer of this console, which the person is working in; if the drawer cannot show it, it says why there";
 
-/// What an agent's open answers when nothing moved and the mark says it (D120). Its last clause
+/// What an agent's open answers when nothing moved and the mark says it (D121). Its last clause
 /// is the one `SHOWN_TO_THE_PERSON` ends with, for the same reason.
 pub(crate) const MARKED_FOR_THE_PERSON: &str = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there";
 
@@ -277,7 +277,7 @@ pub(crate) struct Room<'a> {
     pub(crate) metrics: &'a crate::painter::CellMetrics,
 }
 
-/// Opens `path` in the slot of the console `pane`, for that console's own agent (D120).
+/// Opens `path` in the slot of the console `pane`, for that console's own agent (D121).
 ///
 /// The person is not moved: where the Image tab already shows that console the new image simply
 /// takes its place, and otherwise the drawer opens on it only where the person is working in that
@@ -285,7 +285,7 @@ pub(crate) struct Room<'a> {
 /// over that console's unsent marks, with nothing shown and nothing said in the drawer, because the
 /// agent is the one asking. The file itself is not read here: the worker that decodes it walks the
 /// path first, refusing on every platform a `..` or a name Windows rewrites and, on Windows, a
-/// path through a link — a walk a person's own open is spared (D120).
+/// path through a link — a walk a person's own open is spared (D121).
 pub(crate) fn open_for_an_agent(
     window: &mut Window,
     pane: usize,
@@ -345,7 +345,7 @@ fn in_front(window: &Window, pane: usize, ctx: &eframe::egui::Context) -> bool {
 }
 
 /// Whether the drawer may be switched to the Image tab: switching takes away what the Board or a
-/// maximized drawer shows, and the keys from the drawer or Files if they hold them (D120).
+/// maximized drawer shows, and the keys from the drawer or Files if they hold them (D121).
 fn free_to_switch(window: &Window) -> bool {
     !matches!(crate::sidebar::active(window), Some(Tool::Board))
         && !window.sidebar.maximized

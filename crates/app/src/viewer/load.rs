@@ -15,7 +15,7 @@ const MARKDOWN_LIMIT: usize = 1024 * 1024;
 const CODE_LIMIT: usize = 1024 * 1024;
 /// How far into a file a NUL byte is looked for before it is called binary.
 const BINARY_SNIFF: usize = 8 * 1024;
-/// The bridge refuses the same size before an agent's open reaches the window (D120).
+/// The bridge refuses the same size before an agent's open reaches the window (D121).
 pub(super) const IMAGE_LIMIT: usize = panel_control::image::MAX_BYTES as usize;
 /// Asks one entry of a path whether it is a link an agent's open is refused through.
 pub(super) type IsLink = fn(&Path) -> std::io::Result<bool>;
@@ -121,7 +121,7 @@ impl Job {
 
 impl Job<Picture> {
     /// Decodes `path` on the worker. `links` is set for an agent's open: the walk that refuses a
-    /// path through a link runs there, before the open, with that reader (D120).
+    /// path through a link runs there, before the open, with that reader (D121).
     pub(super) fn image(
         path: PathBuf,
         max_side: usize,
@@ -242,7 +242,7 @@ fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<P
     use image::{ImageDecoder, ImageFormat, ImageReader};
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
     // The enforcement of what the bridge only advises, for an agent's open. A person's own open is
-    // not walked (D120), so a refusal over a link tells the person reading it that open is theirs to
+    // not walked (D121), so a refusal over a link tells the person reading it that open is theirs to
     // make; one over the path's text already says what to send instead, and is left at that.
     if let Some(is_link) = links {
         panel_control::image::no_link_on_the_way(path, is_link).map_err(
@@ -933,7 +933,7 @@ mod tests {
         }
     }
 
-    /// **An agent's image is walked before it is opened** (D120): on Windows the open through a
+    /// **An agent's image is walked before it is opened** (D121): on Windows the open through a
     /// link is what reaches the host. The file here does not exist, so a worker that opened first
     /// would say «Cannot open …» instead of the link sentence. The reader is handed in because the
     /// real one calls no entry a link off Windows, and stops at the missing file on it. A refusal
@@ -965,7 +965,7 @@ mod tests {
     }
 
     /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses an agent's
-    /// image before anything is asked** (D120), with the walk's own sentence and nothing after it:
+    /// image before anything is asked** (D121), with the walk's own sentence and nothing after it:
     /// it already says what to send instead, and Files is no answer to it. No entry is asked whether
     /// it is a link, and the file, which does not exist, is never opened — a worker that opened it
     /// would say «Cannot open …» instead.

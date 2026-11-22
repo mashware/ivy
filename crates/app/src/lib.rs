@@ -6918,7 +6918,7 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
-    /// **An agent's image goes to the console whose endpoint asked, and to no other** (D120): the
+    /// **An agent's image goes to the console whose endpoint asked, and to no other** (D121): the
     /// window's drain answers with the sentence the agent reads, the console that asked holds the
     /// image, and the one beside it still has none.
     #[test]
@@ -6960,7 +6960,7 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
-    /// **An agent's image shown in the console being typed into loses no keystroke** (D120): the
+    /// **An agent's image shown in the console being typed into loses no keystroke** (D121): the
     /// request is answered by the real frame's drain, after that frame's keys, the drawer opens on
     /// the Image tab, and the key typed in that frame and the one typed in the next both reach the
     /// console.

@@ -58,7 +58,7 @@ const LABEL_FLOOR: f32 = 24.0;
 const SUMMARY_LABEL_FLOOR: f32 = 8.0;
 /// The air between the label and the dots.
 const LABEL_AIR: f32 = 8.0;
-/// The «new image» glyph, the size of the header's (D120).
+/// The «new image» glyph, the size of the header's (D121).
 const UNSEEN: f32 = 12.0;
 /// The close target's width at the card's right edge.
 const CLOSE_WIDTH: f32 = 26.0;
@@ -127,7 +127,7 @@ pub(super) struct Layout {
     /// amended for #113). Reserved whether or not anything claims, so a claim never moves the label.
     pub summary: Option<Rect>,
     /// The «new image» glyph, at the label's right end, while one of the tab's consoles holds an
-    /// image its agent opened that nobody has seen (D120). It gives way before the label's floor.
+    /// image its agent opened that nobody has seen (D121). It gives way before the label's floor.
     pub unseen: Option<Rect>,
 }
 

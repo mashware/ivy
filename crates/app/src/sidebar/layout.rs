@@ -123,7 +123,7 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
 }
 
 /// Whether the drawer, opened on `tool`, would get a dock in `area`: asked before the drawer is
-/// switched, so a window too short for it moves nothing (D120).
+/// switched, so a window too short for it moves nothing (D121).
 pub(crate) fn drawer_has_room(
     window: &Window,
     area: egui::Rect,

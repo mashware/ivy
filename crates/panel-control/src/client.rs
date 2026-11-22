@@ -292,7 +292,7 @@ impl Producer {
         self.ask(serde_json::json!({"tool": "split_close", "pane": pane}))
     }
 
-    /// Shows the image at `path` in the drawer of this pane's own console (D120).
+    /// Shows the image at `path` in the drawer of this pane's own console (D121).
     ///
     /// A path that is not UTF-8 is refused here rather than sent changed: JSON cannot carry it,
     /// and a lossy copy would name another file.

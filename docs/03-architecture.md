@@ -54,7 +54,7 @@ An MCP server exposing tools to the agent running in the pane:
 | `split_open` | Open a new pane | Yes, since F3's fourth PR |
 | `split_read` | Read a pane's output | Yes, since F3's fourth PR |
 | `split_close` | Close it | Yes, since F3's fourth PR |
-| `image_open` | Show an image in its own console's drawer slot | Yes, D120 |
+| `image_open` | Show an image in its own console's drawer slot | Yes, D121 |
 
 Every tool in this table is advertised because it is answered. The three `split_*` act on **the panes this
 connection opened**, named by an **opaque handle** the window hands back — sixteen random bytes,
@@ -64,7 +64,7 @@ them takes it back**: from then on the handle answers with the reason and never 
 `split_open` launched keeps reading what the person types after that, and the promise an agent author
 is given is «the app stops handing you that buffer; the program you opened does not».
 
-`image_open` fills **the image slot of the console whose endpoint asked** (D120), never another's: it
+`image_open` fills **the image slot of the console whose endpoint asked** (D121), never another's: it
 names no pane. It takes an absolute path on this machine — on Windows a drive letter or a volume
 GUID, where a mapped drive is the user's own mapping and not a host the agent chose. The bridge
 `stat`s it and reads its first bytes in its own process before the window is asked, as a courtesy

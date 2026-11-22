@@ -12064,7 +12064,7 @@ there.
 
 ---
 
-## D120 — An agent opens an image in its own console's slot, and the person is not moved to it
+## D121 — An agent opens an image in its own console's slot, and the person is not moved to it
 
 **22 November 2026 — #198.** `image_open(path)` on a console's control channel fills **that**
 console's image slot (D72), the one whose endpoint the request arrived on. A name in the message

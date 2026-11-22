@@ -1,5 +1,5 @@
 //! What an image an agent opens is held to, in one place for the bridge that checks it on the
-//! agent's side and the window that reads it (D120): the bridge's check is a courtesy that answers
+//! agent's side and the window that reads it (D121): the bridge's check is a courtesy that answers
 //! at once, and the window's read is the enforcement, so the two must not drift.
 
 use std::ffi::OsStr;
@@ -32,7 +32,7 @@ impl Elsewhere {
 /// Whether `path`'s text names a file on this machine. On Windows an absolute path can name
 /// another host's share or a device, and reading it would authenticate to that host on an agent's
 /// word; paths on other platforms have no prefix. The text is all it judges: a link on the way is
-/// [`no_link_on_the_way`]'s. **An allowlist, not a list of what leaves** (D120): a refusal list
+/// [`no_link_on_the_way`]'s. **An allowlist, not a list of what leaves** (D121): a refusal list
 /// missed `\\?\GLOBALROOT\Device\Mup\…`, which reaches the SMB redirector, and `\\?\unc\…`, which
 /// std parses case-sensitively as a plain verbatim prefix while Windows does not.
 pub fn is_local(path: &Path) -> bool {
@@ -50,7 +50,7 @@ pub fn elsewhere(path: &Path) -> Option<Elsewhere> {
 
 /// A drive letter, in either spelling, or a volume named by its GUID — which is how `canonicalize`
 /// names a volume with no letter — is local. A mapped drive letter is the user's own mapping, not a
-/// host the agent chose, so it passes (D120). Everything else under `\\?\` and `\\.\` is the NT
+/// host the agent chose, so it passes (D121). Everything else under `\\?\` and `\\.\` is the NT
 /// object namespace: its `UNC` spellings are answered as a share, and the rest as not a drive
 /// path, because some of it reaches a share (`\\?\GLOBALROOT\Device\Mup\…`) and some does not.
 fn prefix_elsewhere(prefix: Prefix<'_>) -> Option<Elsewhere> {
@@ -79,15 +79,15 @@ fn is_volume(component: &OsStr) -> bool {
 }
 
 /// Refuses an agent's `path` when an entry on its way — a folder from the root down, or the file
-/// itself — is a link (D120). On Windows a symbolic link under `C:\` can lead to `\\host\share`,
+/// itself — is a link (D121). On Windows a symbolic link under `C:\` can lead to `\\host\share`,
 /// and opening through it authenticates to that host exactly as the prefixes `is_local` refuses
 /// would. Where a link leads is never read: reading a target and checking it is what review found
-/// three ways around (D120). Entries are asked from the root down and the walk stops at the first
+/// three ways around (D121). Entries are asked from the root down and the walk stops at the first
 /// link, so nothing is asked through one.
 ///
 /// **The walk has to ask the entries the open passes through**, and Win32 rewrites some names by
 /// the text, without asking the disk. So a path that holds one is refused, on every platform,
-/// before anything is asked (D120): a `..`, which is collapsed, so in `C:\repo\gone\..\shots\a.png`
+/// before anything is asked (D121): a `..`, which is collapsed, so in `C:\repo\gone\..\shots\a.png`
 /// the open reaches `C:\repo\shots` past an entry the walk stopped at because it is not there; and
 /// the names [`misread_name`] refuses, which Win32 rewrites only as the last segment of a path —
 /// how the walk asks each entry — while the open passes through them as written. Without those, an
@@ -140,7 +140,7 @@ pub fn no_link_on_the_way(
 }
 
 /// Why [`no_link_on_the_way`] refused a path, each holding the sentence the agent is told. The
-/// kind is kept because the window words the two apart for the person reading its drawer (D120).
+/// kind is kept because the window words the two apart for the person reading its drawer (D121).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
     /// By the path's text, before anything is asked: a `..` or a name Win32 rewrites. The sentence
@@ -159,7 +159,7 @@ impl From<Refused> for String {
 }
 
 /// Why one name on an agent's path is one Win32 reads as another entry when it ends a path, as
-/// the agent is told it, or `None` (D120, review round 5). A name made only of dots, or ending in a
+/// the agent is told it, or `None` (D121, review round 5). A name made only of dots, or ending in a
 /// dot or a space, loses those as the last segment — `x.` is asked as `x`, `...` as the folder
 /// it sits in — and a reserved device name is asked as the device, «COM9» as «\\.\COM9». The
 /// order is the sentence's: `...` is told it is only dots, and `CON.` that it ends in a dot.
@@ -213,7 +213,7 @@ fn names_a_device(name: &[u8]) -> bool {
 /// symbolic link, a junction, or any other reparse tag that names another path — so those are what
 /// is refused. A reparse point that is no name (a cloud placeholder, deduplication, compression)
 /// holds the file's own data behind its filter and passes, as D108 lets it pass: refusing it could
-/// refuse images a sync client such as OneDrive keeps as placeholders (D120).
+/// refuse images a sync client such as OneDrive keeps as placeholders (D121).
 #[cfg(windows)]
 pub fn refused_link(path: &Path) -> std::io::Result<bool> {
     Ok(std::fs::symlink_metadata(path)?.file_type().is_symlink())
@@ -221,7 +221,7 @@ pub fn refused_link(path: &Path) -> std::io::Result<bool> {
 
 /// No link is refused here, and nothing is asked of the disk: a link leads to what the user made
 /// reachable, as a mapped drive letter does on Windows. That is an accepted cost, not a claim that
-/// no path can name a host here — macOS's `/net` and an autofs `-hosts` map can (D120).
+/// no path can name a host here — macOS's `/net` and an autofs `-hosts` map can (D121).
 #[cfg(not(windows))]
 pub fn refused_link(_path: &Path) -> std::io::Result<bool> {
     Ok(false)

@@ -674,7 +674,7 @@ fn tools() -> serde_json::Value {
             {
                 "name": "image_open",
                 // The one guard a subagent meets (D88): nothing on the wire tells it from the agent
-                // whose connection it shares, so the last sentence is the whole of it (D120).
+                // whose connection it shares, so the last sentence is the whole of it (D121).
                 "description": IMAGE_OPEN,
                 "inputSchema": {
                     "type": "object",
@@ -692,13 +692,13 @@ fn tools() -> serde_json::Value {
 }
 
 /// What `image_open` tells the agent it does: a shorter wording, for the agent, of the rules docs/04
-/// states for the verb (D120).
+/// states for the verb (D121).
 const IMAGE_OPEN: &str = "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.";
 
 /// The file `path` names, if an agent may hand it to the window: refused with the sentence the agent
 /// reads otherwise.
 ///
-/// **A courtesy, not the enforcement** (D120): it answers at once, in the bridge's own process,
+/// **A courtesy, not the enforcement** (D121): it answers at once, in the bridge's own process,
 /// which is not always the agent's, so a stuck filesystem stalls the bridge and never the window;
 /// but the window may see another file (another mount namespace, a file replaced meanwhile), so
 /// its own read checks again. A path on another machine is refused before anything is asked of it:
@@ -740,7 +740,7 @@ fn image_to_open_with(
             panel_control::image::MAX_BYTES / (1024 * 1024)
         ));
     }
-    // The first bytes decide, not the extension (D120): a file that is not a PNG or JPEG at all is
+    // The first bytes decide, not the extension (D121): a file that is not a PNG or JPEG at all is
     // refused here, before the agent is told «opened». A truncated or corrupt one begins like a
     // whole one and passes; the window's answer says the drawer explains what it cannot show.
     let mut head = Vec::with_capacity(PNG_SIGNATURE.len());
@@ -1691,7 +1691,7 @@ mod tests {
         );
     }
 
-    /// **`image_open` is advertised whole, with the words `IMAGE_OPEN` holds** (D120): its schema,
+    /// **`image_open` is advertised whole, with the words `IMAGE_OPEN` holds** (D121): its schema,
     /// its whole description, and the clause that keeps a subagent off it — which lives in the description
     /// and not in the handshake, whose instructions name only what publishing needs (D88).
     #[test]
@@ -1733,7 +1733,7 @@ mod tests {
     }
 
     /// **The bridge answers a file problem at once, as an error the agent reads, and the pane is
-    /// never reached** (D120): each refusal names the file and what is wrong with it.
+    /// never reached** (D121): each refusal names the file and what is wrong with it.
     #[test]
     fn an_image_the_window_could_not_show_is_refused_by_the_bridge_with_its_reason() {
         let folder = std::env::temp_dir().join(format!("ivy-image-open-{}", std::process::id()));
@@ -1826,7 +1826,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
-    /// **A link on the way refuses the path before the bridge asks for the file** (D120): the file
+    /// **A link on the way refuses the path before the bridge asks for the file** (D121): the file
     /// here does not exist, so a bridge that asked first, or never walked, would answer «cannot
     /// open …». The folder is called one by the reader handed in, which works on every platform: the
     /// real one calls nothing a link off Windows, and on it stops at this folder, which is not there.
@@ -1847,7 +1847,7 @@ mod tests {
     }
 
     /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses the path
-    /// before the bridge asks anything** (D120), each with its own sentence: no entry is asked
+    /// before the bridge asks anything** (D121), each with its own sentence: no entry is asked
     /// whether it is a link, and the file, which does not exist, is never asked for — a bridge that
     /// asked would answer «cannot open …» instead.
     #[test]
@@ -1980,7 +1980,7 @@ mod tests {
     }
 
     /// **A path on another machine is refused by its text, before the file is asked for**, which is
-    /// what would reach that host (D120): a refusal that came from asking would read «cannot open …»
+    /// what would reach that host (D121): a refusal that came from asking would read «cannot open …»
     /// or name what kind of file it found instead.
     #[cfg(windows)]
     #[test]

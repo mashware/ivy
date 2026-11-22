@@ -192,7 +192,7 @@ pub enum Request {
     SplitRead { pane: String, scrollback: bool },
     /// Close a pane this connection opened.
     SplitClose { pane: String },
-    /// Show an image in the drawer of this pane's own console (D120).
+    /// Show an image in the drawer of this pane's own console (D121).
     ///
     /// **It names no pane**: the endpoint decided which console, so a `pane` sent beside it reaches
     /// nothing. The path is absolute and local; whether it is a readable PNG or JPEG is the
@@ -602,7 +602,7 @@ fn split_close(envelope: &Envelope<'_>) -> Incoming {
 }
 
 /// `image_open`: an absolute path on this machine, and nothing else. No extension is asked for and
-/// no length beyond the line's own bound: the bytes decide the format (D120).
+/// no length beyond the line's own bound: the bytes decide the format (D121).
 fn image_open(envelope: &Envelope<'_>) -> Incoming {
     let Some(path) = envelope.path else {
         return Incoming::Malformed("an image_open names no \"path\"".to_owned());

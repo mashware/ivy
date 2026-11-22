@@ -1,5 +1,5 @@
 //! The drawer's image: a PNG or JPEG a console printed, Files opened or the console's agent opened
-//! (D120), one per console and shown in the drawer's image tab while that console has the focus
+//! (D121), one per console and shown in the drawer's image tab while that console has the focus
 //! (D72). It is decoded once per open
 //! and never refreshed, so a program that overwrites the same screenshot name does not change what
 //! is on screen.
@@ -51,7 +51,7 @@ pub(crate) struct Slot {
     /// one opened clears the notice it would have gone to.
     unshown: Option<String>,
     /// An agent opened this image and the drawer has not painted it, or its refusal, since: the
-    /// console's tab card and header mark it (D120). «Loading…» is not seeing it.
+    /// console's tab card and header mark it (D121). «Loading…» is not seeing it.
     unseen: bool,
 }
 
@@ -65,7 +65,7 @@ impl Console {
 /// What the drawer keeps across consoles: one pointer, one Send at a time, one count of openings.
 #[derive(Default)]
 pub(crate) struct Viewer {
-    /// How an agent's open asks each entry of its path whether it is a link (D120).
+    /// How an agent's open asks each entry of its path whether it is a link (D121).
     links: Links,
     /// The button whose drag pans the image, latched when it went down.
     panning: Option<egui::PointerButton>,
@@ -82,7 +82,7 @@ pub(crate) struct Viewer {
 struct Links(IsLink);
 
 /// Who named the path an image is opened from: an agent's open is walked for links before the
-/// worker reads it, and a person's own is not (D120).
+/// worker reads it, and a person's own is not (D121).
 pub(super) enum Opener {
     Agent,
     Person,
@@ -100,7 +100,7 @@ struct Opened {
     path: PathBuf,
     /// The reader every decode of the path is walked with, for an agent's open, and `None` for a
     /// person's, which is not walked: one field, so the two cannot disagree (see [`Opener`]). On
-    /// Windows the reader refuses a path through a link, and elsewhere it refuses none (D120).
+    /// Windows the reader refuses a path through a link, and elsewhere it refuses none (D121).
     walk: Option<IsLink>,
     load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
@@ -6466,7 +6466,7 @@ mod tests {
     }
 
     /// The bytes decide the format: a `.png` holding text that reaches the window — the bridge
-    /// refuses it, but a hand-written line skips the bridge (D120) — is opened, and the drawer says
+    /// refuses it, but a hand-written line skips the bridge (D121) — is opened, and the drawer says
     /// why it cannot be shown.
     #[test]
     fn an_agents_file_that_is_not_an_image_is_opened_and_says_why_in_the_drawer() {
@@ -6504,7 +6504,7 @@ mod tests {
     }
 
     /// **An agent's image is refused through a link, and the person's own open of the same file is
-    /// not** (D120). The window is handed a reader for which every entry is one, so the test holds
+    /// not** (D121). The window is handed a reader for which every entry is one, so the test holds
     /// on every platform — off Windows the real reader calls nothing a link: what is pinned is that
     /// the agent's open reaches the worker's walk and the person's does not.
     #[test]
@@ -6540,7 +6540,7 @@ mod tests {
 
     /// **On a real Windows disk, the window's own reader refuses an agent's image through a
     /// junction** — which needs no privilege to make — and lets the same PNG by its own folder
-    /// through (D120). Nothing is handed in: what is pinned is the reader the window is built with,
+    /// through (D121). Nothing is handed in: what is pinned is the reader the window is built with,
     /// which the portable test above replaces.
     #[cfg(windows)]
     #[test]

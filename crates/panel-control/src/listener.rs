@@ -237,7 +237,7 @@ pub enum What {
     Read { pane: String, scrollback: bool },
     /// Close a pane this connection opened.
     Close { pane: String },
-    /// Show an image in the drawer of the caller's own console (D120); the endpoint decided which.
+    /// Show an image in the drawer of the caller's own console (D121); the endpoint decided which.
     ImageOpen { path: std::path::PathBuf },
     /// The connection is over. Whatever it held is no longer held.
     ///
