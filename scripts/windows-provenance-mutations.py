@@ -12,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = "panel::provenance_route::windows_tests::windows_provenance_opened_panes_label_only_verified_outside_and_keep_unknown"
 MUTATIONS = [
     (
+        "full-queue-reader-close-signal-is-missing", "crates/term-core/src/lib.rs",
+        "self.stop.store(true, Ordering::Relaxed);", "self.stop.store(false, Ordering::Relaxed);", "term-core",
+        "tests::closing_with_the_channel_full_ends_reader_without_draining",
+    ),
+    (
         "parent-order-falls-back-to-wall-clock", "crates/term-core/src/foreground/windows/chain.rs",
         "id.sequence >= child.sequence", "id.birth >= child.birth", "term-core",
         "foreground::windows::chain::tests::later_reused_parent_is_unknown_despite_earlier_wall_clock_birth",

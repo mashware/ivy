@@ -33,6 +33,14 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::time::Instant;
 
+#[cfg(test)]
+thread_local! {
+    // Transferred from the spawning test to its own reader; never shared across consoles.
+    static DELIVERY_FULL_PROBE: std::cell::RefCell<Option<SyncSender<()>>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
 #[cfg(not(windows))]
 use portable_pty::MasterPty;
 use portable_pty::{Child, CommandBuilder, native_pty_system};
@@ -805,7 +813,11 @@ impl Pty {
         let (ended, reader_ended) = channel::<()>();
         let ending = Arc::new(OnceLock::new());
         let ending_for_thread = Arc::clone(&ending);
+        #[cfg(test)]
+        let full_probe = DELIVERY_FULL_PROBE.with(|probe| probe.borrow_mut().take());
         let reader = thread::spawn(move || {
+            #[cfg(test)]
+            DELIVERY_FULL_PROBE.with(|probe| *probe.borrow_mut() = full_probe);
             // Moved in and never used: what closing reads is this being dropped when the thread ends.
             let _ended = ended;
             #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
@@ -1191,6 +1203,12 @@ fn deliver(
         match channel.try_send(pending) {
             Ok(()) => return Ok(()),
             Err(TrySendError::Full(returned)) => {
+                #[cfg(test)]
+                DELIVERY_FULL_PROBE.with(|probe| {
+                    if let Some(probe) = probe.borrow_mut().take() {
+                        let _ = probe.try_send(());
+                    }
+                });
                 pending = returned;
                 thread::sleep(RETRY);
             }
@@ -2427,8 +2445,8 @@ mod tests {
     ///
     /// **What it can still tell apart is narrower than that, and it is measured**: since closing
     /// abandons the reader after [`READER_GIVE_UP`] (**D32**), the close comes back whether or not
-    /// the flag is ever consulted, and with the check deleted this test stays green. The flag's
-    /// effect on this path is what it *costs*, and that is asserted by the test below.
+    /// the flag is ever consulted, and with the check deleted this test stays green. The test below
+    /// instead requires the actual reader thread to end while its output remains undrained.
     ///
     /// The check runs on a separate thread and uses `recv_timeout` to wait for its finish notice,
     /// not a direct `join` of the test's thread: if the hang returns, this test has to fall red
@@ -2474,48 +2492,44 @@ mod tests {
     /// [`deliver`], where the flag is the only thing that can reach it — not the `kill`, not the
     /// end of file.
     ///
-    /// **Measured, and it is the whole reason this exists**: with the flag never consulted, the
-    /// test above — the one written against that very hang — stays green, because the reader is
-    /// abandoned after [`READER_GIVE_UP`] and the close comes back either way. What the flag buys
-    /// is that the thread *ends*, and a thread that ended is not waited for. So the cost is the
-    /// only thing left that tells the two apart, and this asserts it.
+    /// A one-shot probe reports an actual full delivery queue before closing starts. The test
+    /// takes ownership of the real reader handle and joins it after closing the console, so the
+    /// destructor cannot hide a stuck reader by abandoning it. The receiver stays alive and is
+    /// never drained: only the real close signal can end this delivery wait.
     ///
-    /// **The bound is [`READER_GIVE_UP`] and not a literal**, the same choice as the ordinary
-    /// console's: it moves on its own if the constant ever does. Nothing here claims a number is
-    /// fast — only that the reserve for a survivor is not spent when there is none.
+    /// Whole-destructor timing cannot prove that effect: native pseudoconsole cleanup and thread
+    /// scheduling can exceed the reader's abandon reserve even when the reader ended correctly.
     #[test]
-    fn closing_with_the_channel_full_does_not_spend_the_abandon_deadline() {
+    fn closing_with_the_channel_full_ends_reader_without_draining() {
         use std::sync::mpsc;
 
-        let (pty, output) = Pty::spawn("cat", &["/dev/zero"], Size::default()).expect("launch cat");
-
-        // Same wait and same reason as the test above: the channel has to be really full when the
-        // close arrives, which is what parks the reader in the wait for room.
-        thread::sleep(Duration::from_millis(200));
+        let (full, observed_full) = mpsc::sync_channel(1);
+        DELIVERY_FULL_PROBE.with(|probe| *probe.borrow_mut() = Some(full));
+        let (mut pty, output) =
+            Pty::spawn("cat", &["/dev/zero"], Size::default()).expect("launch cat");
+        observed_full
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the actual reader reached a full delivery queue");
+        let reader = pty.reader.take().expect("the console owns its real reader");
 
         let (done, answer) = mpsc::channel();
         let closing = thread::spawn(move || {
-            let started = Instant::now();
             drop(pty);
-            let _ = done.send(started.elapsed());
+            let result = reader.join();
+            let _ = done.send(result);
         });
 
         // Generous, because this is not the assertion: it only keeps the old hang from taking the
         // suite with it instead of turning it red.
-        let took = answer
+        answer
             .recv_timeout(Duration::from_secs(2))
-            .expect("closing a console whose channel is full returned");
-
-        assert!(
-            took < READER_GIVE_UP,
-            "closing with the channel full took {took:?}, the {READER_GIVE_UP:?} this crate \
-             reserves for abandoning a reader: nothing pulled that thread out of its wait for room"
-        );
+            .expect("closing ended the real reader without draining its full output queue")
+            .expect("the real reader did not panic");
 
         let _ = closing.join();
         // **Released only here, and that is load-bearing.** A receiver dropped any earlier makes
         // the delivery fail as disconnected, which ends the thread for a reason that is not the
-        // flag — the close would come back fast and this test would be measuring the disguise.
+        // flag — the reader would join successfully without proving the close signal worked.
         drop(output);
     }
 
