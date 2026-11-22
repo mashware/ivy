@@ -1616,7 +1616,7 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
         window.explorer.navigation[&pane].selected,
         Some(directory.0.join("docs/notes.txt"))
     );
-    // An image opens in the drawer's document tab, pinned to the console Files reads.
+    // An image opens in the drawer's image tab, pinned to the console Files reads.
     // Opening one closed the search; it is opened again to find the image.
     let shot = directory.0.join("docs/shot.png");
     click_icon(&mut window, &ctx, area, view::Icon::Search);
@@ -1628,7 +1628,7 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
     frame(&mut window, &ctx, area, vec![open]);
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Document)
+        Some(crate::sidebar::Tool::Image)
     );
     assert_eq!(crate::viewer::shown_image(&window), Some((pane, shot)));
 }

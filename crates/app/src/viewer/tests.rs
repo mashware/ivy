@@ -123,7 +123,8 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                         &super::drawer::Tabs {
                             changes: None,
                             document: Some("document.md".into()),
-                            markdown: true,
+                            image: None,
+                            active: Some(crate::sidebar::Tool::Document),
                             side_by_side: false,
                         },
                         &super::drawer::Title {
@@ -131,7 +132,7 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                             folder: "docs".into(),
                             unavailable: false,
                         },
-                        None,
+                        crate::viewer::view::Body::Document,
                     ),
                 );
             },
@@ -472,7 +473,8 @@ fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_s
     let tabs = drawer::Tabs {
         changes: Some(Some(3)),
         document: Some("plan.md".into()),
-        markdown: false,
+        image: None,
+        active: Some(crate::sidebar::Tool::Git),
         side_by_side: false,
     };
     let has = |strip: &drawer::Strip, action| strip.places.iter().any(|(a, _)| *a == action);
@@ -502,7 +504,8 @@ fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_s
         "a strip that leaves controls out must say so"
     );
     let reading = drawer::Tabs {
-        markdown: true,
+        image: None,
+        active: Some(crate::sidebar::Tool::Document),
         ..tabs
     };
     let hidden_source = drawer::Strip::framed(
@@ -549,7 +552,8 @@ fn the_file_tab_paints_a_code_document() {
                         &super::drawer::Tabs {
                             changes: None,
                             document: Some("a.rs".into()),
-                            markdown: true,
+                            image: None,
+                            active: Some(crate::sidebar::Tool::Document),
                             side_by_side: false,
                         },
                         &super::drawer::Title {
@@ -557,7 +561,7 @@ fn the_file_tab_paints_a_code_document() {
                             folder: "r".into(),
                             unavailable: false,
                         },
-                        None,
+                        crate::viewer::view::Body::Document,
                     ),
                 );
             },

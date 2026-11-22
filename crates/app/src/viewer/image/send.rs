@@ -1,8 +1,8 @@
 //! Send: a copy of the image with its marks written into the origin console's own folder, then one
 //! line naming the copy, with the notes, typed into that console and submitted with Enter.
 use super::super::delivery::{self, Enter, Refusal};
-use super::flatten;
 use super::tools::Asked;
+use super::{Slot, flatten};
 use crate::viewer::load::{Job, take};
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -37,12 +37,15 @@ impl Drop for Written {
 /// What a click on Send fixed: the image it was for, the console, the copy's name and the line
 /// painted under the image and its notes.
 pub(super) struct Request {
-    /// Which opening of an image this Send belongs to, checked again before the copy starts and
-    /// before the line is typed. The drawer refuses to open another image while marks are unsent,
-    /// which they stay until the Send delivers; this id keeps the line off another image should
-    /// that refusal ever give.
+    /// Which opening of an image this Send belongs to, checked against its console's slot again
+    /// before the copy starts and before the line is typed. That console refuses another image
+    /// while its marks are unsent, which they stay until the Send delivers; this id keeps the line
+    /// off another image should that refusal ever give.
     pub(super) document: u64,
     pub(super) pane: usize,
+    /// The console's name at the click: what another console's greyed Send waits for, and what
+    /// every line this Send tells standard error is prefixed with.
+    pub(super) console: String,
     pub(super) path: PathBuf,
     pub(super) line: String,
 }
@@ -55,8 +58,9 @@ enum Phase {
     /// Clicked; the copy starts on the next frame's input pass.
     Asked(Request),
     Writing(Request, Job<PathBuf>),
-    /// The Enter owed for a line written in the frame named here; it is pressed in a later one.
-    Enter(Enter, u64),
+    /// The Enter owed for a line written in the frame named here by the Send last; it is pressed
+    /// in a later one.
+    Enter(Enter, u64, Request),
 }
 
 #[derive(Default)]
@@ -68,10 +72,16 @@ pub(crate) struct Sending {
     /// it is kept and polled until it ends, and what it wrote is removed then; no other Send
     /// starts meanwhile, as the decoder's abandoned slot keeps a second decode from starting, so
     /// two workers never race for one copy name (#197).
-    parked: Option<(Request, Job<PathBuf>)>,
-    /// What a parked worker's end left to say, until a drawer lays it out: the image it was for
-    /// may be closed by then, and the next one opened clears the notice it would have gone to.
-    pub(super) unshown: Option<String>,
+    parked: Option<Parked>,
+}
+
+/// A cancelled Send's worker, kept until it ends.
+struct Parked {
+    request: Request,
+    job: Job<PathBuf>,
+    /// Whether standard error was already told that its console closed: a console closed with its
+    /// Send in flight is said once, however the worker ends.
+    closed_told: bool,
 }
 
 impl Sending {
@@ -80,6 +90,7 @@ impl Sending {
     }
 
     /// Whether a cancelled Send's worker is still writing its copy.
+    #[cfg(test)]
     pub(super) fn parked(&self) -> bool {
         self.parked.is_some()
     }
@@ -89,11 +100,25 @@ impl Sending {
         self.busy() || self.parked.is_some()
     }
 
-    /// Whether Cancel can still take the Send back: until its line is typed. Offered for the
-    /// whole write rather than after a delay, because a slow disk is not a stuck one and no
-    /// constant tells them apart; the person does.
-    pub(super) fn cancellable(&self) -> bool {
-        self.in_flight().is_some()
+    /// Whether the Send whose line is not typed yet was clicked on the image opened as
+    /// `document`, which freezes that image's marks and no other console's.
+    pub(super) fn busy_for(&self, document: u64) -> bool {
+        self.in_flight().is_some_and(|r| r.document == document)
+    }
+
+    /// What the Send button of the image opened as `document` stands for. The label and whether
+    /// the button answers are both read from this one value, so a button greyed by a Send says why.
+    pub(super) fn button(&self, document: u64) -> Button<'_> {
+        match &self.phase {
+            Phase::Asked(r) | Phase::Writing(r, _) if r.document == document => Button::Sending,
+            Phase::Asked(r) | Phase::Writing(r, _) => Button::Waiting(&r.console),
+            Phase::Enter(_, _, r) if r.document == document => Button::Entering,
+            Phase::Enter(_, _, r) => Button::Waiting(&r.console),
+            Phase::Idle => match &self.parked {
+                Some(parked) => Button::Finishing(&parked.request.console),
+                None => Button::Free,
+            },
+        }
     }
 
     /// Takes up what a click in the notes asked, saying in `notice` what became of it.
@@ -103,7 +128,7 @@ impl Sending {
                 self.ask(request);
                 *notice = None;
             }
-            Some(Asked::Cancel) if self.cancel() => {
+            Some(Asked::Cancel(document)) if self.cancel(|r| r.document == document) => {
                 *notice = Some(if self.parked.is_some() {
                     format!("{CANCELLED} {STILL_FINISHING}.")
                 } else {
@@ -114,22 +139,23 @@ impl Sending {
         }
     }
 
-    /// Takes back the Send whose line is not typed yet, parking its worker if it has one.
-    /// Answers whether there was one.
-    fn cancel(&mut self) -> bool {
-        match std::mem::take(&mut self.phase) {
-            Phase::Asked(_) => true,
-            Phase::Writing(request, job) => {
-                // `start` refuses while a worker is parked, so there is never a second one here.
-                debug_assert!(self.parked.is_none(), "a second worker parked");
-                self.parked = Some((request, job));
-                true
-            }
-            phase => {
-                self.phase = phase;
-                false
-            }
+    /// Takes back the Send whose line is not typed yet, when it is the one `which` names, parking
+    /// its worker if it has one. Answers whether it did: Cancel on one image never takes back
+    /// another's Send.
+    fn cancel(&mut self, which: impl FnOnce(&Request) -> bool) -> bool {
+        if !self.in_flight().is_some_and(which) {
+            return false;
         }
+        if let Phase::Writing(request, job) = std::mem::take(&mut self.phase) {
+            // `start` refuses while a worker is parked, so there is never a second one here.
+            debug_assert!(self.parked.is_none(), "a second worker parked");
+            self.parked = Some(Parked {
+                request,
+                job,
+                closed_told: false,
+            });
+        }
+        true
     }
 
     /// A click on Send, taken up on the next frame. One at a time: a click while another Send is
@@ -147,6 +173,37 @@ impl Sending {
             Phase::Asked(request) | Phase::Writing(request, _) => Some(request),
             _ => None,
         }
+    }
+}
+
+/// What a Send button stands for, given the one Send the window runs at a time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Button<'a> {
+    /// Nothing stands in the way of this image's Send.
+    Free,
+    /// This image's Send is on its way, and Cancel beside it can take it back until its line is
+    /// typed: for the whole write rather than after a delay, because a slow disk is not a stuck
+    /// one and no constant tells them apart; the person does.
+    Sending,
+    /// This image's Send typed its line and owes the Enter: past Cancel, which takes back only a
+    /// line not typed yet.
+    Entering,
+    /// The Send of the console named here is on its way: one runs at a time.
+    Waiting(&'a str),
+    /// The cancelled Send of the console named here still has its worker writing a copy, which
+    /// may take the name this one would write.
+    Finishing(&'a str),
+}
+
+/// The name a Send gives its console wherever another console's Send or standard error reads it:
+/// its label, with the number the app gives every console unless the label already is it, since
+/// two consoles routinely share a title such as the program they run.
+pub(super) fn console_name(origin: &crate::viewer::Source) -> String {
+    let number = format!("Console {}", origin.pane + 1);
+    if origin.label == number {
+        number
+    } else {
+        format!("{} ({number})", origin.label)
     }
 }
 
@@ -239,51 +296,104 @@ fn copy_path(window: &crate::Window, name: usize) -> Result<PathBuf, String> {
 /// Works out, before the drawer paints, where Send would write the shown image's copy. Only an
 /// image with something to send asks the disk: an image merely looked at costs no call per frame.
 pub(crate) fn aim(window: &mut crate::Window) {
+    if !super::super::origin::showing_image(window) {
+        window.image.send.target = None;
+        return;
+    }
     // A Send on its way keeps the name its line showed: the first free name is no longer it once
     // the worker creates the copy, and the line painted must stay the line that will be typed.
-    let shown = window.image.document();
+    let shown = super::focused(window);
     let in_flight = window.image.send.in_flight();
     let kept = in_flight
-        .filter(|r| Some(r.document) == shown)
+        .filter(|r| Some(r.document) == shown.and_then(Slot::document))
         .map(|r| r.path.clone());
     if let Some(path) = kept {
         window.image.send.target = Some(Ok(path));
         return;
     }
-    let target = window
-        .image
-        .origin()
-        .filter(|_| window.image.has_marks())
-        .map(|origin| copy_path(window, origin.pane));
+    let target = shown
+        .filter(|slot| slot.has_marks())
+        .and_then(Slot::origin)
+        .map(|origin| origin.pane)
+        .map(|pane| copy_path(window, pane));
     window.image.send.target = target;
+}
+
+/// The slot of the console `pane`, where everything a Send for it has to say goes.
+fn slot(window: &mut crate::Window, pane: usize) -> Option<&mut Slot> {
+    super::slot_of(&mut window.tabs, pane)
+}
+
+/// Says `said` in the slot of the console `pane`, called `console`. A console that closed took its
+/// slot with it: what is left to say goes to standard error, never under another console's image.
+fn say(window: &mut crate::Window, (pane, console): (usize, &str), said: String) {
+    match slot(window, pane) {
+        Some(slot) => slot.say(said),
+        None => tell(console, &said),
+    }
+}
+
+/// The line standard error is told about a Send for the console `console`: that stream is shared
+/// by every console, so the line names which.
+fn told(console: &str, said: &str) -> String {
+    format!("Send to {console}: {said}")
+}
+
+/// Tells standard error `said` about a Send for the console `console`.
+fn tell(console: &str, said: &str) {
+    let line = told(console, said);
+    #[cfg(test)]
+    TOLD.with(|told| told.borrow_mut().push(line.clone()));
+    eprintln!("{line}");
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What this thread's Sends told standard error, for the tests to read.
+    pub(super) static TOLD: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
-    // No timer while it runs: its worker wakes the window when it ends, and one that never ends
-    // must not wake it for the life of the app.
-    if let Some((_, job)) = &window.image.send.parked
-        && let Some(written) = take(job)
+    // A console that closed took its image, and the Cancel painted under it: its Send is taken
+    // back as Cancel would, so its worker, if it has one, is parked and removes what it wrote, and
+    // every other console's Send says what it waits for. That covers every way a console leaves.
+    let gone = (window.image.send.in_flight())
+        .filter(|r| !window.all_panes().any(|p| p.name == r.pane))
+        .map(|r| (r.pane, r.console.clone()));
+    if let Some((pane, console)) = gone {
+        window.image.send.cancel(|r| r.pane == pane);
+        if let Some(parked) = window.image.send.parked.as_mut() {
+            parked.closed_told = true;
+        }
+        tell(&console, &format!("{}; nothing was sent.", Refusal::Closed));
+    }
+    if let Some(parked) = &window.image.send.parked
+        && let Some(written) = take(&parked.job)
     {
-        let (request, _) = window.image.send.parked.take().expect("a parked worker");
-        forsake(window, &request, written);
+        let parked = window.image.send.parked.take().expect("a parked worker");
+        forsake(window, &parked, written);
     }
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
-        Phase::Enter(enter, at) if frame > at => {
+        Phase::Enter(enter, at, request) if frame > at => {
             if let Err(refusal) = delivery::press(window, enter) {
-                window.image.say(format!(
-                    "The line was typed, but Enter was not pressed: {refusal}."
-                ));
+                let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
+                say(window, (request.pane, &request.console), said);
             }
             Phase::Idle
         }
-        Phase::Asked(request) => start(window, request, ctx).unwrap_or_else(|why| {
-            window.image.say(format!("{why}; nothing was sent."));
-            Phase::Idle
-        }),
+        Phase::Asked(request) => {
+            let to = (request.pane, request.console.clone());
+            start(window, request, ctx).unwrap_or_else(|why| {
+                say(window, (to.0, &to.1), format!("{why}; nothing was sent."));
+                Phase::Idle
+            })
+        }
         phase => phase,
     };
+    // No timer while it runs: its worker wakes the window when it ends, and one that never ends
+    // must not wake it for the life of the app.
     window.image.send.phase = match phase {
         Phase::Writing(request, job) => match take(&job) {
             None => {
@@ -301,23 +411,20 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
 }
 
 /// The worker could not write the copy; its error says whether what it had written of it stayed.
+/// A closed console's worker is left to `forsake`: `poll` cancels its Send before reading it.
 fn failed(window: &mut crate::Window, request: &Request, why: String) {
-    // A console that closed under the worker is the likely cause, but not a certain one: both are
-    // said, so a full disk is not hidden behind a close.
-    let why = if window.all_panes().any(|p| p.name == request.pane) {
-        why
-    } else {
-        format!("{}, and the copy's worker reported: {why}", Refusal::Closed)
-    };
-    let left = forsaken_folder(window, request);
-    window.image.say(format!("{why}; nothing was sent{left}."));
+    debug_assert!(window.all_panes().any(|p| p.name == request.pane));
+    let to = (request.pane, request.console.as_str());
+    say(window, to, format!("{why}; nothing was sent."));
 }
 
 /// A cancelled Send's worker ended: the copy it wrote is removed, and with it the folder of a
 /// console that closed meanwhile. What could not be removed is said, and so is a worker's failure
 /// in its own words, which name a half-written copy it could not remove; a copy it did not write
 /// is not touched, because a refused `create_new` means the file is somebody else's.
-fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBuf, String>) {
+fn forsake(window: &mut crate::Window, parked: &Parked, written: Result<PathBuf, String>) {
+    let request = &parked.request;
+    let closed = !window.all_panes().any(|p| p.name == request.pane);
     let stays = match written {
         Ok(path) => match std::fs::remove_file(&path) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
@@ -326,8 +433,9 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             )),
             _ => None,
         },
-        // As `failed` says it: a console that closed under the worker is the likely cause.
-        Err(why) if !window.all_panes().any(|p| p.name == request.pane) => Some(format!(
+        // A console that closed under the worker is the likely cause, but a failure of its own is
+        // said too; the close is named once, here or where `poll` cancelled the Send.
+        Err(why) if closed && !parked.closed_told => Some(format!(
             "{}, and the cancelled copy's worker reported: {why}",
             Refusal::Closed
         )),
@@ -341,33 +449,44 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             // Send is greyed out while the worker is parked, and the drawer says why: once it
             // ends cleanly, that is no longer true. Send is said ready only where it would be:
             // with marks to send and a folder to write their copy into.
-            let ready = window.image.has_marks()
-                && window
-                    .image
-                    .origin()
-                    .is_some_and(|o| copy_path(window, o.pane).is_ok());
-            let notice = &mut window.image.notice;
-            if notice
-                .as_deref()
-                .is_some_and(|n| n.contains(STILL_FINISHING))
-            {
-                let ready = if ready { "; Send is ready" } else { "" };
-                *notice = Some(format!("{CANCELLED} Its copy is gone{ready}."));
-            }
+            let ready = copy_path(window, request.pane).is_ok();
+            let Some(slot) = slot(window, request.pane) else {
+                return;
+            };
+            let ready = if ready && slot.has_marks() {
+                "; Send is ready"
+            } else {
+                ""
+            };
+            settle(
+                &mut slot.notice,
+                &format!("{CANCELLED} Its copy is gone{ready}."),
+            );
             return;
         }
     };
     // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
-    eprintln!("{said}");
+    tell(&request.console, &said);
     // The worker it waited for has ended: a notice saying so is no longer true, and is not kept.
-    let notice = &mut window.image.notice;
-    if notice
-        .as_deref()
-        .is_some_and(|n| n.contains(STILL_FINISHING))
-    {
-        *notice = Some(CANCELLED.into());
+    if let Some(slot) = slot(window, request.pane) {
+        settle(&mut slot.notice, CANCELLED);
+        join(&mut slot.unshown, said);
     }
-    window.image.send.unshown = Some(said);
+}
+
+/// Puts `now` where `notice` said Send waits for a cancelled Send's worker, which has ended, and
+/// keeps what was added after it: a refusal nobody has read yet.
+fn settle(notice: &mut Option<String>, now: &str) {
+    let Some(text) = notice.as_mut() else {
+        return;
+    };
+    let waited = [
+        format!("{CANCELLED} {STILL_FINISHING}."),
+        format!("{STILL_FINISHING}; nothing was sent."),
+    ];
+    if let Some(waited) = waited.iter().find(|w| text.contains(w.as_str())) {
+        *text = text.replacen(waited.as_str(), now, 1);
+    }
 }
 
 /// Puts `said` after the drawer's `notice` rather than in its place: that one may be a refusal or
@@ -381,9 +500,10 @@ pub(super) fn join(notice: &mut Option<String>, said: String) {
 
 /// A console that closed while its copy was being written could not remove its directory, which
 /// held the copy; once the copy is gone, the directory goes as it would have. Answers what is left
-/// to say about it in the drawer, which is nothing when it went or was already gone. `PanelDir`
-/// told standard error the directory remains when the console closed, so a removal here is told
-/// there too: otherwise that line stays the last word on a directory that is gone.
+/// to say about it, which only a closed console's Send has and so goes to standard error with the
+/// rest of what that Send says; nothing when it was already gone. `PanelDir` told standard error
+/// the directory remains when the console closed, so a removal here is told there too: otherwise
+/// that line stays the last word on a directory that is gone.
 fn forsaken_folder(window: &crate::Window, request: &Request) -> String {
     let Some(folder) = request.path.parent() else {
         return String::new();
@@ -392,13 +512,7 @@ fn forsaken_folder(window: &crate::Window, request: &Request) -> String {
         return String::new();
     }
     match std::fs::remove_dir(folder) {
-        Ok(()) => {
-            eprintln!(
-                "the panel directory {} was removed once its annotated copy was gone",
-                folder.display()
-            );
-            String::new()
-        }
+        Ok(()) => format!(", and its folder {} was removed", folder.display()),
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => format!(
             ", and its folder {} could not be removed: {error}",
             folder.display()
@@ -417,14 +531,17 @@ fn start(
     if window.image.send.parked.is_some() {
         return Err(STILL_FINISHING.into());
     }
-    if window.image.document() != Some(request.document) {
+    let opened = |window: &mut crate::Window| slot(window, request.pane).and_then(|s| s.document());
+    if opened(window) != Some(request.document) {
         return Err(REPLACED.into());
     }
     if copy_path(window, request.pane)? != request.path {
         return Err("The copy's name changed since the line was shown".into());
     }
     delivery::check(window, request.pane, &request.line).map_err(|r| r.to_string())?;
-    let (original, marks) = window.image.to_flatten().ok_or("The image is not loaded")?;
+    let (original, marks) = slot(window, request.pane)
+        .and_then(|slot| slot.to_flatten())
+        .ok_or("The image is not loaded")?;
     let job = flatten::start(original, marks, request.path.clone(), ctx.clone())?;
     Ok(Phase::Writing(request, job))
 }
@@ -437,7 +554,10 @@ fn deliver(
     path: &Path,
     ctx: &egui::Context,
 ) -> Phase {
-    let sent = if window.image.document() == Some(request.document) {
+    // A Send whose console closed is cancelled by `poll` before its worker is read.
+    debug_assert!(window.all_panes().any(|p| p.name == request.pane));
+    let opened = slot(window, request.pane).and_then(|s| s.document());
+    let sent = if opened == Some(request.document) {
         let send = delivery::Send {
             text: &request.line,
             submit: true,
@@ -448,13 +568,13 @@ fn deliver(
     };
     match sent {
         Ok(enter) => {
-            if let Some(pane) = window.all_panes_mut().find(|p| p.name == request.pane) {
-                pane.annotated.record(path.to_owned());
+            if let Some(console) = super::console_of(&mut window.tabs, request.pane) {
+                console.annotated.record(path.to_owned());
+                console.slot.sent();
             }
-            window.image.sent();
             ctx.request_repaint();
             enter.map_or(Phase::Idle, |enter| {
-                Phase::Enter(enter, ctx.cumulative_frame_nr())
+                Phase::Enter(enter, ctx.cumulative_frame_nr(), request)
             })
         }
         Err(why) => {
@@ -465,10 +585,8 @@ fn deliver(
                     path.display()
                 ),
             };
-            let left = forsaken_folder(window, &request);
-            window
-                .image
-                .say(format!("{why}; nothing was sent and {removed}{left}."));
+            let said = format!("{why}; nothing was sent and {removed}.");
+            say(window, (request.pane, &request.console), said);
             Phase::Idle
         }
     }
@@ -480,8 +598,8 @@ const CANCELLED: &str = "Send cancelled; nothing was sent.";
 /// Why Send waits while a cancelled Send's worker is still writing its copy.
 const STILL_FINISHING: &str = "Still finishing the previous copy";
 
-/// Why a Send whose image is no longer the one shown goes nowhere.
-const REPLACED: &str = "The image this was drawn on is no longer the one shown";
+/// Why a Send whose image is no longer in its console's slot goes nowhere.
+const REPLACED: &str = "The image this was drawn on is no longer the one in its console";
 
 #[cfg(test)]
 mod tests {
@@ -519,6 +637,55 @@ mod tests {
         assert_eq!(String::from_utf8(bytes).unwrap(), line);
     }
 
+    /// Cancel takes back only the Send clicked on its own image: one clicked on another opening
+    /// stays on its way, and nothing is said.
+    #[test]
+    fn cancel_on_one_image_never_takes_back_anothers_send() {
+        let mut sending = Sending::default();
+        sending.ask(Request {
+            document: 1,
+            pane: 7,
+            console: "A".into(),
+            path: PathBuf::from("/a/annotated-1.png"),
+            line: "x".into(),
+        });
+        let mut notice = None;
+        sending.answer(Some(Asked::Cancel(2)), &mut notice);
+        assert!(sending.asked(), "another image's Cancel took the Send back");
+        assert_eq!(notice, None);
+        assert_eq!(sending.button(2), Button::Waiting("A"));
+        sending.answer(Some(Asked::Cancel(1)), &mut notice);
+        assert!(!sending.busy());
+        assert_eq!(notice.as_deref(), Some(CANCELLED));
+        // The Enter owed after a line is typed still holds every other image's Send, and its own
+        // image's is past Cancel without waiting for itself.
+        sending.phase = Phase::Enter(
+            Enter(7),
+            0,
+            Request {
+                document: 1,
+                pane: 7,
+                console: "A".into(),
+                path: PathBuf::from("/a/annotated-1.png"),
+                line: "x".into(),
+            },
+        );
+        assert_eq!(sending.button(2), Button::Waiting("A"));
+        assert_eq!(sending.button(1), Button::Entering);
+    }
+
+    /// A console with no name of its own already goes by its number, which is not said twice.
+    #[test]
+    fn a_console_named_by_its_number_is_not_numbered_twice() {
+        let source = |label: &str| crate::viewer::Source {
+            pane: 2,
+            label: label.into(),
+            cwd: None,
+        };
+        assert_eq!(console_name(&source("Console 3")), "Console 3");
+        assert_eq!(console_name(&source("claude")), "claude (Console 3)");
+    }
+
     /// A console that closes takes the copies Send left in its directory, and then the directory
     /// goes as it always does; a file of its program's is left alone and keeps the directory.
     #[test]
@@ -533,7 +700,7 @@ mod tests {
             let copy = folder.join("annotated-1.png");
             std::fs::write(&copy, b"png").unwrap();
             let pane = window.all_panes_mut().find(|p| p.name == *name).unwrap();
-            pane.annotated.record(copy);
+            pane.image.annotated.record(copy);
             pane.panel = Some(dir);
             folders.push(folder);
         }
@@ -564,7 +731,7 @@ mod tests {
             let copy = folder.join("annotated-1.png");
             std::fs::write(&copy, b"png").unwrap();
             let pane = window.all_panes_mut().find(|p| p.name == name).unwrap();
-            pane.annotated.record(copy);
+            pane.image.annotated.record(copy);
             pane.panel = Some(dir);
             folders.push((name, folder));
         }

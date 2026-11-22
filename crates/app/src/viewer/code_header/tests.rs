@@ -129,7 +129,8 @@ impl Drawer {
                         &drawer::Tabs {
                             changes: None,
                             document: Some("file".into()),
-                            markdown: true,
+                            image: None,
+                            active: Some(crate::sidebar::Tool::Document),
                             side_by_side: false,
                         },
                         &drawer::Title {
@@ -137,7 +138,7 @@ impl Drawer {
                             folder: "the source console".into(),
                             unavailable: false,
                         },
-                        None,
+                        crate::viewer::view::Body::Document,
                     ),
                 );
             },

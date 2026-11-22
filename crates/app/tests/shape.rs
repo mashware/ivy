@@ -1481,7 +1481,8 @@ fn the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver() {
     );
 }
 
-/// A pane declares the annotated copies Send wrote **before** the directory they were written into.
+/// A pane declares its image, which holds the annotated copies Send wrote, **before** the directory
+/// they were written into.
 ///
 /// `PanelDir` removes its directory without recursion, on purpose: the content belongs to the
 /// console's program, and a recursive delete would turn a badly built path into data loss. So the
@@ -1504,15 +1505,15 @@ fn the_annotated_copies_are_declared_before_the_directory_that_holds_them() {
         .expect("`struct Pane` has no closing brace at the start of a line")
         .0;
     let copies = fields
-        .find("\n    annotated: viewer::image::send::Written,")
-        .expect("`Pane` no longer declares a field `annotated: viewer::image::send::Written`");
+        .find("\n    image: viewer::image::Console,")
+        .expect("`Pane` no longer declares a field `image: viewer::image::Console`");
     let directory = fields
         .find("\n    panel: Option<PanelDir>,")
         .expect("`Pane` no longer declares a field `panel: Option<PanelDir>`");
     assert!(
         copies < directory,
         "`Pane` declares its directory before the annotated copies in it, so the directory is \
-         dropped first, finds them there and stays. Declare `annotated` first"
+         dropped first, finds them there and stays. Declare `image` first"
     );
 }
 

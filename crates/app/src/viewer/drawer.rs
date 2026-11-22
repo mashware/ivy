@@ -1,7 +1,8 @@
-//! The drawer's top strip: its source, the Changes and document tabs, the diff layout, maximize and
-//! close. Its places are fixed widths so the host can resolve a click before the frame's tiling
+//! The drawer's top strip: its source, the Changes, document and image tabs, the diff layout,
+//! maximize and close. Its places are fixed widths so the host can resolve a click before the frame's tiling
 //! with the same rectangles the painting uses (D72).
 use super::State;
+use crate::sidebar::Tool;
 use crate::theme::Roles;
 use eframe::egui::{self, Color32, FontId, Rect, pos2, vec2};
 
@@ -9,6 +10,7 @@ pub(crate) const HEIGHT: f32 = 36.0;
 const SOURCE: f32 = 220.0;
 const CHANGES: f32 = 124.0;
 const DOCUMENT: f32 = 180.0;
+const IMAGE: f32 = 180.0;
 const SEGMENT: f32 = 92.0;
 const BUTTON: f32 = 24.0;
 /// The comparison picker and the refresh button a Git tab keeps on the strip.
@@ -20,20 +22,24 @@ const TAB_CLOSE: f32 = 16.0;
 pub(crate) enum StripAction {
     Changes,
     Document,
+    Image,
     CloseChanges,
     CloseDocument,
+    CloseImage,
     Unified,
     SideBySide,
     Maximize,
     Close,
 }
 
-/// What the strip shows, read from the two viewer states.
+/// What the strip shows, read from the two viewer states and the image.
 pub(super) struct Tabs {
     /// The Changes tab, with its file count once a diff has loaded.
     pub(super) changes: Option<Option<usize>>,
     pub(super) document: Option<String>,
-    pub(super) markdown: bool,
+    pub(super) image: Option<String>,
+    /// The drawer's tab the strip marks as chosen.
+    pub(super) active: Option<Tool>,
     pub(super) side_by_side: bool,
 }
 
@@ -69,11 +75,12 @@ impl Strip {
         let close = middle(BUTTON, rect.right() - 8.0 - BUTTON);
         let maximize = middle(BUTTON, close.left() - 2.0 - BUTTON);
         let tabs_width = tabs.changes.map_or(0.0, |_| CHANGES)
-            + tabs.document.as_ref().map_or(0.0, |_| DOCUMENT);
+            + tabs.document.as_ref().map_or(0.0, |_| DOCUMENT)
+            + tabs.image.as_ref().map_or(0.0, |_| IMAGE);
         // What gives way first in a narrow drawer: the source's label, then the Git controls, then
         // the diff's layout toggle, which has no other home; the tabs and maximize and close last.
         let available = maximize.left() - 8.0 - rect.left() - 8.0 - 4.0 - tabs_width;
-        let git = !tabs.markdown;
+        let git = tabs.active == Some(Tool::Git);
         let toggle = git && available >= 2.0 * SEGMENT + 2.0 + 8.0;
         let controls = toggle && available >= 2.0 * SEGMENT + 2.0 + 8.0 + CONTROLS + 8.0;
         let right_items = if toggle {
@@ -100,6 +107,12 @@ impl Strip {
             let place = tab(x, DOCUMENT);
             places.push((StripAction::CloseDocument, closer(place)));
             places.push((StripAction::Document, place));
+            x += DOCUMENT;
+        }
+        if tabs.image.is_some() {
+            let place = tab(x, IMAGE);
+            places.push((StripAction::CloseImage, closer(place)));
+            places.push((StripAction::Image, place));
         }
         places.push((StripAction::Maximize, maximize));
         places.push((StripAction::Close, close));
@@ -142,40 +155,46 @@ impl Strip {
 }
 
 pub(super) fn tabs(window: &crate::Window) -> Tabs {
-    let markdown = crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document);
+    let active = crate::sidebar::active(window);
+    let markdown = active == Some(Tool::Document);
     let (shown, other) = (&window.viewer, &window.viewer_other);
     let is_markdown = |state: &State| state.tool_markdown.unwrap_or(true);
     let git = [shown, other].into_iter().find(|s| !is_markdown(s));
     let document = [shown, other].into_iter().find(|s| is_markdown(s));
     Tabs {
-        changes: git.filter(|s| s.origin.is_some() || !markdown).map(|s| {
-            s.loaded
-                .as_ref()
-                .and_then(|loaded| loaded.diff.as_ref())
-                .map(|diff| diff.files.len())
-        }),
-        document: if window.image.shown() {
-            window.image.file_name()
-        } else {
-            document
-                .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .or_else(|| markdown.then(|| "File".to_owned()))
-        },
-        markdown,
+        changes: git
+            .filter(|s| s.origin.is_some() || active == Some(Tool::Git))
+            .map(|s| {
+                s.loaded
+                    .as_ref()
+                    .and_then(|loaded| loaded.diff.as_ref())
+                    .map(|diff| diff.files.len())
+            }),
+        document: document
+            .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .or_else(|| markdown.then(|| "File".to_owned())),
+        image: super::image::focused(window)
+            .and_then(super::image::Slot::file_name)
+            .or_else(|| (active == Some(Tool::Image)).then(|| "Image".to_owned())),
+        active,
         side_by_side: git.is_some_and(|s| s.review.side_by_side()),
     }
 }
 
 fn selected(action: StripAction, tabs: &Tabs, maximized: bool) -> bool {
     match action {
-        StripAction::Changes => !tabs.markdown,
-        StripAction::Document => tabs.markdown,
+        StripAction::Changes => tabs.active == Some(Tool::Git),
+        StripAction::Document => tabs.active == Some(Tool::Document),
+        StripAction::Image => tabs.active == Some(Tool::Image),
         StripAction::Unified => !tabs.side_by_side,
         StripAction::SideBySide => tabs.side_by_side,
         StripAction::Maximize => maximized,
-        StripAction::Close | StripAction::CloseChanges | StripAction::CloseDocument => false,
+        StripAction::Close
+        | StripAction::CloseChanges
+        | StripAction::CloseDocument
+        | StripAction::CloseImage => false,
     }
 }
 
@@ -275,11 +294,13 @@ pub(super) fn paint(
         let chosen = selected(*action, tabs, maximized);
         let hovered = hover.is_some_and(|p| place.contains(p));
         match action {
-            StripAction::Changes | StripAction::Document => {
+            StripAction::Changes | StripAction::Document | StripAction::Image => {
                 let closing = strip.places.iter().any(|(close, at)| {
                     matches!(
                         close,
-                        StripAction::CloseChanges | StripAction::CloseDocument
+                        StripAction::CloseChanges
+                            | StripAction::CloseDocument
+                            | StripAction::CloseImage
                     ) && place.contains(at.center())
                         && hover.is_some_and(|p| at.contains(p))
                 });
@@ -293,7 +314,7 @@ pub(super) fn paint(
                     hovered && !closing,
                 )
             }
-            StripAction::CloseChanges | StripAction::CloseDocument => {
+            StripAction::CloseChanges | StripAction::CloseDocument | StripAction::CloseImage => {
                 if hovered {
                     painter.rect_filled(*place, 4, roles.hover);
                 }
@@ -370,6 +391,7 @@ fn tab(
             "Changes".to_owned(),
             tabs.changes.flatten().map(|n| n.to_string()),
         ),
+        StripAction::Image => (tabs.image.clone().unwrap_or_default(), None),
         _ => (tabs.document.clone().unwrap_or_default(), None),
     };
     let room = place.width() - 20.0 - TAB_CLOSE - 6.0 - count.as_ref().map_or(0.0, |_| 26.0);
@@ -414,12 +436,68 @@ pub(super) fn hint(action: StripAction, maximized: bool) -> &'static str {
     match action {
         StripAction::Changes => "Review changes",
         StripAction::Document => "File",
+        StripAction::Image => "Image",
         StripAction::CloseChanges => "Close the review",
         StripAction::CloseDocument => "Close the document",
+        StripAction::CloseImage => "Close the image",
         StripAction::Unified => "Unified diff",
         StripAction::SideBySide => "Side-by-side diff",
         StripAction::Maximize if maximized => "Restore drawer",
         StripAction::Maximize => "Maximize drawer",
         StripAction::Close => "Close drawer",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::viewer::StripAction;
+
+    /// With an image beside the document and the review, the strip lays out all three tabs, each
+    /// with its close button, at 718 points: the width the review's narrow-strip test holds the
+    /// strip to, chosen as roughly what a 1000-point window with Files open left the drawer.
+    /// Narrower, a strip that leaves any of them out says so.
+    #[test]
+    fn a_strip_with_three_tabs_lays_them_all_out_or_says_it_could_not() {
+        let tabs = Tabs {
+            changes: Some(Some(3)),
+            document: Some("plan.md".into()),
+            image: Some("shot.png".into()),
+            active: Some(crate::sidebar::Tool::Image),
+            side_by_side: false,
+        };
+        let has = |strip: &Strip, action| strip.places.iter().any(|(a, _)| *a == action);
+        let tabs_and_closes = [
+            StripAction::Changes,
+            StripAction::Document,
+            StripAction::Image,
+            StripAction::CloseChanges,
+            StripAction::CloseDocument,
+            StripAction::CloseImage,
+        ];
+        let strip = |width: f32| {
+            Strip::framed(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 370.0)),
+                &tabs,
+            )
+        };
+        let laid = strip(718.0);
+        for action in tabs_and_closes {
+            assert!(has(&laid, action), "{action:?} left out at 718 points");
+        }
+        for width in [300.0, 450.0, 550.0] {
+            let narrow = strip(width);
+            if tabs_and_closes.iter().any(|&action| !has(&narrow, action)) {
+                assert!(
+                    narrow.crowded,
+                    "a tab left out at {width} points was not said"
+                );
+            }
+        }
+        assert!(
+            tabs_and_closes
+                .iter()
+                .any(|&action| !has(&strip(300.0), action))
+        );
     }
 }

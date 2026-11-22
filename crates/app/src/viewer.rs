@@ -13,6 +13,7 @@ mod palette;
 mod review;
 mod view;
 
+use crate::sidebar::Tool;
 pub(crate) use drawer::StripAction;
 use eframe::egui;
 use load::{Job, Kind, Loaded};
@@ -257,10 +258,6 @@ pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
 }
 
 pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
-    if markdown && window.image.shown() {
-        origin::show_image(window);
-        return;
-    }
     select_state(window, markdown);
     let tool = if markdown {
         crate::sidebar::Tool::Document
@@ -320,6 +317,7 @@ pub(crate) fn apply_strip_action(
     match action {
         StripAction::Changes => activate(window, false),
         StripAction::Document => activate(window, true),
+        StripAction::Image => origin::show_image(window),
         StripAction::Unified | StripAction::SideBySide => {
             for state in [&mut window.viewer, &mut window.viewer_other] {
                 if state.tool_markdown == Some(false) {
@@ -329,55 +327,13 @@ pub(crate) fn apply_strip_action(
                 }
             }
         }
-        StripAction::CloseChanges => close_tab(window, false, ctx),
-        StripAction::CloseDocument => close_tab(window, true, ctx),
+        StripAction::CloseChanges => origin::close_tab(window, Tool::Git, ctx),
+        StripAction::CloseDocument => origin::close_tab(window, Tool::Document, ctx),
+        StripAction::CloseImage => origin::close_tab(window, Tool::Image, ctx),
         StripAction::Maximize => crate::sidebar::toggle_maximize(window),
         StripAction::Close => crate::sidebar::close(window, ctx),
     }
     ctx.request_repaint();
-}
-
-/// Close one tab of the drawer: its view forgets what it showed, the other tab takes the drawer,
-/// and with no other tab the drawer closes. A review with unsent comments is kept and says why.
-fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
-    let other_shown = {
-        let tabs = drawer::tabs(window);
-        if markdown {
-            tabs.changes.is_some()
-        } else {
-            tabs.document.is_some()
-        }
-    };
-    let state = if window.viewer.tool_markdown.unwrap_or(true) == markdown {
-        &mut window.viewer
-    } else {
-        &mut window.viewer_other
-    };
-    if state.review.has_comments() {
-        state.message = "Send or clear the review comments before closing the review.".into();
-        return;
-    }
-    if markdown {
-        if origin::keeps_marks(window) {
-            return;
-        }
-        origin::replace_document(window, origin::Keep::Neither);
-    } else {
-        origin::forget(state);
-    }
-    let active = crate::sidebar::active(window);
-    let closed = if markdown {
-        crate::sidebar::Tool::Document
-    } else {
-        crate::sidebar::Tool::Git
-    };
-    if active == Some(closed) {
-        if other_shown {
-            activate(window, !markdown);
-        } else {
-            crate::sidebar::close(window, ctx);
-        }
-    }
 }
 
 /// Leave the keys to Files, which has just opened beside the drawer.
@@ -442,8 +398,8 @@ pub(crate) fn before_keys(
             return false;
         }
         let markdown = match crate::sidebar::active(window) {
-            Some(crate::sidebar::Tool::Document) => true,
-            Some(crate::sidebar::Tool::Git) => false,
+            Some(Tool::Document | Tool::Image) => true,
+            Some(Tool::Git) => false,
             _ => return false,
         };
         select_state(window, markdown);
@@ -535,8 +491,8 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         return;
     }
     let markdown = match crate::sidebar::active(window) {
-        Some(crate::sidebar::Tool::Document) => true,
-        Some(crate::sidebar::Tool::Git) => false,
+        Some(Tool::Document | Tool::Image) => true,
+        Some(Tool::Git) => false,
         _ => return,
     };
     select_state(window, markdown);
@@ -556,7 +512,9 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         window.viewer.refresh_at = Some(Instant::now());
     }
     if image {
-        window.image.poll(&ctx);
+        if let Some(slot) = image::focused_mut(&mut window.tabs, window.active) {
+            slot.poll(&ctx);
+        }
     } else {
         if window.viewer.requested.is_none()
             && !window.viewer.path.is_empty()
@@ -566,8 +524,11 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         }
         window.viewer.poll(&ctx);
     }
-    let unavailable = origin::shown_origin(window)
-        .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
+    // An image tab with nothing to show is about the focused console, which is there.
+    let empty = image && image::focused(window).is_none_or(|slot| !slot.shown());
+    let unavailable = !empty
+        && origin::shown_origin(window)
+            .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
     let filtered = ctx.input(|input| input.events.clone());
     if let Some(events) = window.viewer.events.take() {
         ctx.input_mut(|input| input.events = events);
@@ -582,7 +543,18 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         window.theme,
         unavailable,
         window.sidebar.maximized,
-        (&tabs, &title, image.then_some(&mut window.image)),
+        (
+            &tabs,
+            &title,
+            if image {
+                view::Body::Image(
+                    image::focused_mut(&mut window.tabs, window.active)
+                        .map(|slot| (&mut window.image, slot)),
+                )
+            } else {
+                view::Body::Document
+            },
+        ),
     );
     ctx.input_mut(|input| input.events = filtered);
     code_header::reveal_in_files(window);
@@ -593,6 +565,22 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
 /// The strip's name for what the drawer shows: the source console's project, or the folder it
 /// reads; the terminal's own title says nothing a person needs here.
 fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
+    // An empty image tab names the focused console, which is there by definition.
+    if let Some(pane) = origin::empty_image_tab(window) {
+        return drawer::Title {
+            project: pane
+                .project
+                .as_ref()
+                .map(|badge| (badge.name.clone(), badge.ink)),
+            folder: pane
+                .program
+                .as_ref()
+                .map(|(folder, _)| folder.clone())
+                .filter(|folder| !folder.is_empty())
+                .unwrap_or_else(|| crate::pane_view::display_label(pane).into_owned()),
+            unavailable: false,
+        };
+    }
     let origin = origin::shown_origin(window);
     let project = origin
         .and_then(|origin| window.all_panes().find(|pane| pane.name == origin.pane))
@@ -621,7 +609,8 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
 pub(crate) use code_header::document_relative_path;
 pub(crate) use image::is_image;
 pub(crate) use origin::{
-    NotOpened, kept_document, open_diff_for_pane, open_document_target, open_image_target,
+    KEPT_DOCUMENT, NotOpened, open_diff_for_pane, open_document_target, open_image_target,
+    show_image,
 };
 
 #[cfg(test)]
@@ -634,11 +623,11 @@ mod tests;
 pub(crate) fn hide(window: &mut crate::Window) {
     suspend(window);
 }
-/// The image the document tab shows, with the console it is pinned to.
+/// The image the image tab shows, the focused console's, with the console it is pinned to.
 #[cfg(test)]
 pub(crate) fn shown_image(window: &crate::Window) -> Option<(usize, PathBuf)> {
-    let image = &window.image;
-    Some((image.origin()?.pane, image.path()?.to_owned()))
+    let slot = image::focused(window)?;
+    Some((slot.origin()?.pane, slot.path()?.to_owned()))
 }
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {

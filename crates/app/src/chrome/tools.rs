@@ -50,6 +50,7 @@ pub(super) fn show(
             Tool::Files => window.sidebar.last_files.is_none(),
             _ => window.sidebar.last_dock.is_none(),
         };
+        let unseen = unseen(tool, on, crate::sidebar::active(window), suppressed);
         let (clicked, response) = if tool == Tool::Board {
             labelled(ui, rect, &hint, (hover, frame), fg, on)
         } else {
@@ -57,14 +58,8 @@ pub(super) fn show(
         };
         if let Some(response) = response {
             painted.push((tool, rect));
-            if on && suppressed {
-                response.on_hover_text(match tool {
-                    Tool::Files => "Widen the window to show Files beside the consoles.".to_owned(),
-                    tool => format!(
-                        "Make the window taller to show {} below the consoles.",
-                        tool.label()
-                    ),
-                });
+            if let Some(unseen) = unseen {
+                response.on_hover_text(unseen);
             }
         }
         if clicked {
@@ -119,9 +114,43 @@ fn labelled(
     (response.clicked(), Some(response))
 }
 
+/// What a door says on hover when what it opened cannot be shown: `on` is whether it is lit, and
+/// `active` the drawer's tab. The File door opened the drawer the image tab is in, so it says so
+/// for that tab too, though it is not lit for it.
+fn unseen(tool: Tool, on: bool, active: Option<Tool>, suppressed: bool) -> Option<String> {
+    let opened = on || (tool == Tool::Document && active == Some(Tool::Image));
+    (opened && suppressed).then(|| match tool {
+        Tool::Files => "Widen the window to show Files beside the consoles.".to_owned(),
+        tool => format!(
+            "Make the window taller to show {} below the consoles.",
+            tool.label()
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A drawer too short to show says so on the File door whether it shows the document or the
+    /// image, and says nothing when it shows, or when it holds another tool's tab.
+    #[test]
+    fn the_file_door_says_why_a_drawer_on_its_image_tab_is_not_shown() {
+        let taller = Some("Make the window taller to show File below the consoles.".to_owned());
+        assert_eq!(
+            unseen(Tool::Document, true, Some(Tool::Document), true),
+            taller
+        );
+        assert_eq!(
+            unseen(Tool::Document, false, Some(Tool::Image), true),
+            taller
+        );
+        assert_eq!(
+            unseen(Tool::Document, false, Some(Tool::Image), false),
+            None
+        );
+        assert_eq!(unseen(Tool::Document, false, Some(Tool::Git), true), None);
+    }
 
     /// Each title-bar door finds its tool by its hint, which is how it gets its icon: «File» must
     /// not be read as «Files», nor the other way round.

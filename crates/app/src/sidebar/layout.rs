@@ -136,7 +136,8 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
         height: tree_floor(root, leaf.y, Orientation::Rows),
     };
     let files = window.explorer.visible().then_some(state.files_width);
-    let drawer = matches!(state.active, Some(Tool::Document | Tool::Git)).then_some(state.height);
+    let drawer = matches!(state.active, Some(Tool::Document | Tool::Image | Tool::Git))
+        .then_some(state.height);
     // A surface needs its minimum beside the consoles' floor (`layout`); past that, tiling clamps
     // degenerate weights, so the real allocations decide: Files steps aside when it is what
     // leaves a console under its width floor, the drawer when it is what leaves one under its

@@ -346,8 +346,9 @@ crate::windows_unix_omission!(
     "unix-only: verifies a real shell process and Linux repository state after a viewer interaction"
 );
 
-/// Ctrl+click on a screenshot path a console printed opens it in the drawer, pinned to that
-/// console rather than to the focused one, without revealing it in Files.
+/// Ctrl+click on a screenshot path a console printed opens it in the drawer, in that console's
+/// slot, and focuses it, without revealing it in Files; another console's stuck read holds it up
+/// in nothing.
 #[test]
 fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
     let mut nonce = [0; 8];
@@ -416,40 +417,45 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
             );
         }
     };
-    // A decode that has not finished refuses the click, and the drawer says which file it reads.
-    let other = path.join("other.png");
-    open_image_target(&mut window, names[0], other.clone()).unwrap();
-    let stalled = window.image.stall();
+    // A read stuck in another console holds up only that console: the click focuses the console
+    // it was printed in and opens the image there, which decodes.
+    open_image_target(&mut window, names[0], path.join("other.png")).unwrap();
+    let stalled = super::image::focused_mut(&mut window.tabs, window.active)
+        .unwrap()
+        .stall();
+    open_image_target(&mut window, names[0], path.join("third.png")).unwrap();
     frame(&mut window, &ctx, vec![]);
+    assert_eq!(window.active().focus, names[0]);
     control_click(&mut window);
-    assert_eq!(shown_image(&window), Some((names[1], shot.clone())));
-    let still = format!("Still reading {}…", other.display());
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !frame(&mut window, &ctx, vec![])
-        .iter()
-        .any(|(text, _)| *text == still)
-    {
-        assert!(Instant::now() < deadline, "{:?}", window.image.message());
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    drop(stalled);
-    control_click(&mut window);
+    assert_eq!(window.active().focus, names[1]);
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Document)
+        Some(crate::sidebar::Tool::Image)
     );
     assert_eq!(shown_image(&window), Some((names[1], shot)));
+    assert!(window.viewer.keyboard, "the drawer does not hold the keys");
     assert!(!crate::sidebar::files_visible(&window));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    assert_eq!(
+        super::image::slot_of(&mut window.tabs, names[0])
+            .and_then(|slot| slot.path())
+            .map(ToOwned::to_owned),
+        Some(path.join("third.png")),
+        "the click touched the other console's image"
+    );
+    fn shown(window: &crate::Window) -> &super::image::Slot {
+        super::image::focused(window).unwrap()
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !frame(&mut window, &ctx, vec![])
         .iter()
         .any(|(text, _)| text == "Screen Shot.PNG")
-        || window.image.message().is_none() && !window.image.loaded()
+        || shown(&window).message().is_none() && !shown(&window).loaded()
     {
-        assert!(Instant::now() < deadline, "{:?}", window.image.message());
+        assert!(Instant::now() < deadline, "{:?}", shown(&window).message());
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(window.image.message(), None);
+    assert_eq!(shown(&window).message(), None);
+    drop(stalled);
 }
 
 #[cfg(target_os = "linux")]

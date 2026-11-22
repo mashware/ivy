@@ -9079,8 +9079,8 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026 and for
-#178 on 20 November 2026.**
+**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026, for
+#178 on 20 November 2026 and for #198 on 22 November 2026.**
 Markdown and Git changes open in a transient surface beside the consoles, together with Files and
 the global Board; since #93 that surface is Files on the left and a drawer below (see the last
 section). The
@@ -9302,7 +9302,8 @@ relative path is joined onto that console's directory, as its review is, and ref
 only when the console has none. Files says «Only Markdown, PNG and JPEG files open in the drawer.»
 for anything else.
 
-- **One document tab, as before.** The image and a Markdown file replace each other there: opening
+- **One document tab, as before.** *(Superseded by «The image leaves the document tab», #198.)*
+  The image and a Markdown file replace each other there: opening
   one forgets the other, and closing the tab forgets both, through one replacement every entry
   uses. The image is pinned to the console it was printed in, not to the focused one, and the strip
   shows that console's project or folder.
@@ -9310,7 +9311,8 @@ for anything else.
   never again: switching to Changes and back, or closing and reopening the drawer, shows the same
   picture, and a program that overwrites the same screenshot name does not change what is on
   screen. Markdown's one-second refresh does not apply.
-- **One read at a time.** A read stuck on an unresponsive filesystem cannot be cancelled, so
+- **One read at a time.** *(Superseded in part by «The image leaves the document tab», #198: the
+  bound is per open console, and a closed console's stuck read is let go.)* A read stuck on an unresponsive filesystem cannot be cancelled, so
   replacing or closing an image whose decode has not finished keeps its handle, and another open
   while it runs is refused with «Still reading <path>…» in the drawer. Repeated opens cannot pile
   up readers, the rule the Markdown state already keeps. Errors name the path they are about.
@@ -9380,7 +9382,7 @@ for anything else.
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
 - **Marked and sent (21 November 2026).** A plain left drag draws on the image, and Send hands a
   copy with the marks to the console the image came from: **D113**. Marks not yet sent keep the
-  image in the document tab, as unsent review comments keep their review.
+  image in its console's slot, as unsent review comments keep their review.
 
 Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
 forces the Markdown kind and a kind change clears that state, which would erase the image on the
@@ -9395,6 +9397,33 @@ pointer meant laying blank space before and after the image, and that broke it f
 trailing blank left stale when the drawer grew, scroll-bar drags remapped against content that
 shrank every frame so the thumb ran ahead and jumped, guessing where egui puts its bars to keep a
 pan off them, and its own drag-to-scroll joining the pan after a touch.
+
+### The image leaves the document tab — 22 November 2026, #198
+
+Images get a drawer tab of their own, **Image**; the document tab is Markdown or code only again,
+single and shared, and opening one no longer forgets the other. Each console holds one image with
+its zoom, its marks and its notes, kept on the console and dropped with it, unsent marks included,
+with no dialog. The Image tab shows the focused console's image and follows focus: clicking another
+console shows that console's image, and coming back shows the first one as it was left. On a
+console with none the tab stays selected and says so, since closing or switching the drawer on a
+focus click would resize every console. A Ctrl+click on an image path, or Files activating one,
+fills the clicked console's slot and moves the focus to that console. Unsent marks refuse a new
+image in their own console only; they no longer refuse opening Markdown. Decoding stays lazy and
+once per opening; one live and one abandoned read are bounded per open console, so a stuck read
+never refuses another console's image. A closed console's stuck read is let go with its slot,
+unlike a replaced one, which its slot keeps: its thread finishes unwatched and nothing waits on it,
+so a hung mount costs one reader per console opened and closed on it. A pan latched on one console's image is forgotten when the drawer paints another's. Send
+addresses the slot of the console it was clicked for, never the focused one: its line, its «Sent
+to» and a cancelled worker's last word all go there, and what it has to say about a console that
+closed meanwhile, whose slot went with it, goes to standard error only. No title-bar button opens
+the Image tab: the File door opens the drawer, and the tab is in its strip while the focused
+console holds an image or the tab is the one shown.
+
+Discarded: keeping the image in the document tab with a per-console «front» flag (the tab flipped
+between an image and a Markdown file not that console's); per-console Markdown (nobody asked); a
+map of images on the window (a prune on every way a console leaves; the field needs none); showing
+a closed console's last word in the focused console's slot, which would put one console's news
+under another's image.
 
 ## D73 — Connection help is global and reports observed publication
 
@@ -11560,33 +11589,60 @@ before choosing to send, the D42 precedent.
 window's input pass, before the copy is started — the image replaced, the console gone, no
 `PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
 keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
-or an earlier one freed) — and a refused Send writes no file. **From the click to the Enter the
-marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
+or an earlier one freed) — and a refused Send writes no file. **From the click to the typed line
+the marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
 Send clears them, so an edit made meanwhile would be wiped unsent; a Ctrl+Z in the very pass of the
 click is refused too, and so is a second Send. **Until the line is typed, a Cancel beside «Sending…»
 takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
 already writing is parked — a write cannot be interrupted — and polled from the window's input pass
 until it ends, when its copy is removed, and with it the folder of a console that closed meanwhile.
-While a worker is parked, Send is greyed out and reads «Still finishing the previous copy…» — on the
-button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
-before any other check, so two workers never race for one name; the decoder's abandoned read is the
-same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
-goes to standard error as well, and waits for the next drawer that lays the notes out, because the
-image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+While a worker is parked, Send is greyed out and reads «Still finishing the copy for <console>…» —
+on the button, because any other notice can replace Cancel's — and a Send asked anyway is refused
+with «Still finishing the previous copy» before any other check, so two workers never race for one
+name; the decoder's abandoned read is the same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
+goes to standard error as well, and waits in its own console's slot until the drawer lays that
+console's image out, or its Image tab with no image, because the image it was for may be closed by
+then; there it joins the notice shown rather than replacing it,
 which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
 and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that
-frame, whichever tab is shown and whether the drawer is open, **if that image is still the one
-shown**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open another
-image while a Send is busy; the Send still carries which opening of an image it belongs to, as a
-guard should that refusal ever give. Each refusal says why and keeps the marks; a delivered Send
+frame, whichever tab is shown and whether the drawer is open, **if that opening is still in its
+console's slot**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open
+another image in that console while its Send is busy, and other consoles' slots are not affected
+(#198); the Send still carries which opening of an image it belongs to, as a guard should that
+refusal ever give. Each refusal for a console still open says why under its image and keeps the
+marks; a delivered Send
 clears them. A failure says everything it knows: a write that fails after its console closed names
-both, and a half-written copy that could not be removed is named with why.
+both, the close said once whether the console closed before or after Cancel, and a half-written
+copy that could not be removed is named with why. Since #198 a console
+that closes takes its image, marks and notice with it, so what a Send for it still has to say — a
+refusal, a failed write, a cancelled worker's last word — goes to standard error only, never under
+another console's image.
+
+**One Send runs at a time for the whole window, and a greyed Send says whose (#198).** While
+another console's Send is between its click and its Enter, this console's button reads «Waiting for
+the Send to <console>…»: the label and whether the button answers are read from one value, so no
+button greyed by a Send reads «Send to … and press Enter»; one greyed for want of a folder keeps
+that label and says why in the line under it. The Send's own image, once its line is typed and the
+Enter is owed, reads «Sending…» with no Cancel beside it: nothing is left that Cancel could take
+back, and it does not wait for itself. **A console that closes with its Send in flight
+takes that Send back as Cancel would**, on the next input pass and whichever way it closed — the
+console, its tab, a split or a retirement: its Cancel went with its image, and otherwise every
+console's Send stayed greyed, with no Cancel anywhere, until the worker ended. Its worker is parked
+as Cancel parks one, so the other consoles' Send reads «Still finishing the copy for <console>…»
+until it ends: the rule of one parked worker is kept. Every line a Send tells standard error names
+its console — «Send to <console>: …» — because that stream is shared by every console, and so do
+«Waiting for…» and «Still finishing…»: by its label, followed by «(Console <n>)», the number the
+app gives every console, unless the label already is that number, because two consoles routinely
+share a title such as the agent they run. Discarded:
+cancelling in each place a console is closed, which the next way of closing one would miss; and
+letting the other consoles' Send start while a closed console's worker is still parked, which needs
+more than one parked worker and is a decision of its own.
 
 **The copies are the app's to remove.** A console records the copies delivered to it in a field
-declared before its `PanelDir`, so when its `Pane` is dropped — the console, its tab or the window
+declared before its `PanelDir` (since #198 the console's image, `image: viewer::image::Console`), so when its `Pane` is dropped — the console, its tab or the window
 closed — they are removed first, by the paths recorded and with `remove_file`; then `PanelDir`
 finds its directory empty and removes it as it always has. A process that is killed drops nothing
 and leaves both. A file the console's program left there is not touched and keeps the directory. A

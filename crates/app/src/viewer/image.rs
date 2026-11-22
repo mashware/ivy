@@ -1,6 +1,7 @@
-//! The drawer's image: a PNG or JPEG a console printed, or Files opened, shown in the document tab
-//! when it is the last document opened (D72). It is decoded once per open and never refreshed, so
-//! a program that overwrites the same screenshot name does not change what is on screen.
+//! The drawer's image: a PNG or JPEG a console printed, or Files opened, one per console and shown
+//! in the drawer's image tab while that console has the focus (D72). It is decoded once per open
+//! and never refreshed, so a program that overwrites the same screenshot name does not change what
+//! is on screen.
 use super::Source;
 use super::load::{Job, Picture};
 use eframe::egui;
@@ -25,19 +26,38 @@ pub(crate) fn is_image(path: &Path) -> bool {
         })
 }
 
+/// What a console holds of images: its own, and the copies its Sends wrote into its folder.
 #[derive(Default)]
-pub(crate) struct Viewer {
+pub(crate) struct Console {
+    pub(super) slot: Slot,
+    pub(super) annotated: send::Written,
+}
+
+/// One console's image, with its marks and what was said about them.
+#[derive(Default)]
+pub(crate) struct Slot {
     document: Option<Opened>,
     /// A decode whose image was replaced or closed before it finished. A read stuck on an
     /// unresponsive filesystem cannot be cancelled, so its handle is kept and no other decode
-    /// starts until it ends: repeated opens cannot pile up readers.
+    /// starts in this slot until it ends: repeated opens in one console cannot pile up readers, and
+    /// a stuck read holds up only its own console. A closed console lets its read go with the slot.
     abandoned: Option<(PathBuf, Job<Picture>)>,
-    /// The button whose drag pans the image, latched when it went down.
-    panning: Option<egui::PointerButton>,
-    /// The frame the image was last painted in.
-    painted: Option<u64>,
     /// Why the last thing asked of the marks was refused, or what became of them.
     notice: Option<String>,
+    /// What a cancelled Send's worker left to say when it ended, held for the drawer to lay out
+    /// this console's image or its empty Image tab: the image may be closed by then, and the next
+    /// one opened clears the notice it would have gone to.
+    unshown: Option<String>,
+}
+
+/// What the drawer keeps across consoles: one pointer, one Send at a time, one count of openings.
+#[derive(Default)]
+pub(crate) struct Viewer {
+    /// The button whose drag pans the image, latched when it went down.
+    panning: Option<egui::PointerButton>,
+    /// The frame an image was last painted in, and which opening it was: a pan or a stroke begun
+    /// on one console's image must not carry over to another's.
+    painted: Option<(u64, u64)>,
     send: send::Sending,
     /// How many images were opened, which names each opening: see [`send::Request::document`].
     opened: u64,
@@ -75,19 +95,37 @@ enum Gpu {
 }
 
 impl Viewer {
-    /// Replaces whatever image was shown with `path`, read from `origin`'s console. A relative
-    /// path is one whose console's directory is unknown: it is refused and says so.
-    pub(super) fn open(&mut self, origin: Source, path: PathBuf) {
+    /// Replaces the image `slot` held with `path`, read from `origin`'s console.
+    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf) {
+        self.panning = None;
+        self.opened += 1;
+        slot.open(self.opened, origin, path);
+    }
+
+    /// Whether a Send is between its click and its Enter.
+    #[cfg(test)]
+    pub(super) fn sending(&self) -> bool {
+        self.send.busy()
+    }
+
+    /// Whether Send has work for the input pass: a Send on its way, or a cancelled one's worker.
+    pub(super) fn send_pending(&self) -> bool {
+        self.send.pending()
+    }
+}
+
+impl Slot {
+    /// Replaces the image with `path`, opened as `id`. A relative path is one whose console's
+    /// directory is unknown: it is refused and says so.
+    fn open(&mut self, id: u64, origin: Source, path: PathBuf) {
         self.clear();
-        self.notice = None;
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
         } else {
             Load::Pending
         };
-        self.opened += 1;
         self.document = Some(Opened {
-            id: self.opened,
+            id,
             origin,
             path,
             load,
@@ -98,9 +136,9 @@ impl Viewer {
         });
     }
 
-    /// Forgets the image, keeping an unfinished decode's handle.
+    /// Forgets the image and what was said about it, keeping an unfinished decode's handle.
     pub(super) fn clear(&mut self) {
-        self.panning = None;
+        self.notice = None;
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -111,7 +149,21 @@ impl Viewer {
         }
     }
 
-    /// Whether the document tab paints this image.
+    /// What a slot with no image has to say: its notice, with what a cancelled Send's worker left
+    /// to say taken into it, since the empty tab is where this console's word is read.
+    pub(super) fn word(&mut self) -> Option<&str> {
+        self.hear();
+        self.notice.as_deref()
+    }
+
+    /// Takes what a cancelled Send's worker left to say into the notice, where it is read.
+    fn hear(&mut self) {
+        if let Some(said) = self.unshown.take() {
+            send::join(&mut self.notice, said);
+        }
+    }
+
+    /// Whether there is an image to paint.
     pub(super) fn shown(&self) -> bool {
         self.document.is_some()
     }
@@ -125,15 +177,16 @@ impl Viewer {
         self.notice = Some(notice.into());
     }
 
-    /// Whether a Send is between its click and its Enter.
-    #[cfg(test)]
-    pub(super) fn sending(&self) -> bool {
-        self.send.busy()
-    }
-
-    /// Whether Send has work for the input pass: a Send on its way, or a cancelled one's worker.
-    pub(super) fn send_pending(&self) -> bool {
-        self.send.pending()
+    /// Says `said` after the notice rather than in its place, unless it already says it: the
+    /// notice may be a failed Send nobody has read yet. A delivered Send's word is no such thing,
+    /// and gives way.
+    pub(super) fn add(&mut self, said: &str) {
+        if self.notice.is_some() && self.notice == self.delivered() {
+            self.notice = None;
+        }
+        if !self.notice.as_deref().is_some_and(|n| n.contains(said)) {
+            send::join(&mut self.notice, said.to_owned());
+        }
     }
 
     /// What the copy is drawn from: the original at full resolution and the marks as they are.
@@ -142,17 +195,23 @@ impl Viewer {
         Some((Arc::clone(self.original()?), marks))
     }
 
-    /// Which opening of an image is shown.
+    /// Which opening this slot holds.
     fn document(&self) -> Option<u64> {
         Some(self.document.as_ref()?.id)
     }
 
     /// The marks reached their console: they are forgotten, and the drawer says where they went.
     fn sent(&mut self) {
-        if let Some(document) = self.document.as_mut() {
-            document.marks.clear();
-            self.notice = Some(format!("Sent to {}.", document.origin.label));
-        }
+        let Some(document) = self.document.as_mut() else {
+            return;
+        };
+        document.marks.clear();
+        self.notice = self.delivered();
+    }
+
+    /// What the drawer says once this image's marks reached its console.
+    fn delivered(&self) -> Option<String> {
+        Some(format!("Sent to {}.", self.document.as_ref()?.origin.label))
     }
 
     pub(super) fn origin(&self) -> Option<&Source> {
@@ -232,21 +291,47 @@ impl Viewer {
         }
     }
 
-    /// Paints the image over the drawer's body, fitted to its width until the person zooms, and
-    /// moved by the wheel or a drag that pans it; there are no scroll bars. A plain left drag
+    #[cfg(test)]
+    pub(crate) fn loaded(&self) -> bool {
+        self.original().is_some()
+    }
+
+    /// Makes the image's decode one that has not finished, for as long as the returned sender
+    /// lives.
+    #[cfg(test)]
+    pub(crate) fn stall(&mut self) -> std::sync::mpsc::Sender<Result<Picture, String>> {
+        let (job, sender) = super::load::stalled();
+        self.document.as_mut().unwrap().load = Load::Decoding(job);
+        sender
+    }
+}
+
+impl Viewer {
+    /// Paints `slot`'s image over the drawer's body, fitted to its width until the person zooms,
+    /// and moved by the wheel or a drag that pans it; there are no scroll bars. A plain left drag
     /// draws with the chosen tool. `space` is whether Space is held and the drawer's, which is when
     /// Space + left drag pans.
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, space: bool) {
+    pub(super) fn show(
+        &mut self,
+        slot: &mut Slot,
+        ui: &mut egui::Ui,
+        theme: crate::theme::Theme,
+        space: bool,
+    ) {
         let frame = ui.ctx().cumulative_frame_nr();
-        // A drag whose release came while the image was not painted must not resume on return.
-        if self.painted.is_none_or(|last| frame > last + 1) {
+        // A drag whose release came while this image was not painted must not resume on return.
+        let opening = slot.document();
+        if self
+            .painted
+            .is_none_or(|(last, painted)| frame > last + 1 || Some(painted) != opening)
+        {
             self.panning = None;
-            if let Some(document) = self.document.as_mut() {
+            if let Some(document) = slot.document.as_mut() {
                 document.marks.cancel();
             }
         }
-        let Some(size) = self.size() else {
-            let message = self.message();
+        let Some(size) = slot.size() else {
+            let message = slot.message();
             egui::Frame::new()
                 .inner_margin(14)
                 .show(ui, |ui| match message {
@@ -262,12 +347,10 @@ impl Viewer {
                 });
             return;
         };
-        // Taken up only by a frame that lays the column out, where the notice is painted.
-        if let Some(said) = self.send.unshown.take() {
-            send::join(&mut self.notice, said);
-        }
+        // Taken up where the notice is painted, never by a frame that only says the image loads.
+        slot.hear();
         let panning = &mut self.panning;
-        let notice = self.notice.as_deref();
+        let notice = slot.notice.as_deref();
         let sending = &mut self.send;
         let Some(Opened {
             id,
@@ -278,7 +361,7 @@ impl Viewer {
             view: seen,
             marks,
             ..
-        }) = self.document.as_mut()
+        }) = slot.document.as_mut()
         else {
             return;
         };
@@ -298,31 +381,32 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send =
-            something_to_send.then(|| (origin.label.as_str(), sending.busy(), sending.parked()));
+        let button = sending.button(*id);
+        let send = something_to_send.then_some((origin.label.as_str(), button));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
         let roles = crate::ui::style::roles(ui.ctx(), &theme);
         // While a Send is on its way the marks stay as the click fixed them: the copy is drawn from
         // them a frame later, and a delivered Send clears them.
-        tools::toolbar(ui, layout.bar, marks, sending.busy(), &roles);
+        tools::toolbar(ui, layout.bar, marks, sending.busy_for(*id), &roles);
         let panel = tools::Panel {
             fixed,
             roles,
             refused,
             document: *id,
             origin,
+            button,
             sending,
         };
-        sending.answer(tools::notes(ui, &layout, marks, panel), &mut self.notice);
+        sending.answer(tools::notes(ui, &layout, marks, panel), &mut slot.notice);
         // Undo, Clear or a note's first or last letter changed whether there is something to
         // send after the split was made: the next frame lays the button and its line out again.
         if marks.is_empty() == something_to_send {
             ui.ctx().request_repaint();
         }
         // Read again after the notes: a click on Send in this frame freezes what follows it.
-        let frozen = sending.busy();
+        let frozen = sending.busy_for(*id);
         // Ctrl+Z reaches here only while the drawer holds the keys: a console that holds them
         // has taken it by now. Any text field with the keyboard keeps it, a note's own undo
         // among them.
@@ -334,7 +418,7 @@ impl Viewer {
             return;
         }
         // Only a frame that paints the image may keep a pan latched.
-        self.painted = Some(frame);
+        self.painted = Some((frame, *id));
         // A menu or popup open above the image takes the pointer, and with it the wheel and a press.
         // egui's own hover test is not used: it reaches a few points into a popup's border. The
         // view tested is this frame's, but `layer_id_at` knows every area, the drawer's own among
@@ -421,20 +505,36 @@ impl Viewer {
         }
         marks.paint(&ui.painter().with_clip_rect(view), placement);
     }
+}
 
-    #[cfg(test)]
-    pub(crate) fn loaded(&self) -> bool {
-        self.original().is_some()
-    }
+/// What the console called `pane` holds of images, in whichever tab it is.
+pub(super) fn console_of(tabs: &mut [crate::tree::Tab], pane: usize) -> Option<&mut Console> {
+    tabs.iter_mut()
+        .find_map(|tab| tab.pane_called(pane))
+        .map(|pane| &mut pane.image)
+}
 
-    /// Makes the shown image's decode one that has not finished, for as long as the returned
-    /// sender lives.
-    #[cfg(test)]
-    pub(crate) fn stall(&mut self) -> std::sync::mpsc::Sender<Result<Picture, String>> {
-        let (job, sender) = super::load::stalled();
-        self.document.as_mut().unwrap().load = Load::Decoding(job);
-        sender
-    }
+/// The slot of the console called `pane`, in whichever tab it is.
+pub(super) fn slot_of(tabs: &mut [crate::tree::Tab], pane: usize) -> Option<&mut Slot> {
+    console_of(tabs, pane).map(|console| &mut console.slot)
+}
+
+/// The focused console of the tab on show.
+pub(super) fn focused_pane(window: &crate::Window) -> Option<&crate::Pane> {
+    let tab = window.active();
+    tab.panes().into_iter().find(|pane| pane.name == tab.focus)
+}
+
+/// The slot the image tab shows: the focused console's, in the tab on show.
+pub(super) fn focused(window: &crate::Window) -> Option<&Slot> {
+    Some(&focused_pane(window)?.image.slot)
+}
+
+/// The same, to change it, borrowing only the tabs so the drawer's own state stays at hand.
+pub(super) fn focused_mut(tabs: &mut [crate::tree::Tab], active: usize) -> Option<&mut Slot> {
+    let tab = tabs.get_mut(active)?;
+    let focus = tab.focus;
+    Some(&mut tab.pane_called(focus)?.image.slot)
 }
 
 /// Whether the Space held now is the drawer's: it is when it went down while the drawer `holds`
@@ -476,6 +576,15 @@ mod tests {
         }
     }
 
+    /// The image the image tab shows: the focused console's.
+    fn slot(window: &crate::Window) -> &Slot {
+        focused(window).expect("the tab on show has a focused console")
+    }
+
+    fn slot_mut(window: &mut crate::Window) -> &mut Slot {
+        focused_mut(&mut window.tabs, window.active).expect("the tab on show has a focused console")
+    }
+
     pub(crate) fn write_png(path: &Path, width: u32, height: u32) {
         image::RgbaImage::from_pixel(width, height, image::Rgba([200, 40, 40, 255]))
             .save_with_format(path, image::ImageFormat::Png)
@@ -514,8 +623,8 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 40, 20);
         let ctx = egui::Context::default();
-        let mut viewer = Viewer::default();
-        viewer.open(source(), path.clone());
+        let mut viewer = Slot::default();
+        viewer.open(1, source(), path.clone());
         let started = Instant::now();
         while !viewer.loaded() {
             viewer.poll(&ctx);
@@ -684,7 +793,7 @@ mod tests {
     }
 
     /// The size of the texture the GPU was handed, once the image has been shown.
-    fn texture_size(viewer: &Viewer) -> Option<[usize; 2]> {
+    fn texture_size(viewer: &Slot) -> Option<[usize; 2]> {
         match &viewer.document.as_ref()?.load {
             Load::Ready {
                 gpu: Gpu::Uploaded(texture),
@@ -728,12 +837,12 @@ mod tests {
             assert!(
                 started.elapsed() < Duration::from_secs(30),
                 "{:?}",
-                window.image.message()
+                slot(&window).message()
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        let [width, height] = texture_size(&window.image).unwrap();
-        let (wide, high) = window.image.original().unwrap().dimensions();
+        let [width, height] = texture_size(slot(&window)).unwrap();
+        let (wide, high) = slot(&window).original().unwrap().dimensions();
         if wide.max(high) as usize > MAX_SIDE {
             assert_eq!(width.max(height), MAX_SIDE, "{width}x{height}");
         } else {
@@ -770,12 +879,12 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 640, 400);
         let (mut window, ctx, took) = window_with_image(&path);
-        let first = Arc::clone(window.image.original().unwrap());
+        let first = Arc::clone(slot(&window).original().unwrap());
         write_png(&path, 64, 32);
         let dock = window.sidebar.last_dock.unwrap();
         for (action, tool) in [
             (StripAction::Changes, Tool::Git),
-            (StripAction::Document, Tool::Document),
+            (StripAction::Image, Tool::Image),
         ] {
             let place = crate::viewer::strip_place(&window, dock, action).unwrap();
             click(&mut window, &ctx, place);
@@ -784,14 +893,14 @@ mod tests {
         crate::sidebar::close(&mut window, &ctx);
         painted(&mut window, &ctx, vec![]);
         assert_eq!(active(&window), None);
-        crate::sidebar::toggle(&mut window, Tool::Document, &ctx);
+        crate::sidebar::toggle(&mut window, Tool::Image, &ctx);
         let until = Instant::now() + (took * 5).max(Duration::from_millis(300));
         let mut shapes = Vec::new();
         while Instant::now() < until {
             shapes = painted(&mut window, &ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
         }
-        let now = window.image.original().unwrap();
+        let now = slot(&window).original().unwrap();
         assert!(Arc::ptr_eq(&first, now));
         assert_eq!(now.dimensions(), (640, 400));
         assert!(
@@ -1083,15 +1192,43 @@ mod tests {
         assert_eq!(settle(&mut window, &ctx), edge, "dragged past its edge");
     }
 
-    /// A viewer holding `original`, decoded and not yet shown.
-    fn ready(original: image::RgbaImage) -> Viewer {
-        let mut viewer = Viewer::default();
-        viewer.open(source(), PathBuf::from("/shot.png"));
-        viewer.document.as_mut().unwrap().load = Load::Ready {
+    /// A drawer's image machinery and one console's slot, painted with no window around them.
+    #[derive(Default)]
+    struct Alone {
+        image: Viewer,
+        slot: Slot,
+    }
+
+    impl Alone {
+        fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, space: bool) {
+            self.image.show(&mut self.slot, ui, theme, space);
+        }
+    }
+
+    impl std::ops::Deref for Alone {
+        type Target = Slot;
+        fn deref(&self) -> &Slot {
+            &self.slot
+        }
+    }
+
+    impl std::ops::DerefMut for Alone {
+        fn deref_mut(&mut self) -> &mut Slot {
+            &mut self.slot
+        }
+    }
+
+    /// An image holding `original`, decoded and not yet shown.
+    fn ready(original: image::RgbaImage) -> Alone {
+        let mut alone = Alone::default();
+        alone
+            .image
+            .open(&mut alone.slot, source(), PathBuf::from("/shot.png"));
+        alone.slot.document.as_mut().unwrap().load = Load::Ready {
             original: Arc::new(original),
             gpu: Gpu::Waiting(egui::ColorImage::filled([4, 2], egui::Color32::RED)),
         };
-        viewer
+        alone
     }
 
     /// An image wider than the drawer fits its width; a narrower one is shown at one physical
@@ -1137,8 +1274,8 @@ mod tests {
     #[test]
     fn a_relative_path_says_why_and_reads_nothing() {
         let ctx = egui::Context::default();
-        let mut viewer = Viewer::default();
-        viewer.open(source(), PathBuf::from("shot.png"));
+        let mut viewer = Slot::default();
+        viewer.open(1, source(), PathBuf::from("shot.png"));
         viewer.poll(&ctx);
         assert!(!viewer.loaded());
         assert!(matches!(
@@ -1176,7 +1313,7 @@ mod tests {
         let name = window.active().panes()[1].name;
         crate::viewer::open_image_target(&mut window, name, path).unwrap();
         wait_for_text(&mut window, &ctx, "This file is not a PNG or JPEG image");
-        assert!(!window.image.loaded());
+        assert!(!slot(&window).loaded());
     }
 
     /// While a decode has not finished, a second open starts no reader of its own: it says which
@@ -1191,49 +1328,280 @@ mod tests {
         write_png(&second, 48, 16);
         let (mut window, ctx, _) = window_with_image(&first);
         let name = window.active().panes()[1].name;
-        let finish = window.image.stall();
+        let finish = slot_mut(&mut window).stall();
         crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
         let still = format!("Still reading {}…", first.display());
         wait_for_text(&mut window, &ctx, &still);
         let dock = window.sidebar.last_dock.unwrap();
-        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseDocument).unwrap();
+        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseImage).unwrap();
         click(&mut window, &ctx, close);
-        assert!(!window.image.shown());
+        assert!(!slot(&window).shown());
         crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
         wait_for_text(&mut window, &ctx, &still);
-        assert!(window.image.abandoned.is_some());
+        assert!(slot(&window).abandoned.is_some());
         drop(finish);
         crate::viewer::open_image_target(&mut window, name, second).unwrap();
         let started = Instant::now();
-        while !window.image.loaded() {
+        while !slot(&window).loaded() {
             painted(&mut window, &ctx, vec![]);
             assert!(
                 started.elapsed() < Duration::from_secs(5),
                 "{:?}",
-                window.image.message()
+                slot(&window).message()
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(window.image.original().unwrap().dimensions(), (48, 16));
-        assert!(window.image.abandoned.is_none());
+        assert_eq!(slot(&window).original().unwrap().dimensions(), (48, 16));
+        assert!(slot(&window).abandoned.is_none());
     }
 
-    /// Closing the document tab forgets the image, and the next document tab is Markdown's again.
+    /// The image has a tab of its own: closing the document tab beside it leaves the image painted,
+    /// and closing the image's tab forgets it and hands the drawer to the next tab, here Changes.
     #[test]
-    fn closing_the_document_tab_forgets_the_image() {
+    fn closing_the_document_tab_keeps_the_image_and_closing_its_own_forgets_it() {
+        use crate::sidebar::{Tool, active};
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        let (mut window, ctx, _) = window_with_image(&path);
+        let name = slot(&window).origin().unwrap().pane;
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide,
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        let place = |window: &crate::Window, action| {
+            crate::viewer::strip_place(window, window.sidebar.last_dock.unwrap(), action)
+        };
+        let at = place(&window, StripAction::Image).unwrap();
+        click(&mut window, &ctx, at);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(image_rect(&painted(&mut window, &ctx, vec![])).is_some());
+        let at = place(&window, StripAction::CloseDocument).unwrap();
+        click(&mut window, &ctx, at);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(place(&window, StripAction::Document).is_none());
+        assert!(
+            image_rect(&painted(&mut window, &ctx, vec![])).is_some(),
+            "closing the document tab took the image off the drawer"
+        );
+        let at = place(&window, StripAction::CloseImage).unwrap();
+        click(&mut window, &ctx, at);
+        assert_eq!(active(&window), Some(Tool::Git));
+        assert_eq!(crate::viewer::shown_image(&window), None);
+        assert!(place(&window, StripAction::Image).is_none());
+        assert!(image_rect(&painted(&mut window, &ctx, vec![])).is_none());
+    }
+
+    /// Clicks the strip's `action` where the drawer painted it.
+    fn click_strip(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        action: crate::viewer::StripAction,
+    ) {
+        let dock = window.sidebar.last_dock.unwrap();
+        let at = crate::viewer::strip_place(window, dock, action)
+            .unwrap_or_else(|| panic!("{action:?} is not in the strip"));
+        click(window, ctx, at);
+    }
+
+    /// Closing the image's tab forgets the focused console's image only: the other console's image
+    /// is painted where it was once that console has the focus again.
+    #[test]
+    fn closing_the_image_tab_forgets_only_the_focused_consoles_image() {
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let kept = slot(&window).origin().unwrap().pane;
+        let kept_rect = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+        let first = window.active().panes()[0].name;
+        let small = folder.0.join("small.png");
+        write_png(&small, 120, 60);
+        open_in(&mut window, &ctx, first, &small);
+        click_strip(&mut window, &ctx, StripAction::CloseImage);
+        assert!(!slot(&window).shown(), "the focused console's image stayed");
+        let active = window.active;
+        window.tabs[active].focus = kept;
+        painted(&mut window, &ctx, vec![]);
+        click_strip(&mut window, &ctx, StripAction::Image);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let rect = image_rect(&shapes).expect("the other console's image was forgotten");
+        assert!(same_place(rect, kept_rect), "{rect:?} {kept_rect:?}");
+    }
+
+    /// With the image the drawer's only tab, closing it closes the drawer; with the document and
+    /// Changes beside it, the drawer moves to the document. Closing the document while the image is
+    /// shown keeps the drawer's keys and a Space held for a pan.
+    #[test]
+    fn closing_the_image_tab_moves_to_the_document_or_closes_the_drawer() {
+        use crate::sidebar::{Tool, active};
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let place = |window: &crate::Window, action| {
+            crate::viewer::strip_place(window, window.sidebar.last_dock.unwrap(), action)
+        };
+        // The image alone: no review was opened first.
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        open_in(&mut window, &ctx, name, &path);
+        assert!(place(&window, StripAction::Changes).is_none());
+        assert!(place(&window, StripAction::Document).is_none());
+        click_strip(&mut window, &ctx, StripAction::CloseImage);
+        assert_eq!(active(&window), None, "the drawer stayed on an empty tab");
+        // The image beside the document and Changes.
+        let (mut window, ctx, _) = window_with_image(&path);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        let name = slot(&window).origin().unwrap().pane;
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide,
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        click_strip(&mut window, &ctx, StripAction::Image);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(place(&window, StripAction::Changes).is_some());
+        window.viewer.space = true;
+        window.viewer.held = true;
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(window.viewer.keyboard, "the drawer gave the keys away");
+        assert!(
+            window.viewer.space && window.viewer.held,
+            "a held Space was forgotten"
+        );
+        assert!(
+            image_rect(&painted(&mut window, &ctx, vec![])).is_some(),
+            "closing the document blanked the image"
+        );
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            folder.0.join("guide.md"),
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        click_strip(&mut window, &ctx, StripAction::Image);
+        click_strip(&mut window, &ctx, StripAction::CloseImage);
+        assert_eq!(active(&window), Some(Tool::Document));
+    }
+
+    /// Closing the document while it is the tab shown moves the drawer to Changes, which takes the
+    /// keys; a Space or a press the document held is not carried back when the document reopens.
+    #[test]
+    fn closing_the_shown_document_leaves_no_held_gesture_for_its_return() {
+        use crate::sidebar::{Tool, active};
         use crate::viewer::StripAction;
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
         write_png(&path, 64, 32);
         let (mut window, ctx, _) = window_with_image(&path);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        let name = slot(&window).origin().unwrap().pane;
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide.clone(),
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(active(&window), Some(Tool::Document));
         let dock = window.sidebar.last_dock.unwrap();
-        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseDocument).unwrap();
-        click(&mut window, &ctx, close);
-        assert!(!window.image.shown());
-        assert_eq!(crate::viewer::shown_image(&window), None);
-        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Document, &ctx);
-        let shapes = painted(&mut window, &ctx, vec![]);
-        assert!(image_rect(&shapes).is_none());
+        assert!(crate::viewer::strip_place(&window, dock, StripAction::Changes).is_some());
+        window.viewer.space = true;
+        window.viewer.held = true;
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        assert_eq!(active(&window), Some(Tool::Git));
+        assert!(window.viewer.keyboard, "Changes did not take the keys");
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide,
+            None
+        ));
+        assert_eq!(active(&window), Some(Tool::Document));
+        assert!(
+            !window.viewer.held && !window.viewer.space,
+            "the document came back holding a gesture"
+        );
+    }
+
+    /// A word parked for a console whose empty tab was never laid out waits through the next
+    /// image opened there and is said under it, once: the console's slot keeps it, as D113 has it,
+    /// not the image it was about.
+    #[test]
+    fn a_parked_word_is_said_under_the_next_image_when_the_empty_tab_was_never_shown() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let other = window.active().panes()[0].name;
+        assert_ne!(Some(other), slot(&window).origin().map(|o| o.pane));
+        slot_called(&mut window, other).unshown = Some("A parked word.".into());
+        let next = folder.0.join("next.png");
+        write_png(&next, 64, 32);
+        open_in(&mut window, &ctx, other, &next);
+        for _ in 0..2 {
+            let said = texts(&painted(&mut window, &ctx, vec![]), area());
+            let times: usize = said
+                .iter()
+                .map(|t| t.matches("A parked word.").count())
+                .sum();
+            assert_eq!(times, 1, "{said:?}");
+        }
+    }
+
+    /// A window too short for the drawer says why on the File door while the drawer is on its
+    /// image tab: the door is not lit for that tab, but it opened the drawer that is missing.
+    #[test]
+    fn a_window_too_short_for_the_image_says_so_on_the_file_door() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        // Every real window runs the integrated chrome, which paints the doors.
+        window.chrome.enable();
+        assert_eq!(active(&window), Some(Tool::Image));
+        let door = |window: &crate::Window| {
+            (window.sidebar.buttons.iter())
+                .find(|(tool, _)| *tool == Tool::Document)
+                .map(|(_, rect)| *rect)
+        };
+        let short = (100..400)
+            .step_by(20)
+            .map(|h| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, h as f32)))
+            .find(|&screen| {
+                pass_on(&mut window, &ctx, screen, vec![], |_| {});
+                window.sidebar.last_dock.is_none() && door(&window).is_some()
+            })
+            .expect("no height hides the drawer and keeps the door");
+        let at = door(&window).unwrap().center();
+        let taller = "Make the window taller to show File below the consoles.";
+        let mut hover = vec![egui::Event::PointerMoved(at)];
+        let said = (0..60).any(|_| {
+            let events = std::mem::take(&mut hover);
+            let shapes = pass_on(&mut window, &ctx, short, events, |_| {}).shapes;
+            text_rect(&shapes, |t| t == taller).is_some()
+        });
+        assert!(
+            said,
+            "the File door does not say why the image is not shown"
+        );
     }
 
     /// The wheel over the image pans it and Ctrl+wheel zooms it, and neither reaches a console,
@@ -1626,12 +1994,12 @@ mod tests {
 
     /// How the drawer's body was split around the image on the last pass.
     fn layout(window: &crate::Window, ctx: &egui::Context) -> tools::Layout {
-        let marks = &window.image.document.as_ref().unwrap().marks;
+        let marks = &slot(window).document.as_ref().unwrap().marks;
         let something_to_send = !marks.is_empty();
-        let label = window.image.origin().unwrap().label.as_str();
-        let sending = &window.image.send;
-        let send = something_to_send.then(|| (label, sending.busy(), sending.parked()));
-        let notice = window.image.notice.as_deref();
+        let label = slot(window).origin().unwrap().label.as_str();
+        let id = slot(window).document().unwrap();
+        let send = something_to_send.then(|| (label, window.image.send.button(id)));
+        let notice = slot(window).notice.as_deref();
         let style = ctx.global_style();
         let refused = egui::Color32::RED;
         let fixed = tools::Fixed::new(ctx, &style, body(window), notice, refused, send);
@@ -1796,6 +2164,282 @@ mod tests {
         }
     }
 
+    /// Opens `path` in the console `name` as Ctrl+click does, and paints until its image is.
+    fn open_in(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        name: usize,
+        path: &Path,
+    ) -> egui::Rect {
+        crate::viewer::open_image_target(window, name, path.to_owned()).unwrap();
+        let started = Instant::now();
+        loop {
+            if let Some(rect) = image_rect(&painted(window, ctx, vec![])) {
+                return rect;
+            }
+            // A hang guard, not a speed claim.
+            assert!(started.elapsed() < Duration::from_secs(30));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The image tab shows the focused console's image: clicking the other console shows its own,
+    /// and clicking back shows the first as it was left, at its zoom and with its notes.
+    #[test]
+    fn the_image_tab_follows_the_focus_and_each_console_keeps_its_own() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let names: Vec<_> = window.active().panes().iter().map(|p| p.name).collect();
+        let zoomed = settle(&mut window, &ctx);
+        let small = folder.0.join("small.png");
+        write_png(&small, 120, 60);
+        let first = open_in(&mut window, &ctx, names[0], &small);
+        assert_eq!(window.active().focus, names[0]);
+        assert_eq!(first.size(), egui::vec2(120.0, 60.0));
+        marks_mut(&mut window).general = "on the first console".into();
+        let noted = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area())
+                .iter()
+                .any(|t| t.contains("on the first console"))
+        };
+        assert!(noted(&painted(&mut window, &ctx, vec![])));
+        // A person's click on the console. While the drawer holds the keys the first click only
+        // takes them back, as it does on the Git tab; the next one focuses.
+        let focus = |window: &mut crate::Window, name: usize| {
+            let at = window
+                .active()
+                .panes()
+                .into_iter()
+                .find(|pane| pane.name == name)
+                .and_then(|pane| pane.painted_console.as_ref())
+                .unwrap()
+                .area
+                .center();
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            painted(window, &ctx, vec![egui::Event::PointerMoved(at)]);
+            painted(window, &ctx, vec![button(true), button(false)]);
+        };
+        focus(&mut window, names[1]);
+        assert_eq!(window.active().focus, names[0], "the drawer kept the keys");
+        focus(&mut window, names[1]);
+        assert_eq!(window.active().focus, names[1]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(same_place(image_rect(&shapes).unwrap(), zoomed));
+        assert!(
+            !noted(&shapes),
+            "the first console's note shows on the second's image"
+        );
+        focus(&mut window, names[0]);
+        assert_eq!(window.active().focus, names[0]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(noted(&shapes), "the first console's note was lost");
+        assert_eq!(image_rect(&shapes).unwrap().size(), first.size());
+        focus(&mut window, names[1]);
+        assert!(
+            same_place(settle(&mut window, &ctx), zoomed),
+            "the second console's zoom was lost"
+        );
+    }
+
+    /// On a console with no image the image tab stays selected and says how to open one with
+    /// Ctrl+click, named after that console and not as unavailable; the drawer neither closes nor
+    /// switches, so no console's grid changes. The agent's own way in is not named until the agent
+    /// has a tool that opens one.
+    #[test]
+    fn a_console_with_no_image_keeps_the_tab_and_says_how_to_open_one() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        // Every real window runs the integrated chrome.
+        window.chrome.enable();
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![]);
+        let grids =
+            |window: &crate::Window| window.all_panes().map(|p| p.measured).collect::<Vec<_>>();
+        let before = grids(&window);
+        let empty = window.active().panes()[0].name;
+        let active_tab = window.active;
+        window.tabs[active_tab].focus = empty;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let dock = window.sidebar.last_dock.unwrap();
+        let said = texts(&shapes, dock);
+        let how = "No image in this console. Ctrl+click a PNG or JPEG path printed in it.";
+        assert!(said.iter().any(|t| t == how), "{said:?}");
+        assert!(
+            !said
+                .iter()
+                .any(|t| t.contains("unavailable") || t.contains("No source")),
+            "{said:?}"
+        );
+        assert!(image_rect(&shapes).is_none());
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(
+            crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Image).is_some()
+        );
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(grids(&window), before);
+        // A focus not yet settled after a close names no console: the tab is still not one whose
+        // source went away.
+        window.tabs[active_tab].focus = usize::MAX;
+        let said = texts(&painted(&mut window, &ctx, vec![]), dock);
+        assert!(!said.iter().any(|t| t.contains("unavailable")), "{said:?}");
+    }
+
+    /// A cancelled Send's last word for a console whose image was closed is said on that
+    /// console's empty tab, once, and not again under the next image opened there.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_sends_word_is_said_on_its_consoles_empty_tab() {
+        use crate::viewer::StripAction;
+        let received = term_core::received::Received::new("annotated-cancel-empty");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let own = slot(&window).origin().unwrap().pane;
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        marks_mut(&mut window).clear();
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        let reported = "the half-written copy could not be removed: busy";
+        sender.send(Err(reported.into())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains(reported))
+        };
+        let active = window.active;
+        window.tabs[active].focus = own;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            texts(&shapes, area())
+                .iter()
+                .any(|t| t == crate::viewer::view::NO_IMAGE)
+        );
+        assert!(said(&shapes), "the empty tab kept its console's word back");
+        open_in(&mut window, &ctx, own, &path);
+        assert!(
+            !said(&painted(&mut window, &ctx, vec![])),
+            "the word surfaced under the next image"
+        );
+    }
+
+    /// A pan latched on one console's image does not carry over to another console's when the
+    /// focus moves with the button still down.
+    #[test]
+    fn a_pan_begun_on_one_consoles_image_does_not_move_another_consoles() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let names: Vec<_> = window.active().panes().iter().map(|p| p.name).collect();
+        let second = settle(&mut window, &ctx);
+        let other = folder.0.join("other.png");
+        write_png(&other, 2400, 1600);
+        open_in(&mut window, &ctx, names[0], &other);
+        let at = start_middle_drag(&mut window, &ctx);
+        let active = window.active;
+        window.tabs[active].focus = names[1];
+        assert!(ctx.input(|i| i.pointer.middle_down()));
+        travel(&mut window, &ctx, at, egui::vec2(-30.0, -45.0));
+        assert!(
+            same_place(settle(&mut window, &ctx), second),
+            "the first console's pan moved the second console's image"
+        );
+    }
+
+    /// Closing a console takes its image and its unsent marks with it, with no question; the
+    /// console left keeps its own image, painted once it has the focus. Closing a tab does the
+    /// same for the consoles in it.
+    #[test]
+    fn closing_a_console_or_its_tab_takes_its_image_and_marks_with_no_question() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let (mut window, ctx, _) =
+            window_with_image_in_tabs(&path, &[["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let kept = window.active().panes()[1].name;
+        let kept_rect = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+        let small = folder.0.join("small.png");
+        write_png(&small, 120, 60);
+        let noted = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains("unsent"))
+        };
+        let elsewhere = window.tabs[1].panes()[0].name;
+        open_in(&mut window, &ctx, elsewhere, &small);
+        assert_eq!(window.active, 1);
+        marks_mut(&mut window).general = "unsent".into();
+        window.close_the_active_tab(&ctx);
+        assert_eq!(window.tabs.len(), 1, "closing the tab asked something");
+        let beside = window.active().panes()[0].name;
+        open_in(&mut window, &ctx, beside, &small);
+        marks_mut(&mut window).general = "unsent".into();
+        assert!(noted(&painted(&mut window, &ctx, vec![])));
+        window.close_a_pane_called(beside, &ctx).unwrap();
+        assert!(window.all_panes().all(|pane| pane.name != beside));
+        assert_eq!(window.active().focus, kept);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(same_place(image_rect(&shapes).unwrap(), kept_rect));
+        assert!(
+            !noted(&shapes),
+            "a closed console's marks are still painted"
+        );
+        assert_eq!(slot(&window).notice, None);
+    }
+
+    /// The two other ways a console leaves, the chord that closes the focused one and a retirement
+    /// that detaches it, take its image and unsent marks with no question as well: the console
+    /// left inherits the focus and its own image is painted where it was.
+    #[test]
+    fn closing_the_focused_console_or_retiring_it_leaves_the_other_consoles_image_painted() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let small = folder.0.join("small.png");
+        write_png(&small, 120, 60);
+        let noted = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains("unsent"))
+        };
+        let leaves = |close: &dyn Fn(&mut crate::Window, &egui::Context, usize)| {
+            let (mut window, ctx, _) = window_with_image(&path);
+            let kept = window.active().panes()[1].name;
+            let kept_rect = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+            let leaving = window.active().panes()[0].name;
+            open_in(&mut window, &ctx, leaving, &small);
+            marks_mut(&mut window).general = "unsent".into();
+            assert!(noted(&painted(&mut window, &ctx, vec![])));
+            close(&mut window, &ctx, leaving);
+            assert!(window.all_panes().all(|pane| pane.name != leaving));
+            assert_eq!(window.active().focus, kept);
+            let shapes = painted(&mut window, &ctx, vec![]);
+            let rect = image_rect(&shapes).expect("the console left shows no image");
+            assert!(same_place(rect, kept_rect), "{rect:?} {kept_rect:?}");
+            assert!(
+                !noted(&shapes),
+                "a closed console's marks are still painted"
+            );
+        };
+        leaves(&|window, ctx, _| window.close_the_focused(ctx));
+        leaves(&|window, ctx, leaving| {
+            drop(window.detach_panes_called(&[leaving], ctx).unwrap());
+        });
+    }
+
     /// An image opened while the middle button of a pan is still down is not dragged by it.
     #[test]
     fn a_new_image_is_not_moved_by_a_pan_begun_on_the_old_one() {
@@ -1829,7 +2473,8 @@ mod tests {
         let (mut window, ctx) = zoomed_window(&folder);
         let at = start_middle_drag(&mut window, &ctx);
         crate::viewer::activate(&mut window, false);
-        let console = window.active().panes()[0]
+        // The image's own console: a press on another would focus it, and the image tab with it.
+        let console = window.active().panes()[1]
             .painted_console
             .as_ref()
             .unwrap()
@@ -1847,7 +2492,7 @@ mod tests {
                 }],
             );
         }
-        crate::viewer::activate(&mut window, true);
+        crate::viewer::show_image(&mut window);
         let before = settle(&mut window, &ctx);
         assert!(ctx.input(|i| i.pointer.middle_down()));
         travel(&mut window, &ctx, at, egui::vec2(-30.0, -45.0));
@@ -1908,7 +2553,7 @@ mod tests {
         assert_eq!(crate::sidebar::active(&window), None);
         pass(&mut window, &ctx, vec![space(false)]);
         pass(&mut window, &ctx, vec![space(true)]);
-        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Document, &ctx);
+        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Image, &ctx);
         let before = settle(&mut window, &ctx);
         assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
         let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
@@ -2103,7 +2748,7 @@ mod tests {
     fn a_zoom_on_the_first_frame_the_image_shows_is_not_dropped() {
         let ctx = egui::Context::default();
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-        let run = |viewer: &mut Viewer, events| {
+        let run = |viewer: &mut Alone, events| {
             let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(screen),
@@ -2116,8 +2761,10 @@ mod tests {
             output.drop_without_applying_deltas();
             rect
         };
-        let mut viewer = Viewer::default();
-        viewer.open(source(), PathBuf::from("/shot.png"));
+        let mut viewer = Alone::default();
+        viewer
+            .image
+            .open(&mut viewer.slot, source(), PathBuf::from("/shot.png"));
         let at = egui::pos2(150.0, 50.0);
         // Loading, then decoded: no pass before this one painted the image.
         assert_eq!(run(&mut viewer, vec![egui::Event::PointerMoved(at)]), None);
@@ -2225,7 +2872,7 @@ mod tests {
         let mut viewer = ready(image::RgbaImage::new(2000, 2000));
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 400.0));
         let none = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(0.0, 400.0));
-        let run = |viewer: &mut Viewer, events, view: egui::Rect| {
+        let run = |viewer: &mut Alone, events, view: egui::Rect| {
             let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(screen),
@@ -2250,7 +2897,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         run(&mut viewer, vec![press], screen);
-        assert_eq!(viewer.panning, Some(egui::PointerButton::Middle));
+        assert_eq!(viewer.image.panning, Some(egui::PointerButton::Middle));
         let up = from - egui::vec2(0.0, 20.0);
         assert_eq!(
             run(&mut viewer, vec![egui::Event::PointerMoved(up)], none),
@@ -2275,7 +2922,7 @@ mod tests {
     /// there is one; says where it painted the whole image.
     fn alone(
         ctx: &egui::Context,
-        viewer: &mut Viewer,
+        viewer: &mut Alone,
         events: Vec<egui::Event>,
         view: egui::Rect,
         popup: Option<egui::Rect>,
@@ -2317,7 +2964,7 @@ mod tests {
     /// down, and says where the last one painted the image.
     fn climb(
         ctx: &egui::Context,
-        viewer: &mut Viewer,
+        viewer: &mut Alone,
         from: egui::Pos2,
         view: egui::Rect,
         popup: Option<egui::Rect>,
@@ -2353,7 +3000,7 @@ mod tests {
             egui::Event::PointerMoved(on),
         ];
         alone(&ctx, &mut viewer, events, view, None);
-        assert_eq!(viewer.panning, None);
+        assert_eq!(viewer.image.panning, None);
         let after = climb(&ctx, &mut viewer, on, view, None);
         assert_eq!(after, Some(before), "the press beside the image panned it");
     }
@@ -2376,7 +3023,7 @@ mod tests {
             egui::Event::PointerMoved(off),
         ];
         alone(&ctx, &mut viewer, events, SCREEN, popup);
-        assert_eq!(viewer.panning, None);
+        assert_eq!(viewer.image.panning, None);
         let after = climb(&ctx, &mut viewer, off, SCREEN, popup);
         assert_eq!(
             after,
@@ -2400,7 +3047,7 @@ mod tests {
             egui::Event::PointerMoved(beside),
         ];
         alone(&ctx, &mut viewer, events, view, None);
-        assert_eq!(viewer.panning, Some(egui::PointerButton::Middle));
+        assert_eq!(viewer.image.panning, Some(egui::PointerButton::Middle));
         let after = climb(&ctx, &mut viewer, beside, view, None).unwrap();
         assert_eq!(after.top(), before.top() - 60.0, "{before:?} -> {after:?}");
     }
@@ -2416,10 +3063,10 @@ mod tests {
         let before = alone(&ctx, &mut viewer, vec![], SCREEN, None).unwrap();
         let primary = vec![egui::Event::PointerMoved(on), button(Primary, on, true)];
         alone(&ctx, &mut viewer, primary, SCREEN, None);
-        assert_eq!(viewer.panning, None);
+        assert_eq!(viewer.image.panning, None);
         let events = vec![button(Middle, on, true), button(Primary, on, false)];
         alone(&ctx, &mut viewer, events, SCREEN, None);
-        assert_eq!(viewer.panning, Some(Middle));
+        assert_eq!(viewer.image.panning, Some(Middle));
         let after = climb(&ctx, &mut viewer, on, SCREEN, None).unwrap();
         assert_eq!(after.top(), before.top() - 60.0, "{before:?} -> {after:?}");
     }
@@ -2477,11 +3124,11 @@ mod tests {
     }
 
     fn marks_of(window: &crate::Window) -> &marks::Marks {
-        &window.image.document.as_ref().unwrap().marks
+        &slot(window).document.as_ref().unwrap().marks
     }
 
     fn marks_mut(window: &mut crate::Window) -> &mut marks::Marks {
-        &mut window.image.document.as_mut().unwrap().marks
+        &mut slot_mut(window).document.as_mut().unwrap().marks
     }
 
     fn ink() -> egui::Color32 {
@@ -2719,7 +3366,7 @@ mod tests {
         };
         for closed in [false, true] {
             let (mut window, ctx, _) = window_with_image(&first);
-            let name = window.image.origin().unwrap().pane;
+            let name = slot(&window).origin().unwrap().pane;
             let mark = |window: &mut crate::Window| {
                 marks_mut(window).tool = marks::Tool::Marker;
                 let image = settle(window, &ctx).intersect(image_view(window, &ctx));
@@ -2736,8 +3383,8 @@ mod tests {
             assert_eq!(marks_of(&window).notes(), ["first"]);
             marks_mut(&mut window).clear();
             if closed {
-                crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
-                assert!(!window.image.shown(), "the image did not close");
+                crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
+                assert!(!slot(&window).shown(), "the image did not close");
             }
             crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
             let started = Instant::now();
@@ -2864,7 +3511,7 @@ mod tests {
     /// painted then.
     fn shown_in(
         ctx: &egui::Context,
-        viewer: &mut Viewer,
+        viewer: &mut Alone,
         view: egui::Rect,
         events: Vec<egui::Event>,
     ) -> Vec<egui::epaint::ClippedShape> {
@@ -2999,11 +3646,12 @@ mod tests {
             let request = send::Request {
                 document: viewer.document().unwrap(),
                 pane: 0,
+                console: "test".into(),
                 path: PathBuf::from("/a/annotated-1.png"),
                 line: "x".into(),
             };
             // Nothing polls a viewer alone, so the Send stays asked.
-            viewer.send.ask(request);
+            viewer.image.send.ask(request);
             let view = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(300.0, height));
             (viewer, view)
         };
@@ -3048,9 +3696,10 @@ mod tests {
         let ctx = egui::Context::default();
         let mut viewer = ready(image::RgbaImage::new(400, 300));
         viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
-        viewer.send.ask(send::Request {
+        viewer.image.send.ask(send::Request {
             document: viewer.document().unwrap(),
             pane: 0,
+            console: "test".into(),
             path: PathBuf::from("/a/annotated-1.png"),
             line: "x".into(),
         });
@@ -3066,9 +3715,9 @@ mod tests {
         };
         let events = vec![egui::Event::PointerMoved(at), button(true), button(false)];
         shown_in(&ctx, &mut viewer, view, events);
-        assert!(!viewer.sending(), "the Send was not taken back");
+        assert!(!viewer.image.sending(), "the Send was not taken back");
         assert!(
-            !viewer.send.parked(),
+            !viewer.image.send.parked(),
             "a worker that never started was parked"
         );
         assert_eq!(
@@ -3091,13 +3740,13 @@ mod tests {
         let refusal = "The line was typed, but Enter was not pressed: the console closed.";
         let held = "The cancelled copy's worker reported: disk full.";
         viewer.notice = Some(refusal.into());
-        viewer.send.unshown = Some(held.into());
+        viewer.unshown = Some(held.into());
         let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(700.0, 400.0));
         let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
         let said = texts(&shapes, view).join("\n");
         assert!(said.contains(refusal), "the refusal was lost: {said}");
         assert!(said.contains(held), "the worker's word was lost: {said}");
-        assert!(viewer.send.unshown.is_none());
+        assert!(viewer.unshown.is_none());
     }
 
     /// Between the heights where the Send button shows whole under the notice's line and those
@@ -3181,9 +3830,10 @@ mod tests {
         assert!(said.height() > 30.0, "{said:?} is not wrapped");
     }
 
-    /// Unsent marks keep the image: opening another document or image over it, or closing its
-    /// tab, is refused with a message, the image and its marks stay, and once the marks are
-    /// cleared the same open goes through.
+    /// Unsent marks keep the image: opening another image over it, or closing its tab, is refused
+    /// with a message after a failure nobody read yet, said once however often it is refused, the
+    /// image and its marks stay, and once the marks are cleared the same open goes through. A
+    /// Markdown file opens beside it, refused by nothing.
     #[test]
     fn unsent_marks_keep_the_image_until_they_are_cleared() {
         use crate::viewer::StripAction;
@@ -3191,43 +3841,47 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 64, 32);
         let (mut window, ctx, _) = window_with_image(&path);
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         marks_mut(&mut window).general = "the header overlaps".into();
         let other = folder.0.join("other.png");
         write_png(&other, 64, 32);
         let kept = |window: &crate::Window| {
-            assert_eq!(window.image.path(), Some(path.as_path()));
+            assert_eq!(slot(window).path(), Some(path.as_path()));
             assert_eq!(marks_of(window).general, "the header overlaps");
             assert!(crate::viewer::origin::showing_image(window));
         };
-        assert!(!crate::viewer::open_document_target(
+        assert!(crate::viewer::open_document_target(
             &mut window,
             name,
             folder.0.join("guide.md"),
             None,
         ));
-        kept(&window);
-        assert!(window.image.notice.as_deref().unwrap().contains("marks"));
-        assert!(crate::viewer::kept_document(&window).contains("marks"));
+        assert_eq!(slot(&window).path(), Some(path.as_path()));
+        assert_eq!(marks_of(&window).general, "the header overlaps");
+        assert!(slot(&window).notice.is_none());
+        crate::viewer::show_image(&mut window);
         let said = crate::viewer::NotOpened::Marks.to_string();
-        assert!(said.contains("another image or document"), "{said}");
+        assert!(said.contains("another image"), "{said}");
+        let failure = "The copy could not be written; nothing was sent.";
+        slot_mut(&mut window).say(failure);
+        let said = format!("{failure} {said}");
         assert_eq!(
             crate::viewer::open_image_target(&mut window, name, other.clone()),
             Err(crate::viewer::NotOpened::Marks)
         );
         kept(&window);
-        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
         kept(&window);
         let shapes = painted(&mut window, &ctx, vec![]);
-        let notice = window.image.notice.clone().unwrap();
+        assert_eq!(slot(&window).notice.as_deref(), Some(said.as_str()));
         assert!(
-            texts(&shapes, area()).contains(&notice),
+            texts(&shapes, area()).contains(&said),
             "the refusal is not painted"
         );
         marks_mut(&mut window).clear();
         crate::viewer::open_image_target(&mut window, name, other.clone()).unwrap();
-        assert_eq!(window.image.path(), Some(other.as_path()));
-        assert!(window.image.notice.is_none());
+        assert_eq!(slot(&window).path(), Some(other.as_path()));
+        assert!(slot(&window).notice.is_none());
     }
 
     /// The text painted that `wanted` accepts, and where.
@@ -3280,7 +3934,7 @@ mod tests {
         let script = received.script("stty raw -echo");
         let (mut window, ctx, _) = window_with_image_in(path, [beside, &script]);
         received.wait_until_ready(Duration::from_secs(5));
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         let dir = crate::PanelDir::create().unwrap();
         let folder = dir.path().to_owned();
         origin_pane(&mut window).panel = Some(dir);
@@ -3288,13 +3942,13 @@ mod tests {
         let at = image_view(&window, &ctx).center();
         painted(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
         click(&mut window, &ctx, at);
-        assert_eq!(window.image.origin().unwrap().pane, name);
+        assert_eq!(slot(&window).origin().unwrap().pane, name);
         *marks_mut(&mut window).note_mut(0).unwrap() = "button clipped".into();
         (window, ctx, folder)
     }
 
     fn origin_pane(window: &mut crate::Window) -> &mut crate::Pane {
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(window).origin().unwrap().pane;
         window.all_panes_mut().find(|p| p.name == name).unwrap()
     }
 
@@ -3302,7 +3956,7 @@ mod tests {
     /// Answers the line painted under it on that frame.
     fn click_send(window: &mut crate::Window, ctx: &egui::Context) -> String {
         let shapes = painted(window, ctx, vec![]);
-        let label = window.image.origin().unwrap().label.clone();
+        let label = slot(window).origin().unwrap().label.clone();
         let (_, button) = text_rect(&shapes, |t| t == format!("Send to {label} and press Enter"))
             .expect("the button names the console");
         let line = text_rect(&shapes, |t| t.starts_with("Annotated screenshot: "))
@@ -3324,7 +3978,7 @@ mod tests {
             assert!(
                 started.elapsed() < Duration::from_secs(30),
                 "{:?}",
-                window.image.notice
+                slot(window).notice
             );
             painted(window, ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
@@ -3357,13 +4011,13 @@ mod tests {
         );
         crate::sidebar::close(&mut window, &ctx);
         painted(&mut window, &ctx, vec![]);
-        assert!(window.image.send.writing(), "{:?}", window.image.notice);
+        assert!(window.image.send.writing(), "{:?}", slot(&window).notice);
         // The console turns paste markers on while the copy is written: the paste is composed
         // for the mode it has when it is sent.
         origin_pane(&mut window).screen.advance(b"\x1b[?2004h");
         until_written(&mut window, &ctx);
-        let label = &window.image.origin().unwrap().label;
-        assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
+        let label = &slot(&window).origin().unwrap().label;
+        assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
         let paste = format!("\x1b[200~{shown}\x1b[201~");
         assert_eq!(
             received.wait_for(paste.len(), Duration::from_secs(5)),
@@ -3397,9 +4051,306 @@ mod tests {
         let _ = std::fs::remove_file(&copy);
     }
 
+    /// The slot of the console called `name`, wherever the focus is.
+    fn slot_called(window: &mut crate::Window, name: usize) -> &mut Slot {
+        slot_of(&mut window.tabs, name).expect("the console is open")
+    }
+
+    /// A Send follows its image, not the focus: with another console's image shown while the copy
+    /// is written, the line is typed into the Send's own console and its marks clear there, while
+    /// the other console's image takes a tool, a marker and a note as a person gives them, keeps
+    /// them, offers no Cancel for that Send and greys its own Send naming the console it waits for.
+    #[cfg(unix)]
+    #[test]
+    fn a_send_reaches_its_own_console_while_another_consoles_image_is_shown() {
+        let received = term_core::received::Received::new("annotated-follows");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let origin = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        let marker = icon_place(
+            &mut window,
+            &ctx,
+            egui_phosphor::regular::NUMBER_CIRCLE_ONE,
+            |l| l.bar,
+        );
+        press(&mut window, &ctx, marker);
+        assert!(
+            marks_of(&window).tool == marks::Tool::Marker,
+            "the tool was not taken"
+        );
+        let on_image = image_rect(&painted(&mut window, &ctx, vec![]))
+            .unwrap()
+            .center();
+        painted(&mut window, &ctx, vec![egui::Event::PointerMoved(on_image)]);
+        click(&mut window, &ctx, on_image);
+        assert_eq!(
+            marks_of(&window).marks().len(),
+            1,
+            "no marker on the other image"
+        );
+        let field = place_of(&mut window, &ctx, "A note on the whole image");
+        press(&mut window, &ctx, field);
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Text("on the other console".into())],
+        );
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            text_rect(&shapes, |t| t == "Cancel").is_none(),
+            "the other console's image offers to take this Send back"
+        );
+        let waiting = format!("Waiting for the Send to {}…", origin.1);
+        assert!(
+            text_rect(&shapes, |t| t == waiting).is_some(),
+            "{:?}",
+            texts(&shapes, area())
+        );
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        let submitted = [line.as_bytes(), b"\r"].concat();
+        assert_eq!(
+            received.wait_for(submitted.len(), Duration::from_secs(5)),
+            submitted
+        );
+        let own = slot_called(&mut window, origin.0);
+        assert_eq!(own.notice, Some(format!("Sent to {}.", origin.1)));
+        assert!(own.document.as_ref().unwrap().marks.is_empty());
+        let shown = slot_called(&mut window, beside);
+        assert_eq!(shown.notice, None);
+        assert_eq!(
+            shown.document.as_ref().unwrap().marks.general,
+            "on the other console"
+        );
+        assert_eq!(
+            window.active().focus,
+            origin.0,
+            "the delivery kept the keys"
+        );
+        let sent = format!("Sent to {}.", origin.1);
+        let said = texts(&painted(&mut window, &ctx, vec![]), area());
+        assert!(
+            said.contains(&sent),
+            "not said under its own image: {said:?}"
+        );
+        let active = window.active;
+        window.tabs[active].focus = beside;
+        let said = texts(&painted(&mut window, &ctx, vec![]), area());
+        assert!(
+            !said.contains(&sent),
+            "said under the other console's image"
+        );
+        let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A console that closes while its Send's copy is written takes that Send back as Cancel would:
+    /// standard error is told whose Send went, the console left greys its own Send saying the
+    /// worker is still finishing rather than waiting for a console that is gone, and once the
+    /// worker ends its copy and folder are removed and that Send answers a click.
+    #[cfg(unix)]
+    #[test]
+    fn a_console_closed_mid_send_frees_the_other_consoles_send_once_its_worker_ends() {
+        let received = term_core::received::Received::new("annotated-closed-frees");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        // Both consoles carry one title, as two consoles running one agent do: only the number
+        // the app gives each console tells them apart.
+        let sending = slot(&window).origin().unwrap().pane;
+        slot_called(&mut window, sending)
+            .document
+            .as_mut()
+            .unwrap()
+            .origin
+            .label = "claude".into();
+        let origin = (sending, format!("claude (Console {})", sending + 1));
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let beside = window.active().panes()[0].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == beside)
+            .unwrap()
+            .label = Some("claude".into());
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        let other_rect = open_in(&mut window, &ctx, beside, &other);
+        origin_pane(&mut window).panel = Some(crate::PanelDir::create().unwrap());
+        marks_mut(&mut window).general = "on the console left".into();
+        let painted_texts =
+            |window: &mut crate::Window| texts(&painted(window, &ctx, vec![]), area());
+        let waiting = format!("Waiting for the Send to {}…", origin.1);
+        assert!(painted_texts(&mut window).contains(&waiting));
+        // The worker's copy, which keeps the closing console's folder.
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        send::TOLD.with(|told| told.borrow_mut().clear());
+        window.close_a_pane_called(origin.0, &ctx).unwrap();
+        let rect = image_rect(&painted(&mut window, &ctx, vec![]));
+        assert!(
+            rect.is_some_and(|rect| same_place(rect, other_rect)),
+            "the console left's image is not painted where it was: {rect:?}"
+        );
+        let said = painted_texts(&mut window);
+        assert!(
+            window.image.send.parked(),
+            "the closed console's worker was not parked"
+        );
+        assert!(!said.contains(&waiting), "{said:?}");
+        assert!(
+            said.iter()
+                .any(|t| *t == format!("Still finishing the copy for {}…", origin.1)),
+            "{said:?}"
+        );
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [format!(
+                "Send to {}: The origin console has closed; nothing was sent.",
+                origin.1
+            )]
+        );
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        assert!(
+            !copy.exists() && !dir.exists(),
+            "the copy or its folder stayed"
+        );
+        // The folder's removal names its console as every other line of this Send does.
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told[1..],
+            [format!(
+                "Send to {}: The cancelled copy is gone, and its folder {} was removed.",
+                origin.1,
+                dir.display()
+            )]
+        );
+        click_send(&mut window, &ctx);
+        assert!(
+            window.image.send.before_the_line(),
+            "the console left's Send did not answer"
+        );
+        until_written(&mut window, &ctx);
+    }
+
+    /// A cancelled Send whose worker ends after the focus moved to another console's image says
+    /// what it has to say under its own console's image, never under the one shown.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_sends_last_word_waits_for_its_own_consoles_image() {
+        let received = term_core::received::Received::new("annotated-cancel-elsewhere");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let own = slot(&window).origin().unwrap().pane;
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        let reported = "the half-written copy could not be removed: busy";
+        // A word parked earlier for the same console, not yet read: the worker's joins it.
+        slot_called(&mut window, own).unshown = Some("An earlier word.".into());
+        sender.send(Err(reported.into())).unwrap();
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains(reported))
+        };
+        for _ in 0..3 {
+            assert!(
+                !said(&painted(&mut window, &ctx, vec![])),
+                "said under another console's image"
+            );
+        }
+        assert!(!window.image.send.parked());
+        let active = window.active;
+        window.tabs[active].focus = own;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(said(&shapes), "lost on the way to its own console");
+        assert!(
+            texts(&shapes, area()).iter().any(|t| t.contains(&format!(
+                "An earlier word. The cancelled copy's worker reported: {reported}"
+            ))),
+            "the earlier word was overwritten"
+        );
+    }
+
+    /// A console that closes with its Send's copy being written is said closed once on standard
+    /// error, though the worker it leaves then fails: the failure follows in its own words.
+    #[cfg(unix)]
+    #[test]
+    fn a_console_closed_mid_send_whose_worker_fails_is_said_closed_once() {
+        let received = term_core::received::Received::new("annotated-closed-fails");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let (name, label) = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        send::TOLD.with(|told| told.borrow_mut().clear());
+        window.close_a_pane_called(name, &ctx).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(window.image.send.parked());
+        sender.send(Err("disk full".into())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [
+                format!("Send to {label}: The origin console has closed; nothing was sent."),
+                format!("Send to {label}: The cancelled copy's worker reported: disk full."),
+            ]
+        );
+    }
+
     /// Every refusal Send can know before writing anything says why, keeps the marks, writes no
     /// copy and types nothing: a line longer than the console keeps, a paste waiting for an
-    /// answer, a writer that gave up, a console with no folder, and a console gone.
+    /// answer, a writer that gave up and a console with no folder; a console gone takes its
+    /// image with it and says nothing under another's.
     #[cfg(unix)]
     #[test]
     fn a_refused_send_says_why_and_keeps_the_marks() {
@@ -3411,7 +4362,7 @@ mod tests {
         std::fs::write(dir.join("keep"), b"").unwrap();
         let refused = |window: &mut crate::Window, ctx: &egui::Context, why: &str| {
             until_written(window, ctx);
-            let notice = window.image.notice.clone().unwrap_or_default();
+            let notice = slot(window).notice.clone().unwrap_or_default();
             assert!(
                 // Refused before the copy was written, not written and then removed.
                 notice.contains(why) && notice.ends_with("; nothing was sent."),
@@ -3451,20 +4402,19 @@ mod tests {
         // The console closes between the click and the frame that would write the copy.
         origin_pane(&mut window).panel = dir_kept;
         click_send(&mut window, &ctx);
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         window.close_a_pane_called(name, &ctx).unwrap();
         until_written(&mut window, &ctx);
-        let notice = window.image.notice.clone().unwrap_or_default();
-        assert!(
-            notice.contains("has closed") && notice.ends_with("; nothing was sent."),
-            "{notice}"
-        );
-        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        // Its slot, marks and all, went with it: the refusal is for standard error, never for the
+        // image of the console left.
+        assert!(!window.image.sending());
+        assert_eq!(slot(&window).notice, None);
+        assert!(!slot(&window).shown());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The console closes while its copy is being written: the copy and the directory it left go,
-    /// the marks stay, the drawer says why, and nothing is typed anywhere, then or later.
+    /// The console closes while its copy is being written: the copy and the directory it left go
+    /// with its image and marks, and nothing is typed anywhere, then or later.
     #[cfg(unix)]
     #[test]
     fn a_console_closed_while_its_copy_is_written_gets_nothing_and_keeps_no_copy() {
@@ -3486,7 +4436,7 @@ mod tests {
         let copy = dir.join("annotated-1.png");
         assert_eq!(request, copy);
         flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         window.close_a_pane_called(name, &ctx).unwrap();
         sender.send(Ok(copy.clone())).unwrap();
         for _ in 0..3 {
@@ -3496,12 +4446,9 @@ mod tests {
             !copy.exists() && !dir.exists(),
             "the copy or its folder stayed"
         );
-        let notice = window.image.notice.clone().unwrap_or_default();
-        assert!(
-            notice.contains("closed") && notice.contains("removed"),
-            "{notice}"
-        );
-        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        // Its image and marks went with it, and what is left to say is not said under the image
+        // of the console left.
+        assert_eq!(slot(&window).notice, None);
         assert!(!line.is_empty());
         // Its own console is gone; the one left, which now has the keys, got nothing either.
         std::thread::sleep(Duration::from_millis(200));
@@ -3554,6 +4501,105 @@ mod tests {
         assert_eq!(
             received.wait_for(submitted.len(), Duration::from_secs(5)),
             submitted
+        );
+        let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A refusal said after Cancel, while that Send's worker still writes its copy, outlives the
+    /// worker's end: only the words saying Send waits for it are replaced.
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_said_while_a_cancelled_worker_writes_outlives_it() {
+        let received = term_core::received::Received::new("annotated-refusal-outlives");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        let name = slot(&window).origin().unwrap().pane;
+        let other = folder.0.join("other.png");
+        assert!(crate::viewer::open_image_target(&mut window, name, other).is_err());
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        assert_eq!(
+            slot(&window).notice.as_deref(),
+            Some(
+                "Send cancelled; nothing was sent. Its copy is gone; Send is ready. Send or \
+                 clear the marks on the image before closing it or opening another image."
+            )
+        );
+    }
+
+    /// A refusal takes the place of a delivered Send's word, which is not a failure waiting to be
+    /// read, and joins one that is.
+    #[test]
+    fn a_refusal_after_a_delivered_send_replaces_its_word() {
+        let mut slot = Slot::default();
+        let source = crate::viewer::Source {
+            pane: 0,
+            label: "bash".into(),
+            cwd: None,
+        };
+        slot.open(1, source, PathBuf::from("/a.png"));
+        slot.sent();
+        assert_eq!(slot.notice.as_deref(), Some("Sent to bash."));
+        slot.add("Send or clear the marks.");
+        assert_eq!(slot.notice.as_deref(), Some("Send or clear the marks."));
+        slot.say("The copy failed.");
+        slot.add("Send or clear the marks.");
+        assert_eq!(
+            slot.notice.as_deref(),
+            Some("The copy failed. Send or clear the marks.")
+        );
+    }
+
+    /// A console that closes between its typed line and the Enter owed to it has no image left to
+    /// say it under: standard error is told, under its name, that the Enter was not pressed.
+    #[cfg(unix)]
+    #[test]
+    fn a_console_closed_before_its_enter_is_told_on_standard_error() {
+        let received = term_core::received::Received::new("annotated-enter-closed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let name = slot(&window).origin().unwrap().pane;
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes()
+        );
+        send::TOLD.with(|told| told.borrow_mut().clear());
+        window.close_a_pane_called(name, &ctx).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.sending(), "the owed Enter stayed");
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [format!(
+                "Send to Console {}: The line was typed, but Enter was not pressed: The origin \
+                 console has closed.",
+                name + 1
+            )]
         );
         let _ = std::fs::remove_file(&copy);
     }
@@ -3701,8 +4747,8 @@ mod tests {
         flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
         sender.send(Ok(copy.clone())).unwrap();
         painted(&mut window, &ctx, vec![]);
-        let label = &window.image.origin().unwrap().label;
-        assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
+        let label = &slot(&window).origin().unwrap().label;
+        assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
         assert!(line.ends_with("· 1: button clipped · Note: x"), "{line}");
         assert_eq!(
             received.wait_for(line.len(), Duration::from_secs(5)),
@@ -3741,9 +4787,10 @@ mod tests {
         painted(&mut window, &ctx, vec![egui::Event::Text("x".into())]);
         assert_eq!(marks_of(&window).general, "x", "the notes stayed frozen");
         let parked = "Send cancelled; nothing was sent. Still finishing the previous copy.";
-        assert_eq!(window.image.notice.as_deref(), Some(parked));
+        assert_eq!(slot(&window).notice.as_deref(), Some(parked));
 
-        let finishing = "Still finishing the previous copy…";
+        let label = &slot(&window).origin().unwrap().label;
+        let finishing = format!("Still finishing the copy for {label}…");
         let shapes = painted(&mut window, &ctx, vec![]);
         let (_, button) = text_rect(&shapes, |t| t == finishing).expect("Send says why it waits");
         painted(
@@ -3753,25 +4800,26 @@ mod tests {
         );
         click(&mut window, &ctx, button.center());
         assert!(!window.image.sending(), "a greyed-out Send was taken up");
-        assert_eq!(window.image.notice.as_deref(), Some(parked));
+        assert_eq!(slot(&window).notice.as_deref(), Some(parked));
         // Another notice takes the cancel's place; the button still says why it waits.
         let other = folder.0.join("other.png");
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         assert!(crate::viewer::open_image_target(&mut window, name, other).is_err());
-        assert_ne!(window.image.notice.as_deref(), Some(parked));
+        assert_ne!(slot(&window).notice.as_deref(), Some(parked));
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(
             text_rect(&shapes, |t| t == finishing).is_some(),
             "the reason went"
         );
         window.image.send.ask(send::Request {
-            document: window.image.document().unwrap(),
-            pane: window.image.origin().unwrap().pane,
+            document: slot(&window).document().unwrap(),
+            pane: slot(&window).origin().unwrap().pane,
+            console: "test".into(),
             path: copy.clone(),
             line: "x".into(),
         });
         painted(&mut window, &ctx, vec![]);
-        let notice = window.image.notice.clone().unwrap_or_default();
+        let notice = slot(&window).notice.clone().unwrap_or_default();
         assert!(
             notice.starts_with("Still finishing the previous copy"),
             "{notice}"
@@ -3783,7 +4831,7 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         assert!(!window.image.send.parked());
         assert!(!copy.exists(), "the cancelled copy stayed");
-        let notice = window.image.notice.clone().unwrap_or_default();
+        let notice = slot(&window).notice.clone().unwrap_or_default();
         assert!(
             notice.ends_with("Send is ready.") && !notice.contains("Still finishing"),
             "{notice}"
@@ -3800,8 +4848,9 @@ mod tests {
     }
 
     /// A cancelled Send's worker that ends cleanly says Send is ready only where it is: not once
-    /// the marks were cleared meanwhile, nor once the image's console closed, leaving no folder to
-    /// write a copy into. Its copy is gone either way, and the drawer says that much.
+    /// the marks were cleared meanwhile. Its copy is gone either way, and the drawer says that
+    /// much; a console that closed meanwhile took its image along, and nothing is said under the
+    /// image of the console left.
     #[cfg(unix)]
     #[test]
     fn a_cancelled_send_says_send_is_ready_only_with_something_to_send() {
@@ -3825,18 +4874,16 @@ mod tests {
             if case == "cleared" {
                 marks_mut(&mut window).clear();
             } else {
-                let name = window.image.origin().unwrap().pane;
+                let name = slot(&window).origin().unwrap().pane;
                 window.close_a_pane_called(name, &ctx).unwrap();
             }
             sender.send(Ok(copy.clone())).unwrap();
             painted(&mut window, &ctx, vec![]);
             assert!(!window.image.send.parked());
             assert!(!copy.exists(), "the cancelled copy stayed");
-            assert_eq!(
-                window.image.notice.as_deref(),
-                Some("Send cancelled; nothing was sent. Its copy is gone."),
-                "{case}"
-            );
+            let said = (case == "cleared")
+                .then_some("Send cancelled; nothing was sent. Its copy is gone.");
+            assert_eq!(slot(&window).notice.as_deref(), said, "{case}");
         }
     }
 
@@ -3853,7 +4900,7 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 640, 400);
         let (mut window, ctx, _dir) = window_to_send(&path, &received);
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         click_send(&mut window, &ctx);
         painted(&mut window, &ctx, vec![]);
         let (_, sender) = window
@@ -3864,8 +4911,8 @@ mod tests {
         let cancel = place_of(&mut window, &ctx, "Cancel");
         press(&mut window, &ctx, cancel);
         marks_mut(&mut window).clear();
-        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
-        assert!(!window.image.shown(), "the image did not close");
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
+        assert!(!slot(&window).shown(), "the image did not close");
         let reported = "the half-written copy could not be removed: busy";
         sender.send(Err(reported.into())).unwrap();
         painted(&mut window, &ctx, vec![]);
@@ -3907,11 +4954,12 @@ mod tests {
         );
     }
 
-    /// A cancelled Send whose worker fails after its console closed says the console closed
-    /// before what the worker reported, as a Send that was not cancelled does.
+    /// A cancelled Send whose worker fails after its console closed has no image left to say it
+    /// under: it goes to standard error naming its console, and the console left hears nothing of
+    /// it, under its image or under the next one opened there.
     #[cfg(unix)]
     #[test]
-    fn a_cancelled_send_whose_worker_fails_after_its_console_closed_says_so() {
+    fn a_cancelled_send_whose_worker_fails_after_its_console_closed_says_nothing_under_another() {
         let received = term_core::received::Received::new("annotated-cancel-closed");
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
@@ -3926,21 +4974,41 @@ mod tests {
             .expect("the copy is being written");
         let cancel = place_of(&mut window, &ctx, "Cancel");
         press(&mut window, &ctx, cancel);
-        let name = window.image.origin().unwrap().pane;
+        let (name, label) = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
         window.close_a_pane_called(name, &ctx).unwrap();
+        let left = window.active().focus;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, left, &other);
+        send::TOLD.with(|told| told.borrow_mut().clear());
         sender.send(Err("disk full".into())).unwrap();
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area())
+                .iter()
+                .any(|t| t.contains("disk full"))
+        };
         for _ in 0..3 {
-            painted(&mut window, &ctx, vec![]);
+            assert!(
+                !said(&painted(&mut window, &ctx, vec![])),
+                "said under another console's image"
+            );
         }
         assert!(!window.image.send.parked());
-        // After the cancel's own word, which no longer says the worker is still finishing.
-        let notice = window.image.notice.clone().unwrap_or_default();
+        open_in(&mut window, &ctx, left, &path);
         assert!(
-            notice.starts_with(
-                "Send cancelled; nothing was sent. The origin console has closed, and the \
-                 cancelled copy's worker reported: disk full"
-            ),
-            "{notice}"
+            !said(&painted(&mut window, &ctx, vec![])),
+            "said under the next image opened"
+        );
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [format!(
+                "Send to {label}: The origin console has closed, and the cancelled copy's worker \
+                 reported: disk full."
+            )]
         );
     }
 
@@ -3954,7 +5022,7 @@ mod tests {
         other: &Path,
         started: bool,
     ) -> Option<(PathBuf, std::sync::mpsc::Sender<Result<PathBuf, String>>)> {
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(window).origin().unwrap().pane;
         click_send(window, ctx);
         if started {
             painted(window, ctx, vec![]);
@@ -3964,8 +5032,8 @@ mod tests {
         crate::viewer::open_image_target(window, name, other.to_owned()).unwrap();
         // Decoded without a pass, so that the asked Send is still waiting for its frame.
         let begun = Instant::now();
-        while !window.image.loaded() {
-            window.image.poll(ctx);
+        while !slot(window).loaded() {
+            slot_mut(window).poll(ctx);
             assert!(begun.elapsed() < Duration::from_secs(30));
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -3987,8 +5055,11 @@ mod tests {
         write_png(&other, 320, 200);
         let (mut window, ctx, dir) = window_to_send(&path, &received);
         let replaced = |window: &crate::Window| {
-            let notice = window.image.notice.clone().unwrap_or_default();
-            assert!(notice.contains("no longer the one shown"), "{notice}");
+            let notice = slot(window).notice.clone().unwrap_or_default();
+            assert!(
+                notice.contains("no longer the one in its console"),
+                "{notice}"
+            );
             assert_eq!(marks_of(window).general, "the new image's note");
             assert!(received.so_far().is_empty());
             assert!(!window.image.sending());
@@ -4037,8 +5108,8 @@ mod tests {
         let shown = click_send(&mut window, &ctx);
         assert!(shown.contains(&copy.display().to_string()), "{shown}");
         until_written(&mut window, &ctx);
-        let label = &window.image.origin().unwrap().label;
-        assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
+        let label = &slot(&window).origin().unwrap().label;
+        assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
         assert!(copy.exists());
         assert_eq!(std::fs::read(&foreign).unwrap(), b"not ours");
         assert!(std::fs::symlink_metadata(&dangling).is_ok());
@@ -4070,7 +5141,7 @@ mod tests {
         origin_pane(&mut window).held = held;
         sender.send(Ok(copy.clone())).unwrap();
         painted(&mut window, &ctx, vec![]);
-        let notice = window.image.notice.clone().unwrap_or_default();
+        let notice = slot(&window).notice.clone().unwrap_or_default();
         assert!(
             notice.contains(&format!(
                 "the copy at {} could not be removed: ",
@@ -4112,17 +5183,18 @@ mod tests {
             );
             assert!(copy.exists());
         }
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         window.close_a_pane_called(name, &ctx).unwrap();
         assert!(!dir.exists(), "the copies or the folder stayed");
     }
 
-    /// The console closes while its copy is written and the write then fails: the drawer says the
-    /// console closed and the error the worker met, and the directory the console could not
-    /// remove, because the half-written copy was in it, goes once the copy is gone.
+    /// The console closes while its copy is written and the write then fails: the directory the
+    /// console could not remove, because the half-written copy was in it, goes once the copy is
+    /// gone, and what the worker met goes to standard error, not under the image of the console
+    /// left.
     #[cfg(unix)]
     #[test]
-    fn a_write_that_fails_after_its_console_closed_says_so_and_leaves_no_folder() {
+    fn a_write_that_fails_after_its_console_closed_leaves_no_folder() {
         let received = term_core::received::Received::new("annotated-failed-closed");
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
@@ -4136,7 +5208,7 @@ mod tests {
             .stall()
             .expect("the copy is being written");
         std::fs::write(&copy, b"half").unwrap();
-        let name = window.image.origin().unwrap().pane;
+        let name = slot(&window).origin().unwrap().pane;
         window.close_a_pane_called(name, &ctx).unwrap();
         assert!(
             dir.exists(),
@@ -4151,17 +5223,9 @@ mod tests {
             )))
             .unwrap();
         painted(&mut window, &ctx, vec![]);
-        let notice = window.image.notice.clone().unwrap_or_default();
-        assert_eq!(
-            notice,
-            format!(
-                "The origin console has closed, and the copy's worker reported: The copy could \
-                 not be written at {}: disk full; nothing was sent.",
-                copy.display()
-            )
-        );
+        assert_eq!(slot(&window).notice, None);
         assert!(!dir.exists(), "the folder stayed");
-        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        assert!(!window.image.sending());
     }
 
     /// A file that takes the shown name between the click and the frame that starts the copy
@@ -4180,7 +5244,7 @@ mod tests {
         std::fs::write(&taken, b"theirs").unwrap();
         until_written(&mut window, &ctx);
         assert_eq!(
-            window.image.notice.as_deref(),
+            slot(&window).notice.as_deref(),
             Some("The copy's name changed since the line was shown; nothing was sent.")
         );
         assert_eq!(std::fs::read(&taken).unwrap(), b"theirs");
@@ -4219,18 +5283,19 @@ mod tests {
         let (painting, _) = text_rect(&shapes, |t| t.starts_with("Annotated screenshot: "))
             .expect("the line is painted while the copy is written");
         assert_eq!(painting, shown);
-        let document = window.image.document().unwrap();
-        let pane = window.image.origin().unwrap().pane;
+        let document = slot(&window).document().unwrap();
+        let pane = slot(&window).origin().unwrap().pane;
         window.image.send.ask(send::Request {
             document,
             pane,
+            console: "test".into(),
             path: dir.join("annotated-9.png"),
             line: "a second Send".into(),
         });
         sender.send(Ok(copy.clone())).unwrap();
         painted(&mut window, &ctx, vec![]);
-        let label = &window.image.origin().unwrap().label;
-        assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
+        let label = &slot(&window).origin().unwrap().label;
+        assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
         assert_eq!(
             received.wait_for(shown.len(), Duration::from_secs(5)),
             shown.as_bytes()
@@ -4261,7 +5326,7 @@ mod tests {
         painted(&mut window, &ctx, vec![undo.clone()]);
         assert_eq!(marks_of(&window).marks().len(), 1, "Ctrl+Z with no Send");
         press(&mut window, &ctx, spot);
-        let label = window.image.origin().unwrap().label.clone();
+        let label = slot(&window).origin().unwrap().label.clone();
         let shapes = painted(&mut window, &ctx, vec![]);
         let (_, button) = text_rect(&shapes, |t| t == format!("Send to {label} and press Enter"))
             .expect("the button names the console");
@@ -4286,8 +5351,8 @@ mod tests {
             "Ctrl+Z took a mark back"
         );
         until_written(&mut window, &ctx);
-        let label = &window.image.origin().unwrap().label;
-        assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
+        let label = &slot(&window).origin().unwrap().label;
+        assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
     }
 
     /// An earlier name freed between the click and the frame that starts the copy refuses the
@@ -4309,7 +5374,7 @@ mod tests {
         std::fs::remove_file(&earlier).unwrap();
         until_written(&mut window, &ctx);
         assert_eq!(
-            window.image.notice.as_deref(),
+            slot(&window).notice.as_deref(),
             Some("The copy's name changed since the line was shown; nothing was sent.")
         );
         assert_eq!(
@@ -4398,8 +5463,8 @@ mod tests {
             received.wait_for(submitted.len(), Duration::from_secs(5)),
             submitted
         );
-        let label = &window.image.origin().unwrap().label;
-        assert_eq!(window.image.notice, Some(format!("Sent to {label}.")));
+        let label = &slot(&window).origin().unwrap().label;
+        assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
         assert!(other.so_far().is_empty(), "the line went to another tab");
         let _ = std::fs::remove_file(copy_dir.join("annotated-1.png"));
     }

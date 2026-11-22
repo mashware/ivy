@@ -1,7 +1,7 @@
 //! What frames the drawer's image while it is marked: the tools above it, a column of notes beside
 //! it (under it where the drawer is too narrow for both), and under them the line Send will type.
 use super::marks::{self, Marks, Tool};
-use super::send::{self, Request, Sending};
+use super::send::{self, Button, Request, Sending};
 use crate::theme::{Roles, metrics};
 use crate::ui::icons::{self, Icon};
 use eframe::egui;
@@ -133,15 +133,15 @@ pub(super) struct Fixed {
 }
 
 impl Fixed {
-    /// `send` is the console Send names, whether a Send is on its way and whether a cancelled
-    /// one's worker is still writing, once there is something to send.
+    /// `send` is the console Send names and what its button stands for, once there is something
+    /// to send.
     pub(super) fn new(
         ctx: &egui::Context,
         style: &egui::Style,
         body: egui::Rect,
         notice: Option<&str>,
         refused: egui::Color32,
-        send: Option<(&str, bool, bool)>,
+        send: Option<(&str, Button)>,
     ) -> Self {
         let column = if side_by_side(body) {
             COLUMN
@@ -156,9 +156,9 @@ impl Fixed {
         let wrapped = |width: f32| egui::text::TextWrapping::wrap_at_width(width.max(1.0));
         let said =
             |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
-        let send = send.map(|(console, busy, parked)| {
+        let send = send.map(|(console, button)| {
             let font = egui::TextStyle::Button.into();
-            let label = send_label(console, busy, parked).into();
+            let label = send_label(console, button).into();
             lay(label, wrapped(width - 2.0 * padding.x), font)
         });
         let mut fixed = Self {
@@ -201,16 +201,16 @@ impl Fixed {
     }
 }
 
-/// What the Send button says: the console it types into, that a Send is on its way, which is
-/// why the notes cannot be changed until it is done, or, while it is greyed out for a cancelled
-/// Send's worker, why: on the button, because a notice can be replaced by any other.
-fn send_label(console: &str, busy: bool, parked: bool) -> String {
-    if busy {
-        "Sending…".to_owned()
-    } else if parked {
-        "Still finishing the previous copy…".to_owned()
-    } else {
-        format!("Send to {console} and press Enter")
+/// What the Send button says: the console it types into, that its Send is on its way, which is
+/// why the notes cannot be changed until it is done, or, while it is greyed out for another
+/// console's Send or a cancelled one's worker, why: on the button, because a notice can be
+/// replaced by any other.
+fn send_label(console: &str, button: Button) -> String {
+    match button {
+        Button::Free => format!("Send to {console} and press Enter"),
+        Button::Sending | Button::Entering => "Sending…".to_owned(),
+        Button::Waiting(sending) => format!("Waiting for the Send to {sending}…"),
+        Button::Finishing(cancelled) => format!("Still finishing the copy for {cancelled}…"),
     }
 }
 
@@ -300,8 +300,8 @@ pub(super) fn toolbar(
 /// What a click in the column asked of Send.
 pub(super) enum Asked {
     Send(Request),
-    /// Take back the Send whose line is not typed yet.
-    Cancel,
+    /// Take back the Send whose line is not typed yet, clicked on the image opened as this.
+    Cancel(u64),
 }
 
 /// What the notes show besides the marks.
@@ -314,6 +314,9 @@ pub(super) struct Panel<'a> {
     /// The opening of the image the notes belong to.
     pub(super) document: u64,
     pub(super) origin: &'a crate::viewer::Source,
+    /// What the Send button stands for, the value its label in `fixed` was laid out from: the
+    /// button answers and offers Cancel from that same value.
+    pub(super) button: Button<'a>,
     pub(super) sending: &'a Sending,
 }
 
@@ -334,6 +337,7 @@ pub(super) fn notes(
         refused,
         document,
         origin,
+        button,
         sending,
     } = panel;
     let inner = layout.column.shrink2(MARGIN);
@@ -386,13 +390,13 @@ pub(super) fn notes(
     // what it asks for is composed after the notes, from what they hold at the end of this pass.
     // The fields carry ids of their own: a button or a notice that comes and goes ahead of them
     // would otherwise renumber egui's automatic ids and take the keyboard from a note mid-word.
-    // Not while a cancelled Send's worker may yet create the copy this one would name.
-    let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
+    // Read from the value the label was: a button greyed out says why.
+    let ready = matches!(sending.target, Some(Ok(_))) && button == Button::Free;
     let foot = fixed.send.as_ref().filter(|_| !squeezed);
     let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);
         let label = Arc::clone(label);
-        if !sending.cancellable() {
+        if button != Button::Sending {
             return (
                 send_button(&mut column, ready, label, height, &roles),
                 false,
@@ -420,7 +424,7 @@ pub(super) fn notes(
         }
         // A Send on its way takes the notes as they were at its click; only its Cancel answers.
         // After the notice: a disabled label shows no tooltip, and the cut one needs its own.
-        if sending.busy() {
+        if sending.busy_for(document) {
             ui.disable();
         }
         egui::ScrollArea::vertical()
@@ -429,7 +433,7 @@ pub(super) fn notes(
             .show(ui, |ui| list(ui, marks, document, &roles));
     });
     if marks.is_empty() {
-        return cancelled.then_some(Asked::Cancel);
+        return cancelled.then_some(Asked::Cancel(document));
     }
     let line = match &sending.target {
         Some(Ok(path)) => Ok((compose(path, marks), path)),
@@ -437,15 +441,22 @@ pub(super) fn notes(
         None => Err("Nothing can be sent from here.".to_owned()),
     };
     if let Some(rect) = layout.footer {
-        footer(ui, rect, &line, sending.busy(), (refused, &roles));
+        footer(
+            ui,
+            rect,
+            &line,
+            sending.busy_for(document),
+            (refused, &roles),
+        );
     }
     if cancelled {
-        return Some(Asked::Cancel);
+        return Some(Asked::Cancel(document));
     }
     let (line, path) = line.ok().filter(|_| clicked)?;
     Some(Asked::Send(Request {
         document,
         pane: origin.pane,
+        console: send::console_name(origin),
         path: path.clone(),
         line,
     }))
@@ -573,6 +584,22 @@ fn compose(path: &std::path::Path, marks: &Marks) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each Send button names what it stands for: its own Send still on its way once its line is
+    /// typed, never a wait for itself.
+    #[test]
+    fn a_send_button_says_what_it_stands_for() {
+        assert_eq!(send_label("bash", Button::Sending), "Sending…");
+        assert_eq!(send_label("bash", Button::Entering), "Sending…");
+        assert_eq!(
+            send_label("bash", Button::Waiting("claude (Console 2)")),
+            "Waiting for the Send to claude (Console 2)…"
+        );
+        assert_eq!(
+            send_label("bash", Button::Finishing("claude (Console 2)")),
+            "Still finishing the copy for claude (Console 2)…"
+        );
+    }
 
     fn body(width: f32) -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(width, 400.0))
