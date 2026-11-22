@@ -261,8 +261,8 @@ fn focus(window: &mut Window, pane: usize) {
     }
 }
 
-/// Close one tab of the drawer: what it showed is forgotten, the drawer moves to the next tab the
-/// strip shows, in the order Document, Changes, Image, and with no other tab it closes. A review
+/// Close one tab of the drawer: what it showed is forgotten, the drawer moves to another tab the
+/// strip shows, preferring Document, then Changes, then Image, and with no other tab it closes. A review
 /// with unsent comments and an image with unsent marks are kept and say why.
 pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::Context) {
     let tabs = super::drawer::tabs(window);

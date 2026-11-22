@@ -39,8 +39,8 @@ pub(crate) struct Slot {
     document: Option<Opened>,
     /// A decode whose image was replaced or closed before it finished. A read stuck on an
     /// unresponsive filesystem cannot be cancelled, so its handle is kept and no other decode
-    /// starts in this slot until it ends: repeated opens cannot pile up readers, and a stuck read
-    /// holds up only its own console.
+    /// starts in this slot until it ends: repeated opens in one console cannot pile up readers, and
+    /// a stuck read holds up only its own console. A closed console lets its read go with the slot.
     abandoned: Option<(PathBuf, Job<Picture>)>,
     /// Why the last thing asked of the marks was refused, or what became of them.
     notice: Option<String>,
@@ -169,7 +169,7 @@ impl Slot {
         Some((Arc::clone(self.original()?), marks))
     }
 
-    /// Which opening of an image is shown.
+    /// Which opening this slot holds.
     fn document(&self) -> Option<u64> {
         Some(self.document.as_ref()?.id)
     }

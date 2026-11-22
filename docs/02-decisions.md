@@ -9311,7 +9311,8 @@ for anything else.
   never again: switching to Changes and back, or closing and reopening the drawer, shows the same
   picture, and a program that overwrites the same screenshot name does not change what is on
   screen. Markdown's one-second refresh does not apply.
-- **One read at a time.** A read stuck on an unresponsive filesystem cannot be cancelled, so
+- **One read at a time.** *(Superseded in part by «The image leaves the document tab», #198: the
+  bound is per open console, and a closed console's stuck read is let go.)* A read stuck on an unresponsive filesystem cannot be cancelled, so
   replacing or closing an image whose decode has not finished keeps its handle, and another open
   while it runs is refused with «Still reading <path>…» in the drawer. Repeated opens cannot pile
   up readers, the rule the Markdown state already keeps. Errors name the path they are about.
@@ -9409,12 +9410,14 @@ focus click would resize every console. A Ctrl+click on an image path, or Files 
 fills the clicked console's slot and moves the focus to that console. Unsent marks refuse a new
 image in their own console only; they no longer refuse opening Markdown. Decoding stays lazy and
 once per opening; one live and one abandoned read are bounded per open console, so a stuck read
-never refuses another console's image, and a closed console's stuck read is detached as a replaced
-one is. A pan latched on one console's image is forgotten when the drawer paints another's. Send
+never refuses another console's image. A closed console's stuck read is let go with its slot,
+unlike a replaced one, which its slot keeps: its thread finishes unwatched and nothing waits on it,
+so a hung mount costs one reader per console opened and closed on it. A pan latched on one console's image is forgotten when the drawer paints another's. Send
 addresses the slot of the console it was clicked for, never the focused one: its line, its «Sent
 to» and a cancelled worker's last word all go there, and what it has to say about a console that
 closed meanwhile, whose slot went with it, goes to standard error only. No title-bar button opens
-the Image tab: the File door opens the drawer and the tab is in its strip.
+the Image tab: the File door opens the drawer, and the tab is in its strip while the focused
+console holds an image or the tab is the one shown.
 
 Discarded: keeping the image in the document tab with a per-console «front» flag (the tab flipped
 between an image and a Markdown file not that console's); per-console Markdown (nobody asked); a
@@ -11597,8 +11600,8 @@ While a worker is parked, Send is greyed out and reads «Still finishing the pre
 button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
 before any other check, so two workers never race for one name; the decoder's abandoned read is the
 same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
-goes to standard error as well, and waits for the next drawer that lays the notes out, because the
-image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+goes to standard error as well, and waits in its own console's slot until the drawer lays that
+console's image out, because the image it was for may be closed by then; there it joins the notice shown rather than replacing it,
 which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
 and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
@@ -11608,7 +11611,8 @@ frame, whichever tab is shown and whether the drawer is open, **if that opening 
 console's slot**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open
 another image in that console while its Send is busy, and other consoles' slots are not affected
 (#198); the Send still carries which opening of an image it belongs to, as a guard should that
-refusal ever give. Each refusal says why and keeps the marks; a delivered Send
+refusal ever give. Each refusal for a console still open says why under its image and keeps the
+marks; a delivered Send
 clears them. A failure says everything it knows: a write that fails after its console closed names
 both, and a half-written copy that could not be removed is named with why. Since #198 a console
 that closes takes its image, marks and notice with it, so what a Send for it still has to say — a
