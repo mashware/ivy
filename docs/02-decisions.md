@@ -9079,8 +9079,8 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026 and for
-#178 on 20 November 2026.**
+**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026, for
+#178 on 20 November 2026 and for #198 on 22 November 2026.**
 Markdown and Git changes open in a transient surface beside the consoles, together with Files and
 the global Board; since #93 that surface is Files on the left and a drawer below (see the last
 section). The
@@ -9302,7 +9302,8 @@ relative path is joined onto that console's directory, as its review is, and ref
 only when the console has none. Files says «Only Markdown, PNG and JPEG files open in the drawer.»
 for anything else.
 
-- **One document tab, as before.** The image and a Markdown file replace each other there: opening
+- **One document tab, as before.** *(Superseded by «The image leaves the document tab», #198.)*
+  The image and a Markdown file replace each other there: opening
   one forgets the other, and closing the tab forgets both, through one replacement every entry
   uses. The image is pinned to the console it was printed in, not to the focused one, and the strip
   shows that console's project or folder.
@@ -9380,7 +9381,7 @@ for anything else.
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
 - **Marked and sent (21 November 2026).** A plain left drag draws on the image, and Send hands a
   copy with the marks to the console the image came from: **D113**. Marks not yet sent keep the
-  image in the document tab, as unsent review comments keep their review.
+  image in its console's slot, as unsent review comments keep their review.
 
 Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
 forces the Markdown kind and a kind change clears that state, which would erase the image on the
@@ -9395,6 +9396,31 @@ pointer meant laying blank space before and after the image, and that broke it f
 trailing blank left stale when the drawer grew, scroll-bar drags remapped against content that
 shrank every frame so the thumb ran ahead and jumped, guessing where egui puts its bars to keep a
 pan off them, and its own drag-to-scroll joining the pan after a touch.
+
+### The image leaves the document tab — 22 November 2026, #198
+
+Images get a drawer tab of their own, **Image**; the document tab is Markdown or code only again,
+single and shared, and opening one no longer forgets the other. Each console holds one image with
+its zoom, its marks and its notes, kept on the console and dropped with it, unsent marks included,
+with no dialog. The Image tab shows the focused console's image and follows focus: clicking another
+console shows that console's image, and coming back shows the first one as it was left. On a
+console with none the tab stays selected and says so, since closing or switching the drawer on a
+focus click would resize every console. A Ctrl+click on an image path, or Files activating one,
+fills the clicked console's slot and moves the focus to that console. Unsent marks refuse a new
+image in their own console only; they no longer refuse opening Markdown. Decoding stays lazy and
+once per opening; one live and one abandoned read are bounded per open console, so a stuck read
+never refuses another console's image, and a closed console's stuck read is detached as a replaced
+one is. A pan latched on one console's image is forgotten when the drawer paints another's. Send
+addresses the slot of the console it was clicked for, never the focused one: its line, its «Sent
+to» and a cancelled worker's last word all go there, and what it has to say about a console that
+closed meanwhile, whose slot went with it, goes to standard error only. No title-bar button opens
+the Image tab: the File door opens the drawer and the tab is in its strip.
+
+Discarded: keeping the image in the document tab with a per-console «front» flag (the tab flipped
+between an image and a Markdown file not that console's); per-console Markdown (nobody asked); a
+map of images on the window (a prune on every way a console leaves; the field needs none); showing
+a closed console's last word in the focused console's slot, which would put one console's news
+under another's image.
 
 ## D73 — Connection help is global and reports observed publication
 
@@ -11578,15 +11604,16 @@ and that Send is ready only with marks to send and a folder to write into. **Whi
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that
-frame, whichever tab is shown and whether the drawer is open, **if that image is still the one
-shown**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open another
-image while a Send is busy; the Send still carries which opening of an image it belongs to, as a
-guard should that refusal ever give. Each refusal says why and keeps the marks; a delivered Send
+frame, whichever tab is shown and whether the drawer is open, **if that opening is still in its
+console's slot**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open
+another image in that console while its Send is busy, and other consoles' slots are not affected
+(#198); the Send still carries which opening of an image it belongs to, as a guard should that
+refusal ever give. Each refusal says why and keeps the marks; a delivered Send
 clears them. A failure says everything it knows: a write that fails after its console closed names
 both, and a half-written copy that could not be removed is named with why.
 
 **The copies are the app's to remove.** A console records the copies delivered to it in a field
-declared before its `PanelDir`, so when its `Pane` is dropped — the console, its tab or the window
+declared before its `PanelDir` (since #198 the console's image, `image: viewer::image::Console`), so when its `Pane` is dropped — the console, its tab or the window
 closed — they are removed first, by the paths recorded and with `remove_file`; then `PanelDir`
 finds its directory empty and removes it as it always has. A process that is killed drops nothing
 and leaves both. A file the console's program left there is not touched and keeps the directory. A
