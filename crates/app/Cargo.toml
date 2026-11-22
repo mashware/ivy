@@ -188,6 +188,8 @@ futures-lite = "2"
 # pipe where the process's standard error is, so the log file keeps it (D114). 0.61 is already in
 # the lock; only its features are named.
 [target.'cfg(windows)'.dependencies]
+# The painter exposes its actual GL version through this existing transitive logging interface.
+log = "0.4"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -222,6 +224,7 @@ raw-window-handle = "0.6.2"
 # **does** ship in the published binary, and pulled in the `windows 0.62` stack. On Linux nothing
 # changed; on Windows, which is F2.7's platform, it already changed what gets compiled.
 [dev-dependencies]
+log = "0.4"
 host-load = { path = "../host-load" }
 
 # **The same crate again, for its test support**: `term_core::received` reads what a console's
