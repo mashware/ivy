@@ -1,4 +1,4 @@
-//! Native foreground evidence, bounded to one console's ancestor chain.
+//! Native process evidence, bounded to one console's ancestor chain.
 
 use std::io;
 use std::path::PathBuf;
@@ -211,7 +211,8 @@ fn classify_snapshots<B: Copy + Eq>(
     Ok(verdict)
 }
 
-/// Owns its descriptor while borrowing the console's revocable lifetime.
+/// Owns native evidence while borrowing the console's revocable lifetime.
+/// Windows provides diagnostic ancestry here, without foreground authorization.
 pub struct ForegroundScope {
     #[cfg(target_os = "linux")]
     native: linux::Scope,

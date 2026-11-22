@@ -209,9 +209,7 @@ pub(super) fn runs_script(handle: BorrowedHandle<'_>, expected: &Path) -> io::Re
     if !expected.is_absolute() {
         return Ok(false);
     }
-    let Ok(expected) = std::fs::canonicalize(expected) else {
-        return Ok(false);
-    };
+    let expected = std::fs::canonicalize(expected)?;
     inspect(handle, COMMAND_LINE, |stream| {
         let Some(slot) = arguments::script_slot(stream)? else {
             return Ok(false);
@@ -220,7 +218,7 @@ pub(super) fn runs_script(handle: BorrowedHandle<'_>, expected: &Path) -> io::Re
         if !candidate.is_absolute() {
             return Ok(false);
         }
-        Ok(std::fs::canonicalize(candidate).is_ok_and(|path| path == expected))
+        Ok(std::fs::canonicalize(candidate)? == expected)
     })
 }
 

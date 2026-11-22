@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use crate::{Pty, Size};
 
@@ -73,10 +74,17 @@ fn windows_foreground_root_and_other_console_and_revocation() {
     let (second, _second_output) = console(&base, "second");
     let first_pid = first.child.as_ref().unwrap().process_id().unwrap();
     let second_pid = second.child.as_ref().unwrap().process_id().unwrap();
-    let scope = scope(&first).unwrap();
+    let scope = first.foreground_scope().unwrap();
     assert_eq!(scope.classify_ancestry(first_pid), Ancestry::Inside);
     assert_eq!(scope.classify_ancestry(second_pid), Ancestry::Outside);
     let observation = scope.observe_process(first_pid).unwrap();
+    let birth = observation.identity().birth;
+    assert!(matches!(scope.inspect(first_pid, birth), Err(error)
+        if error.kind() == std::io::ErrorKind::Unsupported));
+    assert!(
+        matches!(scope.inspect_descendant(first_pid, birth), Err(error)
+        if error.kind() == std::io::ErrorKind::Unsupported)
+    );
     assert_eq!(observation.identity().pid, first_pid);
     assert!(observation.executable().unwrap().is_absolute());
     assert!(observation.is_alive());
