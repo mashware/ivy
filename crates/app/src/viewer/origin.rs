@@ -255,6 +255,75 @@ pub(crate) fn open_image_target(
     Ok(())
 }
 
+/// What an agent's open answers when the drawer opened on the image (D120).
+pub(crate) const SHOWN_TO_THE_PERSON: &str =
+    "opened and shown in the drawer of this console, which the person is working in";
+
+/// What an agent's open answers when nothing moved and the mark says it (D120).
+pub(crate) const MARKED_FOR_THE_PERSON: &str = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do";
+
+/// Why an agent's open was refused over the person's unsent marks, worded for the agent.
+pub(crate) const MARKS_NOT_SENT: &str = "the image open in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the marks, then call image_open again";
+
+/// The drawer's geometry, for telling whether an opened drawer has room in this frame.
+pub(crate) struct Room<'a> {
+    pub(crate) ctx: &'a eframe::egui::Context,
+    pub(crate) whole_window: eframe::egui::Rect,
+    pub(crate) metrics: &'a crate::painter::CellMetrics,
+}
+
+/// Opens `path` in the slot of the console `pane`, for that console's own agent (D120).
+///
+/// The person is not moved: the drawer opens on the image only where they are already working in
+/// that console and nothing else holds the screen or the keys, and the keyboard stays where it
+/// was. Refused over that console's unsent marks, with nothing shown and nothing said in the
+/// drawer, because the agent is the one asking. The file itself is never touched here.
+pub(crate) fn open_for_an_agent(
+    window: &mut Window,
+    pane: usize,
+    path: PathBuf,
+    room: &Room<'_>,
+) -> Result<&'static str, String> {
+    let gone = || "the console that asked is gone".to_owned();
+    let source = source(window, pane).ok_or_else(gone)?;
+    let slot = super::image::slot_of(&mut window.tabs, pane).ok_or_else(gone)?;
+    if slot.has_marks() {
+        return Err(MARKS_NOT_SENT.to_owned());
+    }
+    window.image.open(slot, source, path);
+    if !working_in(window, pane, room.ctx) {
+        return Ok(MARKED_FOR_THE_PERSON);
+    }
+    super::select_state(window, true);
+    crate::sidebar::select(window, Tool::Image);
+    window.viewer.open = true;
+    room.ctx.request_repaint();
+    // Selected is not shown: a window too short for the drawer keeps the consoles whole.
+    let geometry = crate::tab_bar::geometry(window, room.whole_window, room.metrics);
+    Ok(if geometry.dock.is_some() {
+        SHOWN_TO_THE_PERSON
+    } else {
+        MARKED_FOR_THE_PERSON
+    })
+}
+
+/// Whether the person is working in the console `pane`: it is the focused one of the tab on show,
+/// and nothing over the drawer owns the screen or the keys. Opening the drawer anywhere else would
+/// take away what they are reading or typing into (D120).
+fn working_in(window: &Window, pane: usize, ctx: &eframe::egui::Context) -> bool {
+    let tab = window.active();
+    tab.focus == pane
+        && tab.panes().iter().any(|p| p.name == pane)
+        && !matches!(crate::sidebar::active(window), Some(Tool::Board))
+        && !window.sidebar.maximized
+        && !window.settings_editor.is_open()
+        && !window.pane_view.is_modal()
+        && !window.chrome.guide_blocked(ctx)
+        && !window.viewer.keyboard
+        && !window.viewer_other.keyboard
+        && !window.explorer.holds_keys()
+}
+
 /// Gives the console `pane` the keys, showing its tab: the image tab shows the focused console's.
 pub(super) fn focus(window: &mut Window, pane: usize) {
     if let Some(tab) = window

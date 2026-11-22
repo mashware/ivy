@@ -6026,4 +6026,250 @@ mod tests {
         assert!(notice.contains("The screenshot was saved to"), "{notice}");
         assert_eq!(marks_of(&window).general, "keep");
     }
+
+    /// One pass in which the agent of the console `pane` opens `path` where the frame's drain does:
+    /// after the keys of the pass were routed.
+    fn agent_pass(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        pane: usize,
+        path: &Path,
+    ) -> (
+        Result<&'static str, String>,
+        Vec<egui::epaint::ClippedShape>,
+    ) {
+        let metrics =
+            crate::painter::CellMetrics::measure(ctx, egui::FontId::monospace(window.font_size));
+        let mut frame = eframe::Frame::_new_kittest();
+        eframe::App::logic(window, ctx, &mut frame);
+        let mut answer = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area()),
+                max_texture_side: Some(MAX_SIDE),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                eframe::App::ui(window, ui, &mut frame);
+                let room = crate::viewer::Room {
+                    ctx: ui.ctx(),
+                    whole_window: area(),
+                    metrics: &metrics,
+                };
+                answer = Some(crate::viewer::open_for_an_agent(
+                    window,
+                    pane,
+                    path.to_owned(),
+                    &room,
+                ));
+            },
+        );
+        output.textures_delta.clear();
+        (answer.expect("the pass ran"), output.shapes)
+    }
+
+    /// What the keys of the last pass sent to the console `pane`.
+    fn typed(window: &crate::Window, pane: usize) -> Vec<u8> {
+        let pane = window.all_panes().find(|p| p.name == pane).unwrap();
+        pane.keystrokes.clone()
+    }
+
+    /// Paints until the drawer paints an image, under a hang guard.
+    fn until_an_image(window: &mut crate::Window, ctx: &egui::Context) -> egui::Rect {
+        let started = Instant::now();
+        loop {
+            if let Some(rect) = image_rect(&painted(window, ctx, vec![])) {
+                return rect;
+            }
+            assert!(started.elapsed() < Duration::from_secs(30));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// An agent's image in the console the person is typing into opens the drawer on it, from a
+    /// closed drawer or from the Changes tab, and the keys stay with the console: what is typed in
+    /// the pass of the open and in the next reaches the program.
+    #[test]
+    fn an_agents_image_in_the_console_being_typed_into_opens_the_drawer_and_leaves_the_keys() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        for from_changes in [false, true] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let typing = window.active().focus;
+            if from_changes {
+                crate::viewer::open_diff_for_pane(&mut window, typing);
+                painted(&mut window, &ctx, vec![]);
+                assert_eq!(active(&window), Some(Tool::Git));
+                // The person went back to typing in the console, as a click on it does.
+                crate::viewer::blur(&mut window);
+            }
+            let (answer, _) = agent_pass(
+                &mut window,
+                &ctx,
+                vec![egui::Event::Text("a".into())],
+                typing,
+                &path,
+            );
+            assert_eq!(answer, Ok(crate::viewer::SHOWN_TO_THE_PERSON));
+            assert_eq!(typed(&window, typing), b"a");
+            assert_eq!(active(&window), Some(Tool::Image));
+            painted(&mut window, &ctx, vec![egui::Event::Text("b".into())]);
+            assert_eq!(
+                typed(&window, typing),
+                b"b",
+                "the drawer took the keys (from Changes: {from_changes})"
+            );
+            assert_eq!(
+                until_an_image(&mut window, &ctx).size(),
+                egui::vec2(64.0, 32.0)
+            );
+        }
+    }
+
+    /// An agent's image in a console the person is not working in moves nothing: not the drawer,
+    /// not the tab it is on, not the focus, not the tab on show, and no console's grid.
+    #[test]
+    fn an_agents_image_in_a_console_nobody_is_looking_at_moves_nothing() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let mut window =
+            crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let beside = window.tabs[0].panes()[1].name;
+        let behind = window.tabs[1].panes()[0].name;
+        assert_ne!(focused, beside);
+        let grids =
+            |window: &crate::Window| window.all_panes().map(|p| p.measured).collect::<Vec<_>>();
+        let before = grids(&window);
+        for pane in [beside, behind] {
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], pane, &path);
+            assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+            assert_eq!(active(&window), None, "the drawer opened");
+            assert_eq!((window.active, window.active().focus), (0, focused));
+        }
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(grids(&window), before);
+        crate::viewer::open_diff_for_pane(&mut window, focused);
+        painted(&mut window, &ctx, vec![]);
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], beside, &path);
+        assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+        assert_eq!(
+            active(&window),
+            Some(Tool::Git),
+            "the Changes tab was switched"
+        );
+    }
+
+    /// In the console the person is working in, an agent's image still moves nothing while
+    /// something else holds the screen or the keys: the Board, a maximized drawer, the drawer
+    /// holding the keys, or Files holding them.
+    #[test]
+    fn an_agents_image_never_covers_what_the_person_is_reading_or_typing_into() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        type Surface = fn(&mut crate::Window, usize);
+        let surfaces: [(&str, Surface); 4] = [
+            ("the Board", |window, _| {
+                crate::sidebar::select(window, Tool::Board)
+            }),
+            ("a maximized drawer", |window, pane| {
+                crate::viewer::open_diff_for_pane(window, pane);
+                crate::sidebar::toggle_maximize(window);
+                // Not holding the keys, so the maximized drawer alone is what is covered.
+                crate::viewer::blur(window);
+            }),
+            ("the drawer holding the keys", |window, pane| {
+                crate::viewer::open_diff_for_pane(window, pane);
+                window.viewer.keyboard = true;
+            }),
+            ("Files holding the keys", |window, _| {
+                crate::sidebar::select(window, Tool::Files)
+            }),
+        ];
+        for (surface, open) in surfaces {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let focused = window.active().focus;
+            open(&mut window, focused);
+            let shown = (
+                active(&window),
+                window.sidebar.maximized,
+                crate::sidebar::files_visible(&window),
+            );
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+            assert_eq!(
+                answer,
+                Ok(crate::viewer::MARKED_FOR_THE_PERSON),
+                "{surface}"
+            );
+            assert_eq!(
+                (
+                    active(&window),
+                    window.sidebar.maximized,
+                    crate::sidebar::files_visible(&window),
+                ),
+                shown,
+                "{surface} was moved"
+            );
+        }
+    }
+
+    /// Unsent marks refuse an agent's image in their own console, with the sentence the agent
+    /// reads and with the image and its marks still painted; another console's open, the agent's
+    /// or the person's, is not theirs to refuse.
+    #[test]
+    fn unsent_marks_refuse_an_agents_image_only_in_their_own_console() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let marked = window.active().panes()[1].name;
+        let beside = window.active().panes()[0].name;
+        marks_mut(&mut window).general = "unsent".into();
+        let before = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], marked, &other);
+        assert_eq!(answer, Err(crate::viewer::MARKS_NOT_SENT.to_owned()));
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(same_place(image_rect(&shapes).unwrap(), before));
+        assert!(texts(&shapes, area()).iter().any(|t| t.contains("unsent")));
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], beside, &other);
+        assert!(answer.is_ok(), "{answer:?}");
+        crate::viewer::open_image_target(&mut window, beside, other.clone()).unwrap();
+        assert_eq!(
+            until_an_image(&mut window, &ctx).size(),
+            egui::vec2(64.0, 32.0)
+        );
+    }
+
+    /// The bytes decide the format: a `.png` holding text is opened, and the drawer says why it
+    /// cannot be shown.
+    #[test]
+    fn an_agents_file_that_is_not_an_image_is_opened_and_says_why_in_the_drawer() {
+        let folder = Folder::new();
+        let path = folder.0.join("notes.png");
+        std::fs::write(&path, "not an image at all").unwrap();
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+        assert_eq!(answer, Ok(crate::viewer::SHOWN_TO_THE_PERSON));
+        wait_for_text(&mut window, &ctx, "This file is not a PNG or JPEG image");
+    }
 }
