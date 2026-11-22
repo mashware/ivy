@@ -246,6 +246,22 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     )
     .unwrap();
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    // Native directory polling must agree with the synthetic OSC 7 report, even when
+    // rendering takes longer than the poll interval. Set cwd at spawn, before any frame.
+    #[cfg(unix)]
+    {
+        let (pty, output) = term_core::Pty::spawn_with_env_in(
+            "sh",
+            &["-c", "sleep 30"],
+            crate::INITIAL_GRID,
+            &[],
+            Some(&path),
+        )
+        .unwrap();
+        let pane = window.active_mut().panes_mut().remove(0);
+        pane.pty = pty.into();
+        pane.pty_output = crate::pty_output::PtyOutput::new(output, || {});
+    }
     let ctx = egui::Context::default();
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, vec![]);
@@ -298,6 +314,9 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
         ],
     );
     assert!(crate::sidebar::files_visible(&window));
+    // Force a fresh native cwd observation before consuming the reveal reply.
+    window.projects = Default::default();
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(
         &mut window,
         &ctx,
