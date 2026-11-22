@@ -545,8 +545,12 @@ mod tests {
             let tabs = super::super::drawer::tabs(window);
             (tabs.document, tabs.image)
         };
-        open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
-        open_image_target(&mut window, names[1], PathBuf::from("/shots/screen.png")).unwrap();
+        // Absolute on every platform: a bare `/docs/guide.md` has no drive on Windows, so it is
+        // read as relative to the console and the document never opens.
+        let root = std::env::temp_dir();
+        let guide = root.join("guide.md");
+        open_document_target(&mut window, names[0], guide.clone(), None);
+        open_image_target(&mut window, names[1], root.join("screen.png")).unwrap();
         assert_eq!(
             super::super::image::focused(&window)
                 .unwrap()
@@ -560,15 +564,15 @@ mod tests {
             strip(&window),
             (Some("guide.md".into()), Some("screen.png".into()))
         );
-        assert_eq!(window.viewer.path, "/docs/guide.md");
-        open_document_target(&mut window, names[0], PathBuf::from("/docs/other.md"), None);
+        assert_eq!(window.viewer.path, guide.to_string_lossy());
+        open_document_target(&mut window, names[0], root.join("other.md"), None);
         assert_eq!(active(&window), Some(Tool::Document));
         assert_eq!(
             strip(&window),
             (Some("other.md".into()), Some("screen.png".into()))
         );
         assert_eq!(
-            open_image_target(&mut window, 9999, PathBuf::from("/x.png")),
+            open_image_target(&mut window, 9999, root.join("x.png")),
             Err(NotOpened::Gone)
         );
         assert_eq!(strip(&window).1, Some("screen.png".into()));
