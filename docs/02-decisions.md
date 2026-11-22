@@ -11815,9 +11815,9 @@ takes a screenshot from:
   rather than the picture. A paste asked while another is on its way is said where the drawer
   paints it — the empty viewer's text, or beside a picture, shown or still loading — never by
   opening another console's empty viewer; over a failed image or none, on standard error, since
-  the paste on its way opens the viewer unless its console closes first. When that paste ends
-  because its console closed, the «on its way» is taken back and the viewer says again what it
-  said before.
+  the paste on its way opens the viewer unless its console closes first. When that paste ends,
+  the «on its way» is taken back: the viewer says again what it said before — the empty viewer's
+  text, or the notice beside a picture — or what the paste found, or that its console closed.
 - **Every answer is shown, and takes the keys** — the drawer's document tab, as opening a clicked
   image does — however late it comes (decided with the owner). An answer is normally there within
   milliseconds; late means a stuck clipboard owner, at most the 10 s deadline, and then what the

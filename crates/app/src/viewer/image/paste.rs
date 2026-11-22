@@ -44,7 +44,8 @@ pub(crate) struct Pasting {
     /// Who started the clipboard read outstanding; the clipboard answers every read it took.
     asked: Option<By>,
     writing: Option<Writing>,
-    /// What the empty viewer said before «a paste is already on its way» covered it.
+    /// What the viewer said — the empty viewer's text, or the notice beside a picture — before «a
+    /// paste is already on its way» covered it; said again when that paste ends.
     covered: Option<String>,
 }
 
@@ -176,7 +177,8 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
             // on its way opens the viewer unless its console closes first.
             Some(super::Load::Failed(_)) | None => return eprintln!("{BUSY}"),
             // A picture, shown or still loading (painted once decoded).
-            Some(_) => window.image.say(BUSY),
+            Some(_) if window.image.notice.as_deref() == Some(BUSY) => {}
+            Some(_) => window.image.paste.covered = window.image.notice.replace(BUSY.to_owned()),
         }
         return origin::show_image(window);
     }
@@ -227,23 +229,24 @@ pub(crate) fn received(
         Pasted::Absent if by == By::Button => tell(window, pane, by, Said::Hint),
         Pasted::Absent => tell(window, pane, by, Said::Retry(NO_IMAGE)),
         Pasted::Failed(why) => {
-            let said = format!("The clipboard could not be read: {why}.");
+            let said = format!("The clipboard could not be read: {}.", clause(&why));
             tell(window, pane, by, Said::Retry(&said));
         }
         Pasted::Unavailable(why) => {
-            // arboard's own texts are sentences: capitalised and closed.
-            let why = why.trim_end_matches('.');
-            let mut rest = why.chars();
-            let first = rest.next().map(|c| c.to_lowercase().to_string());
-            let said = format!(
-                "The clipboard is unavailable: {}{}.",
-                first.unwrap_or_default(),
-                rest.as_str()
-            );
+            let said = format!("The clipboard is unavailable: {}.", clause(&why));
             tell(window, pane, by, Said::Final(&said));
         }
         Pasted::Expired => tell(window, pane, by, Said::Retry(EXPIRED)),
     }
+}
+
+/// A cause put inside the drawer's own sentence, whoever wrote it: lowercased at its start and
+/// without a full stop of its own — arboard words its errors as sentences of their own.
+fn clause(why: &str) -> String {
+    let why = why.trim().trim_end_matches('.');
+    let mut rest = why.chars();
+    let first = rest.next().map(|c| c.to_lowercase().to_string());
+    format!("{}{}", first.unwrap_or_default(), rest.as_str())
 }
 
 /// Refuses an image the viewer would refuse anyway, before a file is left for it, then starts the
@@ -468,24 +471,31 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
 /// The end of a paste for a console that closed: said in its own viewer; another console's viewer
 /// only loses a «paste on its way» said there because of it, which is no longer true.
 fn gone(viewer: &mut super::Viewer, pane: usize) {
+    unbusy(viewer);
     if viewer.origin().is_some_and(|o| o.pane == pane) {
         return closed(viewer);
     }
     eprintln!("A paste ended for a console that has closed");
-    unbusy(viewer);
 }
 
-/// Takes back «a paste is already on its way» once that paste has ended: the empty viewer says
-/// again what it said before, and the notice beside a picture goes.
+/// Takes back «a paste is already on its way» once that paste has ended: the viewer says again
+/// what it said before, and whatever was said after it stays.
 fn unbusy(viewer: &mut super::Viewer) {
     let busy = format!("{BUSY} {HINT}");
     let covered = viewer.paste.covered.take();
-    match viewer.document.as_mut().map(|d| &mut d.load) {
-        Some(super::Load::Empty(text)) if *text == busy => {
+    if let Some(super::Load::Empty(text)) = viewer.document.as_mut().map(|d| &mut d.load) {
+        if *text == busy {
             *text = covered.unwrap_or_else(|| HINT.to_owned());
         }
-        _ if viewer.notice.as_deref() == Some(BUSY) => viewer.notice = None,
-        _ => {}
+        return;
+    }
+    let Some(after) = viewer.notice.as_deref().and_then(|n| n.strip_prefix(BUSY)) else {
+        return;
+    };
+    let after = after.trim_start().to_owned();
+    viewer.notice = covered;
+    if !after.is_empty() {
+        super::send::join(&mut viewer.notice, after);
     }
 }
 

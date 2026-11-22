@@ -5326,4 +5326,83 @@ mod tests {
             Some("A paste is already on its way.")
         );
     }
+
+    /// A «paste on its way» said beside a picture is taken back when that paste ends because its
+    /// console closed: the notice it covered is said again.
+    #[test]
+    fn a_paste_on_its_way_beside_a_picture_gives_back_the_notice_it_covered() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let other = window.active().panes()[0].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == other)
+            .unwrap()
+            .panel = Some(crate::PanelDir::create().unwrap());
+        paste::ask(&mut window, other, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(other));
+        window.image.say("Earlier.");
+        paste::ask(&mut window, other, paste::By::Button);
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("A paste is already on its way.")
+        );
+        window.close_a_pane_called(other, &ctx).unwrap();
+        harness.reply_image(other, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert_eq!(window.image.notice.as_deref(), Some("Earlier."));
+        assert!(text_rect(&shapes, |t| t == "Earlier.").is_some());
+    }
+
+    /// Over the console's own marked picture, its closing is said in place of the «on its way» that
+    /// is no longer true.
+    #[test]
+    fn a_closing_console_takes_back_its_paste_on_its_way_over_marks() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, name, paste::By::Button);
+        marks_mut(&mut window).general = "keep".into();
+        window.close_a_pane_called(name, &ctx).unwrap();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("This console has closed.")
+        );
+    }
+
+    /// Over marks, a paste that ends with its console open says what it found in place of the
+    /// «on its way» it no longer is.
+    #[test]
+    fn an_answer_over_marks_takes_back_the_paste_on_its_way() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, name, paste::By::Button);
+        marks_mut(&mut window).general = "keep".into();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("The clipboard holds no image.")
+        );
+    }
+
+    /// A read that failed says arboard's cause inside the drawer's sentence, then the hint.
+    #[test]
+    fn a_failed_read_says_its_cause_as_part_of_the_sentence() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        let held = crate::clipboard::Pasted::Failed("Held by another party.".into());
+        paste::received(&mut window, name, held, &ctx);
+        let said = format!(
+            "The clipboard could not be read: held by another party. {}",
+            paste::HINT
+        );
+        assert_eq!(paste::empty(&window.image), Some(said.as_str()));
+    }
 }
