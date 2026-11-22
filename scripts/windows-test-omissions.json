@@ -1932,16 +1932,6 @@
   },
   {
     "binary": "panel-control/panel_control:lib",
-    "name": "listener::tests::diagnostic_peer_is_the_connected_process",
-    "reason": "unix-only: requires Unix socket peer credentials"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "listener::tests::inspector_runs_once_and_its_observation_reaches_each_delivery",
-    "reason": "unix-only: requires Unix socket peer credentials"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
     "name": "listener::tests::one_read_is_answered_after_the_pane_closes_and_no_more",
     "reason": "unix-only: requires Unix-domain socket transport and close-time buffered request semantics"
   },

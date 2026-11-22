@@ -289,17 +289,13 @@ mod tests {
             // controls appear, D96); the third is where a fade keeps the window awake or not.
             let (moved, _) = pass(&mut window, &ctx, 2.0);
             pass(&mut window, &ctx, 2.016);
-            let (_, delay) = pass(&mut window, &ctx, 2.032);
+            pass(&mut window, &ctx, 2.032);
             if fades {
                 // egui steps the animation by one predicted frame on the pass the target moves,
                 // so neither end has been reached yet — that is what «it did not jump» means.
                 assert!(
                     moved[0] != line && moved[1] != accent,
                     "the fade jumped: {moved:?}"
-                );
-                assert!(
-                    delay < std::time::Duration::from_secs(1),
-                    "the fade asked for no frame"
                 );
                 let (half, _) = pass(&mut window, &ctx, 2.075);
                 assert!(
@@ -308,18 +304,69 @@ mod tests {
                 );
                 let (done, _) = pass(&mut window, &ctx, 2.2);
                 assert_eq!(done, vec![line, accent]);
-                // The cursor blink (600 ms halves) still wakes the window; a fade asks for the
-                // next frame, about 16 ms away, so anything past 100 ms is not the fade.
-                let (_, settled) = pass(&mut window, &ctx, 2.3);
-                assert!(
-                    settled > std::time::Duration::from_millis(100),
-                    "a settled fade still wakes: {settled:?}"
-                );
+                // Real producers can request a repaint independently of the focus animation.
+                // Its own repaint deadlines are checked in isolation below.
+                ctx.request_repaint();
+                let (settled, _) = pass(&mut window, &ctx, 2.3);
+                assert_eq!(settled, vec![line, accent]);
             } else {
                 assert_eq!(moved, vec![line, accent], "a measured run faded");
+            }
+        }
+    }
+
+    #[test]
+    fn focus_animation_alone_owns_its_repaint_deadlines() {
+        let pass = |ctx: &egui::Context, time: f64, moved: bool| {
+            let mut mix = [0.0; 2];
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    mix = [
+                        crate::pane_view::focus_mix(ui.ctx(), 0, !moved),
+                        crate::pane_view::focus_mix(ui.ctx(), 1, moved),
+                    ];
+                },
+            );
+            let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            output.drop_without_applying_deltas();
+            (mix, delay)
+        };
+        for fades in [true, false] {
+            let ctx = egui::Context::default();
+            crate::pane_view::allow_focus_fades(&ctx, fades);
+            for time in [0.0, 1.0, 1.5, 2.0] {
+                pass(&ctx, time, false);
+            }
+            let (moved, _) = pass(&ctx, 2.0, true);
+            pass(&ctx, 2.016, true);
+            let (between, delay) = pass(&ctx, 2.032, true);
+            if fades {
+                assert!(
+                    between.iter().all(|mix| *mix > 0.0 && *mix < 1.0),
+                    "fade did not interpolate: {between:?}"
+                );
+                assert!(
+                    delay < std::time::Duration::from_millis(100),
+                    "active fade must wake"
+                );
+                let (done, _) = pass(&ctx, 2.2, true);
+                assert_eq!(done, [0.0, 1.0]);
+                // Drain egui's already-requested follow-up passes using synthetic frame time.
+                pass(&ctx, 2.3, true);
+                let (_, settled) = pass(&ctx, 2.4, true);
+                assert!(
+                    settled > std::time::Duration::from_millis(100),
+                    "settled fade still wakes: {settled:?}"
+                );
+            } else {
+                assert_eq!(moved, [0.0, 1.0]);
                 assert!(
                     delay > std::time::Duration::from_millis(100),
-                    "a measured run woke for the fade: {delay:?}"
+                    "measured fade woke: {delay:?}"
                 );
             }
         }
