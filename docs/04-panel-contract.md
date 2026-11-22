@@ -734,6 +734,13 @@ replaces it.
   bytes decide whether it is a PNG or a JPEG. `panel-mcp` refuses one that is neither (below); a
   hand-written line that skips it is opened, and the drawer says the file is not a PNG or JPEG
   image. The line's own bound is the only bound on the path's length.
+- **On Windows no link is passed through.** If the file, or any folder on its way, is a symbolic
+  link, a junction or another reparse point that names a path, the open is refused with `<path>
+  passes through a link, and an agent's image is not opened through one`, and a folder or file that
+  cannot be looked at refuses it with `cannot tell whether <path> passes through a link: <error>`.
+  Where a link leads is never read. `panel-mcp` refuses before it asks for the file, and the window
+  refuses again before its worker reads, where the refusal is painted in the drawer. A person's own
+  open of the same file is not refused, and other platforms refuse no link (**D120**).
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
   person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
   image — it opened on it, or its Image tab was already on show for that console — and `opened; the

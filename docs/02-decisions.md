@@ -12104,19 +12104,28 @@ refused prefix is answered «is not a drive path; give it as C:\…», because i
 whether it stays here — `\\.\C:\…` and `\\?\GLOBALROOT\Device\HarddiskVolume3\…` do,
 `\\?\GLOBALROOT\Device\Mup\…` does not — and the agent can act on the form where it could not act
 on a false «elsewhere». A mapped drive letter passes: it is the user's own mapping, not a host the
-agent chose. **A link is a prefix too** (review, 22 November 2026): a symbolic link under `C:\` —
-the file, or any folder on its way — can point at `\\host\share`, and a cloned repository or an
-unpacked archive is where one comes from. So on Windows the path is walked from its root, each
-symbolic link or junction's target is read with `read_link`, which does not follow it, a relative
-target is read from the link's folder, and a target that is not local refuses the path with
-`<path> leads to <target>, which is not on this machine`; a target is walked in turn before
-anything past its link is looked at, and more than 40 links refuse the path. The bridge walks
-before its `stat`, and the image worker walks before it opens, for every image the drawer opens:
-the drawer does not know who named the path, so a person's click on such a link is refused too,
-while a share path the person types is not. A link swapped in between the walk and the open is not
-caught. Elsewhere nothing is walked: a link to a mount is to a mount the user made. The MCP bridge also `stat`s the file in its own process, which is not always the
-agent's, so a missing file, a folder, something that is not a regular file or a file over 32 MiB
-is refused at once. It then reads the file's first bytes and refuses anything that begins as
+agent chose. **On Windows an agent's image never passes through a link** (owner, 22 November
+2026, review round 3): a symbolic link under `C:\` — the file, or any folder on its way — can point at
+`\\host\share`, and a cloned repository or an unpacked archive is where one comes from. So each
+entry of the path is asked, from the root down and without following it (`symlink_metadata`),
+whether it is a link, and the first one that is refuses the path with `<path> passes through a
+link, and an agent's image is not opened through one`. A link is a name-surrogate reparse point,
+which is the rule std's `is_symlink` applies: a symbolic link, a junction, or any other tag that
+names a path. A reparse point that names nothing — a cloud placeholder, deduplication,
+compression — passes, as D108 lets it pass: it holds the file's own data behind its filter, and
+refusing it would refuse every image a sync client such as OneDrive keeps. An entry that is not there stops the walk and leaves the path to the open, which
+fails and says why; **any other error refuses** (`cannot tell whether <path> passes through a link:
+<error>`), because a folder the walk may not look into can still be passed through by the open.
+Where a link leads is never read. The bridge walks before its `stat`, and the image worker walks
+before it opens, **only for an agent's open**: the open carries who named the path to the worker,
+and a person's own click or Files open is not walked. A link swapped in between the walk and the
+open is not caught, the race D108 also leaves. Elsewhere no link is refused: a link leads where
+the user made it reach, as a mapped drive letter does on Windows. That is accepted, not a claim
+that no path there names a host — macOS's `/net` and an autofs `-hosts` map do.
+
+The MCP bridge also `stat`s the file in its own process, which is not always the agent's, so a
+missing file, a folder, something that is not a regular file or a file over 32 MiB is refused at
+once. It then reads the file's first bytes and refuses anything that begins as
 neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to say
 included, with `<path> is not a PNG or JPEG image`, before the pane is reached (owner, 22 November
 2026): told «opened» for a file that is not an image at all, the agent would wait for marks that
@@ -12151,5 +12160,7 @@ published figure changes. The glyph's read sits inside the tab bar's and the hea
 | An extension gate on the wire | The bytes decide the format, and extension-less PNGs exist. |
 | Replacing the Board, or switching a maximized drawer | Both take away what the person is reading. |
 | Opening the drawer while the drawer or Files holds the keys | The person is typing there, and switching the drawer's tab or blurring Files would take the keys from them. |
-| Refusing every link on Windows, as D108 does at an untracked file's last component | A screenshot folder reached through a junction to another local drive is ordinary; what reaches a host is where the link leads, not that it is one. |
+| Following each link and checking where it leads (review round 2) | Review round 3 found three ways around it: an error looking at an entry ended the walk as a pass, a raw NT target such as `\GLOBAL??\UNC\…` came back rootless and was read as local, and a relative target was joined to the folder the link was spelled in rather than the one it really sits in. A screenshot folder reached through a junction to another local drive is refused now; the owner took that cost over a walk that has to model Windows' resolution. |
 | Canonicalizing the path and testing the result | `canonicalize` opens the path, following each link, so it reaches the host it was meant to detect. |
+| Refusing every reparse point, `FILE_ATTRIBUTE_REPARSE_POINT` | A cloud placeholder carries it, so every agent's image a sync client such as OneDrive keeps would be refused. Which reparse tags a real OneDrive folder carries has not been looked at on Windows. |
+| Walking a person's own open too | The person chose the path; the rule is about an agent's word. |

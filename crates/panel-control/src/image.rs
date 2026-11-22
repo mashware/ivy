@@ -29,16 +29,18 @@ impl Elsewhere {
     }
 }
 
-/// Whether `path` names a file on this machine. On Windows an absolute path can name another
-/// host's share or a device, and reading it would authenticate to that host on an agent's word; no
-/// other platform has a prefix. **An allowlist, not a list of what leaves** (D120): a refusal list
+/// Whether `path`'s text names a file on this machine. On Windows an absolute path can name
+/// another host's share or a device, and reading it would authenticate to that host on an agent's
+/// word; paths on other platforms have no prefix. The text is all it judges: a link on the way is
+/// [`no_link_on_the_way`]'s. **An allowlist, not a list of what leaves** (D120): a refusal list
 /// missed `\\?\GLOBALROOT\Device\Mup\…`, which reaches the SMB redirector, and `\\?\unc\…`, which
 /// std parses case-sensitively as a plain verbatim prefix while Windows does not.
 pub fn is_local(path: &Path) -> bool {
     elsewhere(path).is_none()
 }
 
-/// Why `path` is refused by its text alone, or `None` when it is on this machine (see `is_local`).
+/// Why `path` is refused by its text alone, or `None` when its text names this machine (see
+/// `is_local`).
 pub fn elsewhere(path: &Path) -> Option<Elsewhere> {
     match path.components().next() {
         Some(Component::Prefix(prefix)) => prefix_elsewhere(prefix.kind()),
@@ -49,7 +51,8 @@ pub fn elsewhere(path: &Path) -> Option<Elsewhere> {
 /// A drive letter, in either spelling, or a volume named by its GUID — which is how `canonicalize`
 /// names a volume with no letter — is local. A mapped drive letter is the user's own mapping, not a
 /// host the agent chose, so it passes (D120). Everything else under `\\?\` and `\\.\` is the NT
-/// object namespace, of which only the `UNC` spellings are known to name a share.
+/// object namespace: its `UNC` spellings are answered as a share, and the rest as not a drive
+/// path, because some of it reaches a share (`\\?\GLOBALROOT\Device\Mup\…`) and some does not.
 fn prefix_elsewhere(prefix: Prefix<'_>) -> Option<Elsewhere> {
     match prefix {
         Prefix::Disk(_) | Prefix::VerbatimDisk(_) => None,
