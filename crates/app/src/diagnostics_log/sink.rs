@@ -76,19 +76,26 @@ impl RotatingSink {
         let moved = std::fs::rename(&self.path, rotated(&self.path));
         self.file = append(&self.path).ok();
         if let (Err(why), Some(file)) = (moved, &mut self.file) {
-            // Windows append handles lack the right to truncate, even with write(true).
-            // Keep appending through the original handle so other windows cannot overwrite us.
-            OpenOptions::new()
-                .write(true)
-                .open(&self.path)?
-                .set_len(0)?;
-            writeln!(
-                file,
-                "ivy: could not move the full log aside ({why}); it was started again"
-            )?;
+            restart(file, &self.path, &why)?;
         }
         Ok(())
     }
+}
+
+/// Windows append handles cannot truncate. The writable handle must still reach the file the
+/// append handle holds: another window could have rotated the name between the two opens.
+fn restart(file: &mut File, path: &Path, why: &std::io::Error) -> std::io::Result<()> {
+    let writable = OpenOptions::new().write(true).open(path)?;
+    if identity(&writable)? != identity(file)? {
+        return Err(std::io::Error::other(
+            "the log changed while it was being reset",
+        ));
+    }
+    writable.set_len(0)?;
+    writeln!(
+        file,
+        "ivy: could not move the full log aside ({why}); it was started again"
+    )
 }
 
 /// Where a full file goes: the same name with `.1`, replacing the one there before.
@@ -257,15 +264,35 @@ mod tests {
     }
 
     #[test]
-    fn a_log_that_cannot_be_reopened_returns_an_error_without_claiming_a_restart() {
+    fn a_failed_writable_open_preserves_the_log_without_claiming_a_restart() {
         let dir = scratch("missing-parent");
         let path = dir.join("ivy.log");
-        let mut sink = RotatingSink::open(path.clone(), 4).unwrap();
-        sink.write(b"1234").unwrap();
-        sink.path = dir.join("missing-parent/ivy.log");
+        let mut file = append(&path).unwrap();
+        file.write_all(b"1234").unwrap();
 
-        assert!(sink.write(b"5").is_err());
+        assert!(
+            restart(
+                &mut file,
+                &dir.join("missing-parent/ivy.log"),
+                &std::io::Error::other("rotation failed")
+            )
+            .is_err()
+        );
         assert_eq!(std::fs::read(&path).unwrap(), b"1234");
+    }
+
+    #[test]
+    fn another_windows_fresh_log_is_not_emptied_through_an_old_append_handle() {
+        let dir = scratch("replaced");
+        let path = dir.join("ivy.log");
+        let mut old = append(&path).unwrap();
+        old.write_all(b"old full log").unwrap();
+        std::fs::rename(&path, rotated(&path)).unwrap();
+        std::fs::write(&path, b"another window's fresh log").unwrap();
+
+        assert!(restart(&mut old, &path, &std::io::Error::other("rotation failed")).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"another window's fresh log");
+        assert_eq!(std::fs::read(rotated(&path)).unwrap(), b"old full log");
     }
 
     #[cfg(unix)]
