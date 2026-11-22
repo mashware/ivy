@@ -436,7 +436,7 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
     control_click(&mut window);
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Document)
+        Some(crate::sidebar::Tool::Image)
     );
     assert_eq!(shown_image(&window), Some((names[1], shot)));
     assert!(!crate::sidebar::files_visible(&window));

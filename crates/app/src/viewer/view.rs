@@ -316,7 +316,12 @@ mod tests {
         super::super::drawer::Tabs {
             changes: Some(Some(3)),
             document: Some("PLAN.md".into()),
-            markdown,
+            image: None,
+            active: Some(if markdown {
+                crate::sidebar::Tool::Document
+            } else {
+                crate::sidebar::Tool::Git
+            }),
             side_by_side: false,
         }
     }

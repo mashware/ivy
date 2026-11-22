@@ -1,6 +1,7 @@
 //! Explicit console identity and directory for a review session.
 use super::{Source, State};
 use crate::Window;
+use crate::sidebar::Tool;
 use std::path::PathBuf;
 
 fn source(window: &mut Window, name: usize) -> Option<Source> {
@@ -106,9 +107,6 @@ pub(crate) fn open_document_target(
     path: PathBuf,
     _line: Option<u32>,
 ) -> bool {
-    if keeps_marks(window) {
-        return false;
-    }
     super::select_state(window, true);
     let Some(source) = source(window, pane) else {
         return false;
@@ -116,7 +114,6 @@ pub(crate) fn open_document_target(
     if !pin(&mut window.viewer, source) {
         return false;
     }
-    replace_document(window, Keep::Document);
     crate::sidebar::select(window, crate::sidebar::Tool::Document);
     // Files follows the focused console, so the folder a relative path is counted from is the
     // one Files showed when the file was opened, not whatever it shows later.
@@ -147,13 +144,14 @@ pub(super) fn forget(state: &mut super::State) {
     };
 }
 
-/// Shows the image in the document tab. The drawer's open, keyboard and gesture flags stay the
-/// document state's, so the image takes input exactly as a document would.
-pub(super) fn show_image(window: &mut Window) {
+/// Shows the drawer's image tab; `keys` is whether the drawer takes the keyboard with it. The
+/// drawer's open, keyboard and gesture flags stay the document state's, so the image takes input
+/// exactly as a document would.
+pub(crate) fn show_image(window: &mut Window, keys: bool) {
     super::select_state(window, true);
-    crate::sidebar::select(window, crate::sidebar::Tool::Document);
+    crate::sidebar::select(window, crate::sidebar::Tool::Image);
     window.viewer.open = true;
-    window.viewer.keyboard = true;
+    window.viewer.keyboard = keys;
     if let Some(ctx) = &window.viewer.context {
         ctx.request_repaint();
     }
@@ -166,25 +164,20 @@ pub(super) fn keeps_marks(window: &mut Window) -> bool {
         return false;
     }
     window.image.say(UNSENT_MARKS);
-    show_image(window);
+    show_image(window, true);
     true
 }
 
 const UNSENT_MARKS: &str =
-    "Send or clear the marks on the image before closing it or opening another image or document.";
+    "Send or clear the marks on the image before closing it or opening another image.";
 
-/// Why a document did not open: the image's unsent marks, or the review's unsent comments.
-pub(crate) fn kept_document(window: &Window) -> &'static str {
-    if window.image.has_marks() {
-        UNSENT_MARKS
-    } else {
-        "Send or clear the review comments before opening another document."
-    }
-}
+/// Why a document did not open: the review's unsent comments.
+pub(crate) const KEPT_DOCUMENT: &str =
+    "Send or clear the review comments before opening another document.";
 
-/// Whether the drawer is on its document tab and that tab holds the image.
+/// Whether the drawer is on its image tab.
 pub(super) fn showing_image(window: &Window) -> bool {
-    window.image.shown() && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document)
+    crate::sidebar::active(window) == Some(crate::sidebar::Tool::Image)
 }
 
 /// The console the shown document was opened from.
@@ -193,26 +186,6 @@ pub(super) fn shown_origin(window: &Window) -> Option<&super::Source> {
         window.image.origin()
     } else {
         window.viewer.origin.as_ref()
-    }
-}
-
-/// What stays in the document tab when [`replace_document`] empties it.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Keep {
-    Document,
-    Image,
-    Neither,
-}
-
-/// The document tab holds one document: whatever opens there, or closing it, forgets the other.
-/// Every entry goes through here, so the document state and the image cannot both be shown.
-pub(super) fn replace_document(window: &mut Window, keep: Keep) {
-    super::select_state(window, true);
-    if keep != Keep::Document {
-        forget(&mut window.viewer);
-    }
-    if keep != Keep::Image {
-        window.image.clear();
     }
 }
 
@@ -234,7 +207,7 @@ impl std::fmt::Display for NotOpened {
     }
 }
 
-/// Opens an image in the drawer's document tab, pinned to the console it was printed in. A
+/// Opens an image in the drawer's image tab, pinned to the console it was printed in. A
 /// relative path is read from that console's directory, as the review reads its repository.
 /// Refused when that console is gone or the image shown keeps unsent marks; the refusals of the
 /// image itself, a file that does not decode among them, are painted in the drawer.
@@ -253,13 +226,58 @@ pub(crate) fn open_image_target(
         Some(cwd) if path.is_relative() => cwd.join(path),
         _ => path,
     };
-    replace_document(window, Keep::Image);
     window.image.open(source, path);
-    show_image(window);
+    show_image(window, true);
     if let Some(ctx) = window.viewer.context.clone() {
         window.image.poll(&ctx);
     }
     Ok(())
+}
+
+/// Close one tab of the drawer: what it showed is forgotten, the drawer moves to the next tab the
+/// strip shows, in the order Document, Changes, Image, and with no other tab it closes. A review
+/// with unsent comments and an image with unsent marks are kept and say why.
+pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::Context) {
+    let tabs = super::drawer::tabs(window);
+    let next = [
+        (Tool::Document, tabs.document.is_some()),
+        (Tool::Git, tabs.changes.is_some()),
+        (Tool::Image, tabs.image.is_some()),
+    ]
+    .into_iter()
+    .find(|&(tool, shown)| shown && tool != closed)
+    .map(|(tool, _)| tool);
+    if closed == Tool::Image {
+        if keeps_marks(window) {
+            return;
+        }
+        window.image.clear();
+    } else {
+        let markdown = closed == Tool::Document;
+        let state = if window.viewer.tool_markdown.unwrap_or(true) == markdown {
+            &mut window.viewer
+        } else {
+            &mut window.viewer_other
+        };
+        if state.review.has_comments() {
+            state.message = "Send or clear the review comments before closing the review.".into();
+            return;
+        }
+        // The image tab borrows the document state's open and keyboard flags.
+        let (open, keyboard) = (state.open, state.keyboard);
+        forget(state);
+        if markdown && crate::sidebar::active(window) == Some(Tool::Image) {
+            window.viewer.open = open;
+            window.viewer.keyboard = keyboard;
+        }
+    }
+    if crate::sidebar::active(window) == Some(closed) {
+        match next {
+            Some(Tool::Image) => show_image(window, true),
+            Some(tool) => super::activate(window, tool == Tool::Document),
+            None => crate::sidebar::close(window, ctx),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -483,32 +501,40 @@ mod tests {
             names
         );
     }
-    /// The image is pinned to the console it was printed in, not to the focused one, and it and a
-    /// Markdown document replace each other in the document tab.
+    /// The image is pinned to the console it was printed in, and it and a Markdown document no
+    /// longer push each other out of the drawer: each keeps a tab of its own.
     #[test]
-    fn an_image_pins_its_console_and_replaces_the_markdown_document() {
+    fn an_image_and_a_markdown_document_keep_tabs_of_their_own() {
+        use crate::sidebar::{Tool, active};
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let ctx = egui::Context::default();
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
         one_frame_in(&mut window, &ctx, area, vec![]);
         let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
-        assert_eq!(window.active().focus, names[0]);
+        let strip = |window: &Window| {
+            let tabs = super::super::drawer::tabs(window);
+            (tabs.document, tabs.image)
+        };
         open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
         open_image_target(&mut window, names[1], PathBuf::from("/shots/screen.png")).unwrap();
         assert_eq!(window.image.origin().unwrap().pane, names[1]);
-        assert!(window.image.shown());
+        assert_eq!(active(&window), Some(Tool::Image));
         assert_eq!(
-            crate::sidebar::active(&window),
-            Some(crate::sidebar::Tool::Document)
+            strip(&window),
+            (Some("guide.md".into()), Some("screen.png".into()))
         );
-        assert!(window.viewer.open && window.viewer.path.is_empty());
-        open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
-        assert!(!window.image.shown() && window.image.origin().is_none());
+        assert_eq!(window.viewer.path, "/docs/guide.md");
+        open_document_target(&mut window, names[0], PathBuf::from("/docs/other.md"), None);
+        assert_eq!(active(&window), Some(Tool::Document));
+        assert_eq!(
+            strip(&window),
+            (Some("other.md".into()), Some("screen.png".into()))
+        );
         assert_eq!(
             open_image_target(&mut window, 9999, PathBuf::from("/x.png")),
             Err(NotOpened::Gone)
         );
-        assert!(!window.image.shown());
+        assert_eq!(strip(&window).1, Some("screen.png".into()));
     }
 
     /// A relative image path is read from the console it was printed in, as its review is; a

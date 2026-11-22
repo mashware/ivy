@@ -450,7 +450,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
             } else if crate::viewer::open_document_target(window, pane, path, None) {
                 Ok(())
             } else {
-                Err(crate::viewer::kept_document(window).into())
+                Err(crate::viewer::KEPT_DOCUMENT.into())
             };
             match opened {
                 Ok(()) => ui.ctx().request_repaint(),

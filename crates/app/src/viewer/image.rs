@@ -111,7 +111,8 @@ impl Viewer {
         }
     }
 
-    /// Whether the document tab paints this image.
+    /// Whether there is an image to paint.
+    #[cfg(test)]
     pub(super) fn shown(&self) -> bool {
         self.document.is_some()
     }
@@ -775,7 +776,7 @@ mod tests {
         let dock = window.sidebar.last_dock.unwrap();
         for (action, tool) in [
             (StripAction::Changes, Tool::Git),
-            (StripAction::Document, Tool::Document),
+            (StripAction::Image, Tool::Image),
         ] {
             let place = crate::viewer::strip_place(&window, dock, action).unwrap();
             click(&mut window, &ctx, place);
@@ -784,7 +785,7 @@ mod tests {
         crate::sidebar::close(&mut window, &ctx);
         painted(&mut window, &ctx, vec![]);
         assert_eq!(active(&window), None);
-        crate::sidebar::toggle(&mut window, Tool::Document, &ctx);
+        crate::sidebar::toggle(&mut window, Tool::Image, &ctx);
         let until = Instant::now() + (took * 5).max(Duration::from_millis(300));
         let mut shapes = Vec::new();
         while Instant::now() < until {
@@ -1196,7 +1197,7 @@ mod tests {
         let still = format!("Still reading {}…", first.display());
         wait_for_text(&mut window, &ctx, &still);
         let dock = window.sidebar.last_dock.unwrap();
-        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseDocument).unwrap();
+        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseImage).unwrap();
         click(&mut window, &ctx, close);
         assert!(!window.image.shown());
         crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
@@ -1218,22 +1219,47 @@ mod tests {
         assert!(window.image.abandoned.is_none());
     }
 
-    /// Closing the document tab forgets the image, and the next document tab is Markdown's again.
+    /// The image has a tab of its own: closing the document tab beside it leaves the image painted,
+    /// and closing the image's tab forgets it and hands the drawer to the next tab, here Changes.
     #[test]
-    fn closing_the_document_tab_forgets_the_image() {
+    fn closing_the_document_tab_keeps_the_image_and_closing_its_own_forgets_it() {
+        use crate::sidebar::{Tool, active};
         use crate::viewer::StripAction;
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
         write_png(&path, 64, 32);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
         let (mut window, ctx, _) = window_with_image(&path);
-        let dock = window.sidebar.last_dock.unwrap();
-        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseDocument).unwrap();
-        click(&mut window, &ctx, close);
-        assert!(!window.image.shown());
+        let name = window.image.origin().unwrap().pane;
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide,
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        let place = |window: &crate::Window, action| {
+            crate::viewer::strip_place(window, window.sidebar.last_dock.unwrap(), action)
+        };
+        let at = place(&window, StripAction::Image).unwrap();
+        click(&mut window, &ctx, at);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(image_rect(&painted(&mut window, &ctx, vec![])).is_some());
+        let at = place(&window, StripAction::CloseDocument).unwrap();
+        click(&mut window, &ctx, at);
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(place(&window, StripAction::Document).is_none());
+        assert!(
+            image_rect(&painted(&mut window, &ctx, vec![])).is_some(),
+            "closing the document tab took the image off the drawer"
+        );
+        let at = place(&window, StripAction::CloseImage).unwrap();
+        click(&mut window, &ctx, at);
+        assert_eq!(active(&window), Some(Tool::Git));
         assert_eq!(crate::viewer::shown_image(&window), None);
-        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Document, &ctx);
-        let shapes = painted(&mut window, &ctx, vec![]);
-        assert!(image_rect(&shapes).is_none());
+        assert!(place(&window, StripAction::Image).is_none());
+        assert!(image_rect(&painted(&mut window, &ctx, vec![])).is_none());
     }
 
     /// The wheel over the image pans it and Ctrl+wheel zooms it, and neither reaches a console,
@@ -1847,7 +1873,7 @@ mod tests {
                 }],
             );
         }
-        crate::viewer::activate(&mut window, true);
+        crate::viewer::show_image(&mut window, true);
         let before = settle(&mut window, &ctx);
         assert!(ctx.input(|i| i.pointer.middle_down()));
         travel(&mut window, &ctx, at, egui::vec2(-30.0, -45.0));
@@ -1908,7 +1934,7 @@ mod tests {
         assert_eq!(crate::sidebar::active(&window), None);
         pass(&mut window, &ctx, vec![space(false)]);
         pass(&mut window, &ctx, vec![space(true)]);
-        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Document, &ctx);
+        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Image, &ctx);
         let before = settle(&mut window, &ctx);
         assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
         let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
@@ -2736,7 +2762,7 @@ mod tests {
             assert_eq!(marks_of(&window).notes(), ["first"]);
             marks_mut(&mut window).clear();
             if closed {
-                crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+                crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
                 assert!(!window.image.shown(), "the image did not close");
             }
             crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
@@ -3181,9 +3207,9 @@ mod tests {
         assert!(said.height() > 30.0, "{said:?} is not wrapped");
     }
 
-    /// Unsent marks keep the image: opening another document or image over it, or closing its
-    /// tab, is refused with a message, the image and its marks stay, and once the marks are
-    /// cleared the same open goes through.
+    /// Unsent marks keep the image: opening another image over it, or closing its tab, is refused
+    /// with a message, the image and its marks stay, and once the marks are cleared the same open
+    /// goes through. A Markdown file opens beside it, refused by nothing.
     #[test]
     fn unsent_marks_keep_the_image_until_they_are_cleared() {
         use crate::viewer::StripAction;
@@ -3200,23 +3226,24 @@ mod tests {
             assert_eq!(marks_of(window).general, "the header overlaps");
             assert!(crate::viewer::origin::showing_image(window));
         };
-        assert!(!crate::viewer::open_document_target(
+        assert!(crate::viewer::open_document_target(
             &mut window,
             name,
             folder.0.join("guide.md"),
             None,
         ));
-        kept(&window);
-        assert!(window.image.notice.as_deref().unwrap().contains("marks"));
-        assert!(crate::viewer::kept_document(&window).contains("marks"));
+        assert_eq!(window.image.path(), Some(path.as_path()));
+        assert_eq!(marks_of(&window).general, "the header overlaps");
+        assert!(window.image.notice.is_none());
+        crate::viewer::show_image(&mut window, true);
         let said = crate::viewer::NotOpened::Marks.to_string();
-        assert!(said.contains("another image or document"), "{said}");
+        assert!(said.contains("another image"), "{said}");
         assert_eq!(
             crate::viewer::open_image_target(&mut window, name, other.clone()),
             Err(crate::viewer::NotOpened::Marks)
         );
         kept(&window);
-        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
         kept(&window);
         let shapes = painted(&mut window, &ctx, vec![]);
         let notice = window.image.notice.clone().unwrap();
@@ -3864,7 +3891,7 @@ mod tests {
         let cancel = place_of(&mut window, &ctx, "Cancel");
         press(&mut window, &ctx, cancel);
         marks_mut(&mut window).clear();
-        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseImage, &ctx);
         assert!(!window.image.shown(), "the image did not close");
         let reported = "the half-written copy could not be removed: busy";
         sender.send(Err(reported.into())).unwrap();

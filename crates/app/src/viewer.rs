@@ -15,6 +15,7 @@ mod view;
 
 pub(crate) use drawer::StripAction;
 use eframe::egui;
+use crate::sidebar::Tool;
 use load::{Job, Kind, Loaded};
 use std::{
     path::PathBuf,
@@ -257,10 +258,6 @@ pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
 }
 
 pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
-    if markdown && window.image.shown() {
-        origin::show_image(window);
-        return;
-    }
     select_state(window, markdown);
     let tool = if markdown {
         crate::sidebar::Tool::Document
@@ -320,6 +317,7 @@ pub(crate) fn apply_strip_action(
     match action {
         StripAction::Changes => activate(window, false),
         StripAction::Document => activate(window, true),
+        StripAction::Image => origin::show_image(window, true),
         StripAction::Unified | StripAction::SideBySide => {
             for state in [&mut window.viewer, &mut window.viewer_other] {
                 if state.tool_markdown == Some(false) {
@@ -329,55 +327,13 @@ pub(crate) fn apply_strip_action(
                 }
             }
         }
-        StripAction::CloseChanges => close_tab(window, false, ctx),
-        StripAction::CloseDocument => close_tab(window, true, ctx),
+        StripAction::CloseChanges => origin::close_tab(window, Tool::Git, ctx),
+        StripAction::CloseDocument => origin::close_tab(window, Tool::Document, ctx),
+        StripAction::CloseImage => origin::close_tab(window, Tool::Image, ctx),
         StripAction::Maximize => crate::sidebar::toggle_maximize(window),
         StripAction::Close => crate::sidebar::close(window, ctx),
     }
     ctx.request_repaint();
-}
-
-/// Close one tab of the drawer: its view forgets what it showed, the other tab takes the drawer,
-/// and with no other tab the drawer closes. A review with unsent comments is kept and says why.
-fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
-    let other_shown = {
-        let tabs = drawer::tabs(window);
-        if markdown {
-            tabs.changes.is_some()
-        } else {
-            tabs.document.is_some()
-        }
-    };
-    let state = if window.viewer.tool_markdown.unwrap_or(true) == markdown {
-        &mut window.viewer
-    } else {
-        &mut window.viewer_other
-    };
-    if state.review.has_comments() {
-        state.message = "Send or clear the review comments before closing the review.".into();
-        return;
-    }
-    if markdown {
-        if origin::keeps_marks(window) {
-            return;
-        }
-        origin::replace_document(window, origin::Keep::Neither);
-    } else {
-        origin::forget(state);
-    }
-    let active = crate::sidebar::active(window);
-    let closed = if markdown {
-        crate::sidebar::Tool::Document
-    } else {
-        crate::sidebar::Tool::Git
-    };
-    if active == Some(closed) {
-        if other_shown {
-            activate(window, !markdown);
-        } else {
-            crate::sidebar::close(window, ctx);
-        }
-    }
 }
 
 /// Leave the keys to Files, which has just opened beside the drawer.
@@ -442,8 +398,8 @@ pub(crate) fn before_keys(
             return false;
         }
         let markdown = match crate::sidebar::active(window) {
-            Some(crate::sidebar::Tool::Document) => true,
-            Some(crate::sidebar::Tool::Git) => false,
+            Some(Tool::Document | Tool::Image) => true,
+            Some(Tool::Git) => false,
             _ => return false,
         };
         select_state(window, markdown);
@@ -535,8 +491,8 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         return;
     }
     let markdown = match crate::sidebar::active(window) {
-        Some(crate::sidebar::Tool::Document) => true,
-        Some(crate::sidebar::Tool::Git) => false,
+        Some(Tool::Document | Tool::Image) => true,
+        Some(Tool::Git) => false,
         _ => return,
     };
     select_state(window, markdown);
@@ -621,7 +577,8 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
 pub(crate) use code_header::document_relative_path;
 pub(crate) use image::is_image;
 pub(crate) use origin::{
-    NotOpened, kept_document, open_diff_for_pane, open_document_target, open_image_target,
+    KEPT_DOCUMENT, NotOpened, open_diff_for_pane, open_document_target, open_image_target,
+    show_image,
 };
 
 #[cfg(test)]
