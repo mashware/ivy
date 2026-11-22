@@ -11,6 +11,7 @@ use std::time::Duration;
 
 mod flatten;
 mod marks;
+pub(crate) mod paste;
 pub(crate) mod send;
 mod tools;
 mod viewport;
@@ -59,6 +60,7 @@ pub(crate) struct Viewer {
     /// on one console's image must not carry over to another's.
     painted: Option<(u64, u64)>,
     send: send::Sending,
+    pub(super) paste: paste::Pasting,
     /// How many images were opened, which names each opening: see [`send::Request::document`].
     opened: u64,
 }
@@ -350,7 +352,9 @@ impl Viewer {
         // Taken up where the notice is painted, never by a frame that only says the image loads.
         slot.hear();
         let panning = &mut self.panning;
-        let notice = slot.notice.as_deref();
+        let pane = slot.origin().map(|o| o.pane);
+        let notice = paste::shown(&self.paste, pane, slot.notice.as_deref());
+        let notice = notice.as_deref();
         let sending = &mut self.send;
         let Some(Opened {
             id,
@@ -2499,8 +2503,16 @@ mod tests {
         let shapes = painted(&mut window, &ctx, vec![]);
         let dock = window.sidebar.last_dock.unwrap();
         let said = texts(&shapes, dock);
-        let how = "No image in this console. Ctrl+click a PNG or JPEG path printed in it.";
-        assert!(said.iter().any(|t| t == how), "{said:?}");
+        let chord = if cfg!(target_os = "macos") {
+            "Cmd+V"
+        } else {
+            "Ctrl+V"
+        };
+        let how = format!(
+            "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a \
+             screenshot and press Paste screenshot or {chord} here."
+        );
+        assert!(said.contains(&how), "{said:?}");
         assert!(
             !said
                 .iter()
@@ -5702,5 +5714,316 @@ mod tests {
         assert_eq!(slot(&window).notice, Some(format!("Sent to {label}.")));
         assert!(other.so_far().is_empty(), "the line went to another tab");
         let _ = std::fs::remove_file(copy_dir.join("annotated-1.png"));
+    }
+
+    // D120: a screenshot pasted from the clipboard into a console's own image.
+
+    /// A window whose second console has a folder of its own and a clipboard only the test
+    /// answers, with no image open yet.
+    fn window_to_paste() -> (
+        crate::Window,
+        egui::Context,
+        crate::clipboard::Harness,
+        usize,
+        PathBuf,
+    ) {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        let (service, harness) = crate::clipboard::Service::testing();
+        window.clipboard = service;
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        let dir = crate::PanelDir::create().unwrap();
+        let folder = dir.path().to_owned();
+        window
+            .all_panes_mut()
+            .find(|p| p.name == name)
+            .unwrap()
+            .panel = Some(dir);
+        (window, ctx, harness, name, folder)
+    }
+
+    /// A window with an image shown in a console that has a folder, and a clipboard only the test
+    /// answers.
+    fn image_and_clipboard() -> (
+        crate::Window,
+        egui::Context,
+        crate::clipboard::Harness,
+        PathBuf,
+        Folder,
+    ) {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let (service, harness) = crate::clipboard::Service::testing();
+        window.clipboard = service;
+        origin_pane(&mut window).panel = Some(crate::PanelDir::create().unwrap());
+        (window, ctx, harness, path, folder)
+    }
+
+    fn screenshot() -> image::RgbaImage {
+        image::RgbaImage::from_fn(5, 3, |x, y| {
+            image::Rgba([x as u8 * 40, y as u8 * 60, 7, 255 - x as u8])
+        })
+    }
+
+    fn chord() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }
+    }
+
+    fn released_v() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }
+    }
+
+    /// The text painted in the drawer.
+    fn drawer_texts(window: &mut crate::Window, ctx: &egui::Context) -> Vec<String> {
+        painted(window, ctx, vec![]);
+        let shapes = painted(window, ctx, vec![]);
+        texts(&shapes, window.sidebar.last_dock.unwrap())
+    }
+
+    fn word_of(window: &mut crate::Window, pane: usize) -> Option<String> {
+        slot_of(&mut window.tabs, pane)?
+            .word()
+            .map(ToOwned::to_owned)
+    }
+
+    /// AC1, AC7: the screenshot lands in that console's folder as a PNG of the same pixels, owner
+    /// readable only, opens as that console's image with the focus, and goes with the console.
+    #[test]
+    fn a_pasted_screenshot_lands_in_its_consoles_own_image_and_goes_with_it() {
+        let (mut window, ctx, harness, name, folder) = window_to_paste();
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Image(screenshot()));
+        let started = Instant::now();
+        while !slot_of(&mut window.tabs, name).is_some_and(|s| s.loaded()) {
+            // A hang guard, not a speed claim.
+            assert!(started.elapsed() < Duration::from_secs(30));
+            painted(&mut window, &ctx, vec![]);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let file = folder.join("pasted-1.png");
+        assert_eq!(slot(&window).path(), Some(file.as_path()));
+        assert_eq!(window.active().focus, name);
+        assert!(crate::viewer::origin::showing_image(&window));
+        assert_eq!(image::open(&file).unwrap().to_rgba8(), screenshot());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        window.close_a_pane_called(name, &ctx).unwrap();
+        assert!(!file.exists(), "the pasted screenshot outlived its console");
+        assert!(!folder.exists(), "the console's folder outlived it");
+    }
+
+    /// AC2: no image on the clipboard shows that console's empty Image tab, which says how to
+    /// paste and what the clipboard held, and nothing is written.
+    #[test]
+    fn with_no_image_the_consoles_empty_tab_says_so() {
+        let (mut window, ctx, harness, name, folder) = window_to_paste();
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        let said = drawer_texts(&mut window, &ctx);
+        assert_eq!(window.active().focus, name);
+        assert!(crate::viewer::origin::showing_image(&window));
+        assert!(
+            said.iter().any(|t| t == super::super::view::NO_IMAGE),
+            "{said:?}"
+        );
+        assert!(said.iter().any(|t| t == paste::NO_IMAGE), "{said:?}");
+        assert!(std::fs::read_dir(&folder).unwrap().next().is_none());
+    }
+
+    /// AC3: the paste chord in the Image tab asks for the focused console's image, whether it
+    /// arrives as a key or as egui's text paste, once per press.
+    #[test]
+    fn the_paste_chord_in_the_image_tab_pastes_for_the_focused_console() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        paste::ask(&mut window, name);
+        harness.requested_image();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        for event in [chord(), egui::Event::Paste("some text".into())] {
+            painted(&mut window, &ctx, vec![released_v(), event.clone()]);
+            painted(&mut window, &ctx, vec![]);
+            assert_eq!(harness.requested_image(), Some(name), "{event:?}");
+            harness.reply_image(name, crate::clipboard::Pasted::Absent);
+            painted(&mut window, &ctx, vec![]);
+        }
+        // Held: egui-winit repeats a held chord as text pastes with no repeat flag.
+        painted(&mut window, &ctx, vec![released_v(), chord()]);
+        painted(&mut window, &ctx, vec![egui::Event::Paste("again".into())]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![egui::Event::Paste("again".into())]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), None, "a held chord asked twice");
+    }
+
+    /// The chord belongs to the drawer only while it holds the keys: a console that holds them
+    /// keeps its paste, and nothing is read as an image.
+    #[test]
+    fn a_paste_into_a_console_is_not_taken_by_the_tab() {
+        let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
+        crate::viewer::blur(&mut window);
+        for event in [egui::Event::Paste("text".into()), chord()] {
+            painted(&mut window, &ctx, vec![event.clone()]);
+            painted(&mut window, &ctx, vec![]);
+            assert_eq!(harness.requested_image(), None, "{event:?}");
+        }
+        assert_eq!(slot(&window).path(), Some(path.as_path()));
+    }
+
+    /// AC11: a note being typed keeps a text paste; nothing is read as an image.
+    #[test]
+    fn a_text_paste_into_a_note_stays_a_text_paste() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let field = place_of(&mut window, &ctx, "A note on the whole image");
+        press(&mut window, &ctx, field);
+        painted(&mut window, &ctx, vec![egui::Event::Paste("hello".into())]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(marks_of(&window).general, "hello");
+        assert_eq!(harness.requested_image(), None);
+    }
+
+    /// AC4: unsent marks refuse a paste into their console before the clipboard is read.
+    #[test]
+    fn unsent_marks_refuse_a_paste_before_the_clipboard_is_read() {
+        let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
+        marks_mut(&mut window).general = "keep me".into();
+        let name = slot(&window).origin().unwrap().pane;
+        paste::ask(&mut window, name);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), None);
+        assert_eq!(slot(&window).path(), Some(path.as_path()));
+        let notice = slot(&window).notice.clone().unwrap_or_default();
+        assert!(notice.starts_with("Send or clear the marks"), "{notice}");
+    }
+
+    /// AC9, AC12: a console with no folder, a clipboard that never answered and one that failed
+    /// say so in that console's own Image tab, the failure's cause inside the sentence.
+    #[test]
+    fn no_folder_and_clipboard_failures_are_said_in_the_consoles_own_tab() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let bare = window.active().panes()[0].name;
+        paste::ask(&mut window, bare);
+        assert_eq!(harness.requested_image(), None);
+        assert_eq!(
+            word_of(&mut window, bare).as_deref(),
+            Some(paste::NO_FOLDER)
+        );
+        assert_eq!(window.active().focus, bare);
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Expired);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(word_of(&mut window, name).as_deref(), Some(paste::EXPIRED));
+        assert_eq!(
+            word_of(&mut window, bare).as_deref(),
+            Some(paste::NO_FOLDER)
+        );
+        assert_eq!(window.active().focus, name);
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        let held = crate::clipboard::Pasted::Failed("Held by another party.".into());
+        harness.reply_image(name, held);
+        painted(&mut window, &ctx, vec![]);
+        // The new answer replaces the old one rather than piling up after it.
+        let said = "The clipboard could not be read: held by another party.";
+        assert_eq!(word_of(&mut window, name).as_deref(), Some(said));
+    }
+
+    /// A paste asked again while one is on its way is painted in that console's tab, ahead of what
+    /// it says, never in another console's, and is gone once the paste has answered.
+    #[test]
+    fn a_paste_asked_again_is_painted_only_in_its_consoles_tab_while_on_its_way() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let other = window.active().panes()[0].name;
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, name);
+        let busy = "A paste is already on its way.";
+        assert!(drawer_texts(&mut window, &ctx).iter().any(|t| t == busy));
+        let active = window.active;
+        window.tabs[active].focus = other;
+        let said = drawer_texts(&mut window, &ctx);
+        assert!(!said.iter().any(|t| t.contains("on its way")), "{said:?}");
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        let said = drawer_texts(&mut window, &ctx);
+        assert_eq!(window.active().focus, name);
+        assert!(said.iter().any(|t| t == paste::NO_IMAGE), "{said:?}");
+        assert!(!said.iter().any(|t| t.contains("on its way")), "{said:?}");
+    }
+
+    /// A paste asked for another console while one is on its way says that console's paste was not
+    /// read, rather than that one is on its way for it.
+    #[test]
+    fn a_paste_asked_for_another_console_says_it_was_not_read() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let other = window.active().panes()[0].name;
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, other);
+        assert_eq!(harness.requested_image(), None);
+        assert_eq!(window.active().focus, other);
+        let said = drawer_texts(&mut window, &ctx);
+        let elsewhere = "Another console's paste is on its way; press Paste screenshot again once it has opened.";
+        assert!(said.iter().any(|t| t == elsewhere), "{said:?}");
+    }
+
+    /// An answer for a console that closed meanwhile is said nowhere but standard error: the other
+    /// console's tab is left as it was.
+    #[test]
+    fn an_answer_for_a_closed_console_leaves_the_other_consoles_tab() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        let other = window.active().panes()[0].name;
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        window.close_a_pane_called(name, &ctx).unwrap();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(word_of(&mut window, other), None);
+    }
+
+    /// Marks drawn on the console's image while its screenshot was written are kept: the file is
+    /// saved, the image stays, and the tab says where the screenshot is.
+    #[test]
+    fn marks_drawn_while_a_screenshot_is_written_are_kept() {
+        let (mut window, ctx, harness, path, _folder) = image_and_clipboard();
+        let name = slot(&window).origin().unwrap().pane;
+        paste::ask(&mut window, name);
+        assert_eq!(harness.requested_image(), Some(name));
+        marks_mut(&mut window).general = "keep".into();
+        harness.reply_image(name, crate::clipboard::Pasted::Image(screenshot()));
+        // The reply is taken in this pass's input, which starts the write.
+        painted(&mut window, &ctx, vec![]);
+        let started = Instant::now();
+        while window.image.paste.pending() {
+            assert!(started.elapsed() < Duration::from_secs(30));
+            painted(&mut window, &ctx, vec![]);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(slot(&window).path(), Some(path.as_path()));
+        let notice = slot(&window).notice.clone().unwrap_or_default();
+        assert!(notice.contains("The screenshot was saved to"), "{notice}");
+        assert_eq!(marks_of(&window).general, "keep");
     }
 }

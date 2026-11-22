@@ -167,13 +167,15 @@ vello_cpu = { version = "0.1.0", default-features = false, features = ["std", "u
 egui-phosphor = { version = "=0.14.0", default-features = false, features = ["regular"] }
 
 # Clipboard reads run away from the UI; normal Copy keeps egui's existing writer.
+# `image-data` reads a screenshot the desktop's own tool copied (D120). It decodes inside the read,
+# which is why an image read has a longer deadline than a text one.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-arboard = { version = "3.6.1", default-features = false }
+arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Data-control owns its connection and completes seat setup before accepting operations;
 # unsupported compositors can use arboard's X11/XWayland fallback.
-arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control", "image-data"] }
 # Showing a file selected in the desktop's file manager: the `FileManager1` bus service, called
 # without starting a process whose arguments would need quoting (D110). The same three crates, at the
 # same versions and features, that `term-core` already compiles for its scope placement.

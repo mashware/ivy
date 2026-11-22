@@ -15,8 +15,8 @@ const MARKDOWN_LIMIT: usize = 1024 * 1024;
 const CODE_LIMIT: usize = 1024 * 1024;
 /// How far into a file a NUL byte is looked for before it is called binary.
 const BINARY_SNIFF: usize = 8 * 1024;
-const IMAGE_LIMIT: usize = 32 * 1024 * 1024;
-const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
+pub(super) const IMAGE_LIMIT: usize = 32 * 1024 * 1024;
+pub(super) const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 64 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);

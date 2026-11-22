@@ -54,6 +54,8 @@ pub(crate) struct State {
     keyboard: bool,
     /// Whether the Space held now was pressed while the drawer held the keys.
     space: bool,
+    /// Whether the drawer holds the keys this pass, once a press has handed them over.
+    keys: bool,
     held: bool,
     blocked_frame: Option<u64>,
     events: Option<Vec<egui::Event>>,
@@ -88,6 +90,7 @@ impl Default for State {
             refresh_at: None,
             keyboard: false,
             space: false,
+            keys: false,
             held: false,
             blocked_frame: None,
             events: None,
@@ -369,6 +372,7 @@ pub(crate) fn keys(
     if blocked {
         window.viewer.space = false;
         window.viewer_other.space = false;
+        window.viewer.keys = false;
     }
     let owned = !blocked && before_keys(window, ui, metrics);
     delivery::deliver(window, ui.ctx());
@@ -393,7 +397,9 @@ pub(crate) fn before_keys(
         let held = window.viewer.space || window.viewer_other.space;
         for state in [&mut window.viewer, &mut window.viewer_other] {
             state.events = None;
+            // Nor the keys: whatever pass returns early, the drawer did not hold them in it.
             state.space = false;
+            state.keys = false;
         }
         if window.settings_editor.is_open() || window.pane_view.is_modal() {
             return false;
@@ -431,6 +437,7 @@ pub(crate) fn before_keys(
             window.viewer.keyboard = over && !returned;
             window.viewer.held = over && !returned;
         }
+        window.viewer.keys = window.viewer.keyboard || window.sidebar.maximized;
         let gesture_owned = window.viewer.held;
         if !ctx.input(|i| i.focused && i.pointer.any_down()) {
             window.viewer.held = false;
@@ -555,6 +562,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
             &title,
             if image {
                 view::Body::Image(
+                    window.tabs.get(window.active).map(|tab| tab.focus),
                     image::focused_mut(&mut window.tabs, window.active)
                         .map(|slot| (&mut window.image, slot)),
                 )

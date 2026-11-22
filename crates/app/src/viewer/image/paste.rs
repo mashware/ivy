@@ -1,0 +1,524 @@
+//! Paste: a screenshot the desktop's own tool left on the clipboard, written as a PNG into a
+//! console's own folder and opened in that console's image (D120).
+use crate::clipboard::Pasted;
+use crate::viewer::load::{DECODE_LIMIT, IMAGE_LIMIT, Job, spawn, take};
+use crate::viewer::origin;
+use eframe::egui;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+pub(crate) const NO_IMAGE: &str = "The clipboard holds no image.";
+pub(crate) const NO_FOLDER: &str = "This console has no folder to keep the screenshot in.";
+pub(crate) const EXPIRED: &str = "The clipboard did not answer in time.";
+const BUSY: &str = "A paste is already on its way.";
+const BUSY_ELSEWHERE: &str =
+    "Another console's paste is on its way; press Paste screenshot again once it has opened.";
+
+/// A paste from the read to the opened image; one at a time.
+#[derive(Default)]
+pub(crate) struct Pasting {
+    /// The paste chord, taken by the image tab while it painted; the input pass asks for it.
+    key: bool,
+    /// Whether the chord that asked is still held: egui-winit turns every repeat of a held chord
+    /// into another text paste with no repeat flag, but lets its key's release through as a key,
+    /// which is where a hold ends — as it does when the window loses the keys, after which no
+    /// release comes, or after a frame the tab did not look for the chord in, whose release went
+    /// to somebody else.
+    held: bool,
+    /// The frame the image tab last looked for the chord in.
+    seen: Option<u64>,
+    /// The console whose clipboard read is outstanding; the clipboard answers every read it took.
+    asked: Option<usize>,
+    writing: Option<Writing>,
+    /// The console a paste was asked again for while this one was on its way. Read only through
+    /// `says_busy`, which also needs the paste still on its way; cleared when the next read starts.
+    asked_again: Option<usize>,
+}
+
+/// A screenshot being encoded and written into a console's folder.
+struct Writing {
+    pane: usize,
+    folder: PathBuf,
+    job: Job<PathBuf>,
+}
+
+impl Pasting {
+    fn busy(&self) -> bool {
+        self.asked.is_some() || self.writing.is_some()
+    }
+
+    pub(crate) fn pending(&self) -> bool {
+        self.key || self.writing.is_some()
+    }
+
+    fn says_busy(&self, pane: usize) -> bool {
+        self.asked_again == Some(pane) && self.busy()
+    }
+
+    /// The console the paste on its way is for.
+    fn for_pane(&self) -> Option<usize> {
+        self.asked.or(self.writing.as_ref().map(|w| w.pane))
+    }
+}
+
+/// What the drawer paints of the console `pane`'s word, beside its image or in its empty tab:
+/// «a paste is already on its way» ahead of it while a paste asked again for that console is. It
+/// is composed here and never written into the slot's notice, which Send, the marks and every
+/// answer write too; a copy kept to restore later went stale with each of them.
+pub(in crate::viewer) fn shown<'a>(
+    paste: &Pasting,
+    pane: Option<usize>,
+    word: Option<&'a str>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    if !pane.is_some_and(|pane| paste.says_busy(pane)) {
+        return word.map(Into::into);
+    }
+    // Asked for this console while another's was on its way: this one was not read.
+    let busy = if paste.for_pane() == pane {
+        BUSY
+    } else {
+        BUSY_ELSEWHERE
+    };
+    Some(match word {
+        Some(word) => format!("{busy} {word}").into(),
+        None => busy.into(),
+    })
+}
+
+/// The paste chord is the image tab's only while the drawer holds the keys — a console that holds
+/// them leaves the chord in the input, its own (`a_paste_into_a_console_is_not_taken_by_the_tab`)
+/// — and no note is being typed, which keeps it for its own text. Taken here, it is asked for in
+/// the next input pass, once per hold. The events are walked in order, so a release and a new
+/// press in one frame are two presses.
+pub(in crate::viewer) fn take_chord(viewer: &mut super::Viewer, ui: &mut egui::Ui, keys: bool) {
+    let frame = ui.ctx().cumulative_frame_nr();
+    if viewer.paste.seen.is_none_or(|last| frame > last + 1) {
+        viewer.paste.held = false;
+    }
+    viewer.paste.seen = Some(frame);
+    let free = keys && !viewer.send.busy() && !ui.ctx().text_edit_focused();
+    let paste = &mut viewer.paste;
+    let mut asked = false;
+    ui.input_mut(|input| {
+        input.events.retain(|event| {
+            if released(event) {
+                paste.held = false;
+                return true;
+            }
+            if !free || !chord(event) {
+                return true;
+            }
+            asked |= !paste.held;
+            paste.held = true;
+            false
+        });
+    });
+    if asked {
+        paste.key = true;
+        ui.ctx().request_repaint();
+    }
+}
+
+/// The release of a key a paste chord is made of, or the window losing the keys, after which no
+/// release is reported.
+fn released(event: &egui::Event) -> bool {
+    use egui::Key::{Insert, Paste, V};
+    matches!(
+        event,
+        egui::Event::Key {
+            key: V | Paste | Insert,
+            pressed: false,
+            ..
+        } | egui::Event::WindowFocused(false)
+    )
+}
+
+/// Whether `event` is the paste chord: the text paste egui-winit makes of every paste chord when
+/// the clipboard holds text, or the key it lets through — the vendored copy does — when it holds
+/// none, which is when a screenshot is there: Ctrl+V or Ctrl+Shift+V (Cmd on macOS), the Paste key,
+/// and Shift+Insert on Windows, where Win+Shift+S leaves only an image. A key's own repeats are
+/// not the chord.
+fn chord(event: &egui::Event) -> bool {
+    let egui::Event::Key {
+        key,
+        pressed: true,
+        repeat: false,
+        modifiers: m,
+        ..
+    } = event
+    else {
+        return matches!(event, egui::Event::Paste(_));
+    };
+    let insert = cfg!(windows) && m.shift && !m.ctrl && !m.alt && !m.command;
+    match key {
+        egui::Key::V => m.command && !m.alt,
+        egui::Key::Paste => true,
+        egui::Key::Insert => insert,
+        _ => false,
+    }
+}
+
+/// A paste for the console `pane`, whose image tab is shown and takes the keys. Refused, before
+/// the clipboard is read, when its image keeps unsent marks, another paste is on its way, it has
+/// no folder to keep the file in, or the clipboard is busy or unavailable.
+pub(crate) fn ask(window: &mut crate::Window, pane: usize) {
+    if !window.all_panes().any(|p| p.name == pane) {
+        return;
+    }
+    origin::focus(window, pane);
+    if origin::keeps_marks(window, pane) {
+        return;
+    }
+    if window.image.paste.busy() {
+        window.image.paste.asked_again = Some(pane);
+        return origin::show_image(window);
+    }
+    let folder = window
+        .all_panes()
+        .find(|p| p.name == pane)
+        .map(|p| p.panel.is_some());
+    if folder == Some(false) {
+        return tell(window, pane, NO_FOLDER);
+    }
+    match window.clipboard.request_image(pane, Instant::now()) {
+        Ok(()) => {
+            window.image.paste.asked = Some(pane);
+            window.image.paste.asked_again = None;
+            origin::show_image(window);
+        }
+        Err(why) => tell(window, pane, why.says()),
+    }
+}
+
+/// What the clipboard answered for the console `pane`.
+pub(crate) fn received(
+    window: &mut crate::Window,
+    pane: usize,
+    pasted: Pasted,
+    ctx: &egui::Context,
+) {
+    // Only `ask` starts an image read; the clipboard answers each read it took once
+    // (`an_expired_read_is_not_answered_again_when_the_worker_stops`).
+    let asked = window.image.paste.asked.take();
+    debug_assert_eq!(asked, Some(pane), "an image read nobody asked for");
+    match pasted {
+        Pasted::Image(image) => {
+            if let Err(why) = write(window, pane, image, ctx) {
+                tell(window, pane, &why);
+            }
+        }
+        Pasted::Absent => tell(window, pane, NO_IMAGE),
+        Pasted::Failed(why) => {
+            let said = format!("The clipboard could not be read: {}.", clause(&why));
+            tell(window, pane, &said);
+        }
+        Pasted::Unavailable(why) => {
+            let said = format!("The clipboard is unavailable: {}.", clause(&why));
+            tell(window, pane, &said);
+        }
+        Pasted::Expired => tell(window, pane, EXPIRED),
+    }
+}
+
+/// A cause put inside the drawer's own sentence, whoever wrote it: lowercased at its start and
+/// without a full stop of its own — arboard words its errors as sentences of their own.
+fn clause(why: &str) -> String {
+    let why = why.trim().trim_end_matches('.');
+    let mut rest = why.chars();
+    let first = rest.next().map(|c| c.to_lowercase().to_string());
+    format!("{}{}", first.unwrap_or_default(), rest.as_str())
+}
+
+/// Refuses an image the viewer would refuse anyway, before a file is left for it, then starts the
+/// worker that encodes and writes it.
+fn write(
+    window: &mut crate::Window,
+    pane: usize,
+    image: image::RgbaImage,
+    ctx: &egui::Context,
+) -> Result<(), String> {
+    let console = window.all_panes().find(|p| p.name == pane);
+    let console = console.ok_or("its console has closed")?;
+    let folder = console.panel.as_ref().map(|dir| dir.path().to_owned());
+    let folder = folder.ok_or(NO_FOLDER)?;
+    if decodes_too_large(image.width(), image.height()) {
+        return Err(too_large(DECODE_LIMIT));
+    }
+    let into = folder.clone();
+    let job = spawn(ctx.clone(), move || {
+        let png = encode(&image, IMAGE_LIMIT)?;
+        write_new(&into, &png)
+    })?;
+    window.image.paste.writing = Some(Writing { pane, folder, job });
+    Ok(())
+}
+
+/// Whether the viewer's decode would refuse an image this size: it decodes to RGBA, four bytes a
+/// pixel, under the same limit.
+fn decodes_too_large(width: u32, height: u32) -> bool {
+    u64::from(width) * u64::from(height) * 4 > DECODE_LIMIT
+}
+
+/// The screenshot as a PNG, refused over `limit` bytes as an opened image's file would be.
+fn encode(image: &image::RgbaImage, limit: usize) -> Result<Vec<u8>, String> {
+    let mut png = Vec::new();
+    image
+        .write_with_encoder(image::codecs::png::PngEncoder::new(&mut png))
+        .map_err(|e| format!("The screenshot could not be encoded: {e}"))?;
+    if png.len() > limit {
+        return Err(too_large(limit as u64));
+    }
+    Ok(png)
+}
+
+fn too_large(limit: u64) -> String {
+    format!(
+        "The clipboard image is too large to open (limit: {} MiB).",
+        limit / (1024 * 1024)
+    )
+}
+
+/// Writes `png` into `folder` under the first `pasted-<n>.png` nothing there takes, a dangling
+/// link included: `create_new` refuses them all, so a name taken by anyone moves on to the next. On Unix readable by its owner only, as Send's copies are (D113).
+fn write_new(folder: &Path, png: &[u8]) -> Result<PathBuf, String> {
+    for n in 1.. {
+        let path = folder.join(format!("pasted-{n}.png"));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = match options.open(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(format!(
+                    "The screenshot could not be created at {}: {e}",
+                    path.display()
+                ));
+            }
+        };
+        return match file.write_all(png).and_then(|()| file.flush()) {
+            Ok(()) => Ok(path),
+            Err(e) => {
+                drop(file);
+                let left = match std::fs::remove_file(&path) {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                        format!("; the half-written file could not be removed: {error}")
+                    }
+                    _ => String::new(),
+                };
+                Err(format!(
+                    "The screenshot could not be written at {}: {e}{left}",
+                    path.display()
+                ))
+            }
+        };
+    }
+    unreachable!("some number is free")
+}
+
+/// From the window's input pass: asks for the paste the image tab's chord asked for, for the
+/// console that tab shows, and takes a written screenshot to its console's image.
+pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
+    if std::mem::take(&mut window.image.paste.key)
+        && let Some(pane) = super::focused_pane(window).map(|p| p.name)
+    {
+        ask(window, pane);
+    }
+    let Some(writing) = &window.image.paste.writing else {
+        return;
+    };
+    let Some(written) = take(&writing.job) else {
+        ctx.request_repaint_after(Duration::from_millis(50));
+        return;
+    };
+    let Writing { pane, folder, .. } = window.image.paste.writing.take().expect("a paste");
+    let open = window.all_panes().any(|p| p.name == pane);
+    let path = match written {
+        Ok(path) if !open => return forsake(&path),
+        Err(why) if !open => return forsake_folder(&folder, Some(&why)),
+        Ok(path) => path,
+        Err(why) => return tell(window, pane, &why),
+    };
+    let Some(console) = super::console_of(&mut window.tabs, pane) else {
+        return forsake(&path);
+    };
+    // The console removes it when it closes, with Send's copies.
+    console.annotated.record(path.clone());
+    if console.slot.has_marks() {
+        // Marks drawn on this console's image while the screenshot was written: they are kept,
+        // and the file stays the console's until it closes.
+        let said = format!(
+            "The screenshot was saved to {}; send or clear the marks on this image to open it.",
+            path.display()
+        );
+        tell(window, pane, &said);
+    } else {
+        let opened = origin::open_image_target(window, pane, path);
+        debug_assert!(opened.is_ok(), "{opened:?}");
+    }
+    ctx.request_repaint();
+}
+
+/// A console that closed while its screenshot was written could not remove its folder, which held
+/// the file: both go now.
+fn forsake(path: &Path) {
+    if let Err(error) = std::fs::remove_file(path) {
+        eprintln!("the pasted screenshot {} remains ({error})", path.display());
+        return;
+    }
+    if let Some(folder) = path.parent() {
+        forsake_folder(folder, None);
+    }
+}
+
+/// The folder of a console that closed while its screenshot was being written goes if nothing
+/// else is in it; a write that failed meanwhile is said on standard error, where nobody else will.
+fn forsake_folder(folder: &Path, failed: Option<&str>) {
+    if let Some(why) = failed {
+        eprintln!("the pasted screenshot for a closed console was not written: {why}");
+    }
+    if std::fs::remove_dir(folder).is_ok() {
+        let after = if failed.is_some() {
+            "its failed paste"
+        } else {
+            "its pasted screenshot was gone"
+        };
+        eprintln!(
+            "the panel directory {} was removed after {after}",
+            folder.display()
+        );
+    }
+}
+
+/// Says what became of a paste in its own console's image, and shows that console's image tab
+/// with the keys, however late the answer (D120). It replaces what the tab said, unless the image
+/// keeps unsent marks, whose words — a failed Send among them — are kept and it follows them. A
+/// console that closed meanwhile took its slot with it: standard error alone.
+fn tell(window: &mut crate::Window, pane: usize, said: &str) {
+    let Some(slot) = super::slot_of(&mut window.tabs, pane) else {
+        return eprintln!("A paste ended for a console that has closed: {said}");
+    };
+    if slot.has_marks() {
+        slot.add(said);
+    } else {
+        slot.say(said);
+    }
+    origin::focus(window, pane);
+    origin::show_image(window);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC8: the viewer's own decode limit, at its edge: 8192 × 8192 RGBA is exactly 256 MiB.
+    #[test]
+    fn an_image_the_decode_would_refuse_is_refused_before_a_file_is_written() {
+        assert!(!decodes_too_large(8192, 8192));
+        assert!(decodes_too_large(8192, 8193));
+        assert!(!decodes_too_large(0, u32::MAX));
+        assert_eq!(
+            too_large(DECODE_LIMIT),
+            "The clipboard image is too large to open (limit: 256 MiB)."
+        );
+    }
+
+    /// AC8: a PNG over the file limit is refused, one at it is kept.
+    #[test]
+    fn a_png_over_the_file_limit_is_refused() {
+        let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 255]));
+        let size = encode(&image, usize::MAX).unwrap().len();
+        assert_eq!(encode(&image, size).unwrap().len(), size);
+        assert_eq!(encode(&image, size - 1), Err(too_large(size as u64 - 1)));
+    }
+
+    /// AC1: the first name nothing takes, a dangling link included, and nobody's file touched.
+    #[cfg(unix)]
+    #[test]
+    fn the_screenshot_takes_the_first_free_name_and_touches_nothing_else() {
+        let dir = panel_contract::PanelDir::create().unwrap();
+        let folder = dir.path();
+        std::os::unix::fs::symlink(folder.join("nowhere"), folder.join("pasted-1.png")).unwrap();
+        std::fs::write(folder.join("pasted-2.png"), b"theirs").unwrap();
+        let written = write_new(folder, b"png").unwrap();
+        assert_eq!(written, folder.join("pasted-3.png"));
+        assert_eq!(std::fs::read(&written).unwrap(), b"png");
+        assert_eq!(
+            std::fs::read(folder.join("pasted-2.png")).unwrap(),
+            b"theirs"
+        );
+        assert!(!folder.join("nowhere").exists());
+        for name in ["pasted-1.png", "pasted-2.png", "pasted-3.png"] {
+            let _ = std::fs::remove_file(folder.join(name));
+        }
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// Which presses are the paste chord: Ctrl+V with or without Shift (Cmd on macOS), the Paste
+    /// key, Shift+Insert on Windows, and egui's text paste; not Ctrl+Alt+V as a key, a plain V, a
+    /// release, or a held chord's repeat.
+    #[test]
+    fn the_paste_chord_is_taken_and_nothing_else() {
+        use egui::{Key, Modifiers};
+        let shift_command = Modifiers::COMMAND | Modifiers::SHIFT;
+        let taken = [
+            key(Key::V, Modifiers::COMMAND),
+            key(Key::V, shift_command),
+            key(Key::Paste, Modifiers::NONE),
+            egui::Event::Paste("text".into()),
+        ];
+        let repeat = egui::Event::Key {
+            key: Key::V,
+            physical_key: None,
+            pressed: true,
+            repeat: true,
+            modifiers: Modifiers::COMMAND,
+        };
+        // Shift+Insert is the paste chord on Windows alone, where Win+Shift+S leaves only an image.
+        let insert = key(Key::Insert, Modifiers::SHIFT);
+        let ctrl_insert = key(Key::Insert, Modifiers::SHIFT | Modifiers::CTRL);
+        let (windows_taken, windows_kept) = if cfg!(windows) {
+            (vec![insert], vec![ctrl_insert])
+        } else {
+            (vec![], vec![insert, ctrl_insert])
+        };
+        for event in windows_taken {
+            assert!(chord(&event), "{event:?} is not the chord");
+        }
+        for event in windows_kept {
+            assert!(!chord(&event), "{event:?} is the chord");
+        }
+        let kept = [
+            repeat,
+            key(Key::V, Modifiers::COMMAND | Modifiers::ALT),
+            key(Key::V, Modifiers::NONE),
+            egui::Event::Key {
+                key: Key::V,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            },
+        ];
+        for event in taken {
+            assert!(chord(&event), "{event:?} is not the chord");
+        }
+        for event in kept {
+            assert!(!chord(&event), "{event:?} is the chord");
+        }
+    }
+}

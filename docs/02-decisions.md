@@ -11689,6 +11689,9 @@ which protects nothing the opening in the id does not; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.
 
+**Amended by D120 (#199):** the copies field also holds screenshots pasted from the clipboard, and
+they are removed with the console the same way.
+
 ## D114 — The window keeps its own standard error in a log file, and records a panic there itself
 
 **Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
@@ -11977,3 +11980,76 @@ unnecessary for one diagnostic chain; raw command-line getters expose data the c
 request. The next implementation must prove native supported-runtime argument parsing rather
 than assume one parser represents every Windows program.
 
+
+---
+
+## D120 — A screenshot on the clipboard is pasted into a console's own folder and its own image
+
+**22 November 2026 — #199.** The system's own screenshot tools already copy to the clipboard —
+Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so that is where Ivy
+takes a screenshot from, into the image a console holds since #198 (D72's amendment):
+
+- **«Paste screenshot» in every console's header** (Phosphor's image glyph, between the review and
+  the panel; a narrow header gives up the splits first, then this) reads the clipboard's image for
+  that console, focuses it and shows the Image tab, as a Ctrl+click on an image path does. Found,
+  it is written as `pasted-<n>.png` into that console's `PANEL_DIR` — the first `n` nothing there
+  takes, a dangling link included, created with `create_new` on a worker, mode 0600 on Unix — and
+  opened through the same entry as a clicked image path (D72, D113) in that console's slot. Not
+  found, that console's empty Image tab says so after how to open an image, which now names the
+  paste too: «… or copy a screenshot and press Paste screenshot or Ctrl+V here.» (Cmd+V on macOS).
+  Every refusal is said there, in that console's own slot, in place of what the tab said — after
+  it only over unsent marks, whose words, a failed Send among them, stay — so presses do not pile
+  answers up: no folder, an image too large, a read that failed or ran out of time (a decoder that
+  panics on another program's image included, which fails that read and not the worker), a
+  clipboard busy with another read or unavailable, each with its cause.
+- **The paste chord in the Image tab** does the same for the focused console, the one the tab
+  shows — **only while the drawer holds the keys and no text field has the keyboard**, so a note
+  being typed keeps its text paste, and not while a Send is on its way. A console that holds the
+  keys leaves its events in egui's input, so the drawer cannot rely on being painted after it. The
+  vendored egui-winit lets the chord through as a key when the clipboard holds no text — Ctrl+V or
+  Ctrl+Shift+V (Cmd on macOS), the Paste key, and Shift+Insert on Windows, where Win+Shift+S leaves
+  only an image — and turns every paste chord into `Event::Paste` when it does. Both are taken once
+  per hold: egui-winit turns a held chord's repeats into more text pastes with no repeat flag, but
+  lets the key's release through, and that release ends the hold — as does the window losing the
+  keys, or a frame the tab did not look in.
+- **Every answer is shown in its own console, and takes the keys**, however late it comes (decided
+  with the owner on #199's first PR): that console is focused and the Image tab shown. Late means a
+  stuck clipboard owner, at most the 10 s deadline. A paste asked over unsent marks is refused before
+  the clipboard is read; a screenshot written while marks were drawn is kept in the folder, and the
+  tab says where. A console that closed before its answer took its slot with it: standard error
+  only, never another console's tab.
+- **«A paste is already on its way» is painted, never written**: ahead of the word in the tab of
+  the console it was asked again for, while that paste is on its way — or, asked for another
+  console than the one being read, that its paste was not read and to press again once the first
+  has opened, since one read runs at a time. The slot's notice is written
+  by Send, the marks' refusal and every answer, so a status written into it and restored later went
+  stale with each of them — lost, brought back after it stopped being true, or piled up — in three
+  review rounds of #199's first PR.
+- **The file is the console's**: it joins the annotated copies the console removes when it closes
+  (D113's cleanup, the same field). A console that closes while its screenshot is written takes the
+  file when the write ends, and its folder if nothing else is in it.
+- **The same limits as an opened image** — a decode over 256 MiB, a PNG over 32 MiB — refuse it
+  **before** a file is written, with `The clipboard image is too large to open (limit: … MiB).`
+  They keep the file off the disk, not the memory: arboard has decoded the clipboard's image whole
+  by the time it is measured, and offers no size to look at first.
+- **An image read has a deadline of its own, 10 s**: arboard decodes the clipboard's PNG inside the
+  read, and a debug build decoded a 2400×1600 PNG in 1.5–4 s under load (#178), so the 2 s text
+  deadline would expire on an ordinary capture. The read stays on the clipboard's one worker, one
+  read at a time, keyed by console, so a late reply cannot land as another console's paste. A worker
+  that stops answers the read it held, unless that read was already said expired.
+
+**Amends D113**: the copies field also holds pasted screenshots.
+
+Discarded: watching the system's screenshots folder, whose path changes with the system and its
+language and which means watching a folder of the person's all the time; «Open with Ivy» and an
+`ivy open <file>` command, which need the running app to take orders from outside; a capture
+button inside Ivy, which needs each platform's capture API — the three by the owner's choice in
+#199. Opening the clipboard's pixels in memory with no file, because the ticket wants the file in
+the console's folder. **A picker beside Send to send to another console**, which #199 asked for in
+case the wrong header was pressed and its first PR built: with one image per console (#198) Send
+goes to the console that holds the image, and the image stays on the clipboard, so pressing the
+right console's button again is the remedy (the owner's choice when #198 landed). A second
+clipboard thread for images, against one outstanding read keyed by console.
+
+**Verification.** The clipboard formats on macOS and Windows are compiled but only checked by hand
+there.
