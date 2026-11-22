@@ -211,3 +211,29 @@ fn client_upgrade_uses_its_supplied_total_deadline() {
     assert!(started.elapsed() < DEADLINE);
     server.join().unwrap();
 }
+
+#[test]
+fn unverified_upgrade_preserves_pipelined_bytes_without_authority() {
+    let (dir, listener) = listener();
+    let server = thread::spawn(move || {
+        let stream = accept_with_capture(listener.accept().unwrap(), |_| {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "test refusal",
+            ))
+        })
+        .unwrap();
+        assert!(stream.verified_peer().is_none());
+        assert!(crate::session::Peer::capture(&stream).is_err());
+        let mut data = [0; 5];
+        (&stream).read_exact(&mut data).unwrap();
+        assert_eq!(&data, b"hello");
+    });
+    let mut client = windows::connect(dir.path(), dir.id()).unwrap();
+    client.write_all(&[HELLO, b"hello"].concat()).unwrap();
+    assert_eq!(
+        read_frame(&client, Instant::now() + DEADLINE).unwrap().mode,
+        "unverified"
+    );
+    server.join().unwrap();
+}

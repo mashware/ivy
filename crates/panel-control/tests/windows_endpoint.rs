@@ -93,6 +93,20 @@ fn windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips() {
                 break;
             }
         }
+        let hello: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(hello, serde_json::json!({"tool":"peer_hello","v":1}));
+        // This fixture checks the public MCP exchange, without providing process authorization.
+        stream
+            .write_all(b"{\"ok\":true,\"peer\":{\"v\":1,\"mode\":\"unverified\"}}\n")
+            .unwrap();
+        bytes.clear();
+        loop {
+            assert_eq!(stream.read(&mut byte).unwrap(), 1);
+            bytes.push(byte[0]);
+            if byte[0] == b'\n' {
+                break;
+            }
+        }
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["tool"], "panel_set");
         assert_eq!(value["document"]["lines"][0], "native pipe round trip");

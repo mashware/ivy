@@ -1,6 +1,7 @@
 use super::*;
 use crate::{DiagnosticPeer, session::Peer};
 use panel_contract::PanelDir;
+use std::os::windows::io::AsRawHandle;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::sync_channel;
 use std::thread;
@@ -92,6 +93,29 @@ fn exited_windows_peer_and_its_clones_never_become_alive_again() {
     assert_eq!(peer.pid(), child.0.id());
     assert_eq!(diagnostic.pid(), child.0.id());
     assert!(peer.birth() > 0 && peer.is_alive() && diagnostic.is_alive());
+    let mut creation = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exit = creation;
+    let mut kernel = creation;
+    let mut user = creation;
+    assert_ne!(
+        unsafe {
+            GetProcessTimes(
+                child.0.as_raw_handle(),
+                &mut creation,
+                &mut exit,
+                &mut kernel,
+                &mut user,
+            )
+        },
+        0
+    );
+    assert_eq!(
+        peer.birth(),
+        ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64
+    );
     child.0.kill().unwrap();
     child.0.wait().unwrap();
     for witness in [&peer, &cloned_peer] {

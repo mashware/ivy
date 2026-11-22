@@ -47,6 +47,11 @@ fn accept_with_capture(
     match result {
         Ok(Some(verified)) => Ok(verified),
         Ok(None) => {
+            bootstrap
+                .prefetched
+                .lock()
+                .unwrap()
+                .extend(&first[line.len() + 1..]);
             reset_timeouts(&bootstrap)?;
             Ok(bootstrap)
         }

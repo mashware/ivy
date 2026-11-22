@@ -121,6 +121,11 @@ jobs:
                             'windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
+      - name: Prove Windows peer regression witnesses with mutations
+        shell: pwsh
+        run: |
+          python scripts/windows-peer-mutations.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Keep named Windows control lifecycle witnesses
         shell: pwsh
         run: |
