@@ -115,7 +115,7 @@ pub(super) fn notify(error: &eframe::Error) {
         };
         let title: Vec<u16> = "Ivy could not start\0".encode_utf16().collect();
         let text: Vec<u16> = text
-            .replace('\0', "�")
+            .replace('\0', "?")
             .encode_utf16()
             .chain(Some(0))
             .collect();

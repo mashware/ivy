@@ -488,6 +488,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/diagnostics_log/graphics.rs",
+        include_str!("../src/diagnostics_log/graphics.rs"),
+        4,
+    ),
+    (
         "src/diagnostics_log/sink.rs",
         include_str!("../src/diagnostics_log/sink.rs"),
         0,
