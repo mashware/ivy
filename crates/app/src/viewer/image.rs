@@ -2243,6 +2243,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_maximized_drawer_keeps_clicks_over_hidden_consoles() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 120, 60);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let focused = window.active().focus;
+        let hidden = window.active().panes()[0]
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        crate::sidebar::toggle_maximize(&mut window);
+        painted(&mut window, &ctx, vec![]);
+        assert!(window.sidebar.maximized);
+        assert!(window.sidebar.last_dock.unwrap().contains(hidden));
+        click(&mut window, &ctx, hidden);
+        assert_eq!(window.active().focus, focused);
+        assert!(window.viewer.keyboard);
+        assert_eq!(slot(&window).path(), Some(path.as_path()));
+    }
+
     // The byte witnesses run POSIX shell preludes to disable echo and canonical input.
     #[cfg(unix)]
     #[test]

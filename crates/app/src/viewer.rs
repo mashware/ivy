@@ -424,6 +424,7 @@ pub(crate) fn before_keys(
         // at the drawer's handoff so even text batched with this press has the right recipient.
         let returned = holds
             && !window.viewer.held
+            && !window.sidebar.maximized
             && return_to_console(window, &ctx, geometry.consoles, metrics);
         if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
             window.viewer.keyboard = over && !returned;
