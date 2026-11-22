@@ -596,6 +596,28 @@ mod tests {
         assert_eq!(String::from_utf8(bytes).unwrap(), line);
     }
 
+    /// Cancel takes back only the Send clicked on its own image: one clicked on another opening
+    /// stays on its way, and nothing is said.
+    #[test]
+    fn cancel_on_one_image_never_takes_back_anothers_send() {
+        let mut sending = Sending::default();
+        sending.ask(Request {
+            document: 1,
+            pane: 7,
+            console: "A".into(),
+            path: PathBuf::from("/a/annotated-1.png"),
+            line: "x".into(),
+        });
+        let mut notice = None;
+        sending.answer(Some(Asked::Cancel(2)), &mut notice);
+        assert!(sending.asked(), "another image's Cancel took the Send back");
+        assert_eq!(notice, None);
+        assert_eq!(sending.button(2), Button::Waiting("A"));
+        sending.answer(Some(Asked::Cancel(1)), &mut notice);
+        assert!(!sending.busy());
+        assert_eq!(notice.as_deref(), Some(CANCELLED));
+    }
+
     /// A console that closes takes the copies Send left in its directory, and then the directory
     /// goes as it always does; a file of its program's is left alone and keeps the directory.
     #[test]
