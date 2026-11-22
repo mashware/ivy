@@ -382,7 +382,7 @@ impl Viewer {
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
         let button = sending.button(*id);
-        let send = something_to_send.then(|| (origin.label.as_str(), button));
+        let send = something_to_send.then_some((origin.label.as_str(), button));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
