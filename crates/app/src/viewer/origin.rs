@@ -379,8 +379,10 @@ pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::C
         if keeps_marks(window, focus) {
             return;
         }
-        if let Some(slot) = super::image::slot_of(&mut window.tabs, focus) {
-            slot.clear();
+        if let Some(slot) = super::image::slot_of(&mut window.tabs, focus)
+            && slot.clear()
+        {
+            ctx.request_repaint();
         }
     } else {
         let markdown = closed == Tool::Document;

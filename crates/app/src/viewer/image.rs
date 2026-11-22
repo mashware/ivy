@@ -157,9 +157,11 @@ impl Slot {
     }
 
     /// Forgets the image and what was said about it, keeping an unfinished decode's handle.
-    pub(super) fn clear(&mut self) {
+    /// Answers whether it took down the «new image» mark: the tab card and the header painted it
+    /// earlier in the frame, so whoever clears asks for the next one, as `mark_seen` does.
+    pub(super) fn clear(&mut self) -> bool {
         self.notice = None;
-        self.unseen = false;
+        let was_unseen = std::mem::take(&mut self.unseen);
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -168,6 +170,7 @@ impl Slot {
         {
             self.abandoned = Some((path, job));
         }
+        was_unseen
     }
 
     /// What a slot with no image has to say: its notice, with what a cancelled Send's worker left
@@ -6662,6 +6665,56 @@ mod tests {
         alone.slot.mark_unseen();
         assert_eq!(frame(&mut alone), Duration::ZERO);
         assert!(!alone.slot.unseen);
+    }
+
+    /// Closing a marked image with the Image tab's × takes the mark down and asks for the next
+    /// frame, where the tab card and the header, painted before the drawer, show it gone. The
+    /// control is the same close of an image nobody marked, which asks for none.
+    #[test]
+    fn closing_a_marked_image_asks_for_the_next_frame() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        for marked in [true, false] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let focused = window.active().focus;
+            // The drawer holds the keys on Changes, so the agent's image is marked and not shown.
+            crate::viewer::open_diff_for_pane(&mut window, focused);
+            window.viewer.keyboard = true;
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+            assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+            slot_mut(&mut window).unseen = marked;
+            let delay = |output: &egui::FullOutput| {
+                output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+            };
+            // Settled: a frame with nothing new asks for none, so what the close's frame asks for
+            // is the close's own.
+            let started = Instant::now();
+            while delay(&pass(&mut window, &ctx, vec![])).is_zero() {
+                assert!(started.elapsed() < Duration::from_secs(30), "never at rest");
+            }
+            assert_eq!(active(&window), Some(Tool::Git));
+            // Where the strip's × closes it: inside the frame, after the bar and the headers.
+            let mut frame = eframe::Frame::_new_kittest();
+            eframe::App::logic(&mut window, &ctx, &mut frame);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area()),
+                    max_texture_side: Some(MAX_SIDE),
+                    ..Default::default()
+                },
+                |ui| {
+                    eframe::App::ui(&mut window, ui, &mut frame);
+                    crate::viewer::origin::close_tab(&mut window, Tool::Image, ui.ctx());
+                },
+            );
+            output.textures_delta.clear();
+            assert!(!slot(&window).shown() && !slot(&window).unseen);
+            assert_eq!(delay(&output).is_zero(), marked, "marked: {marked}");
+        }
     }
 
     /// An agent opening an image in another console leaves a pan the person is making on the image
