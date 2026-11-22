@@ -804,6 +804,18 @@ fn the_large_document_lands_between_the_floor_and_the_ceiling() {
 /// Batch `Z` dumps ASCII in its consoles and publishes emoji in its panels. The colour guard used to
 /// ask only whether the batch was `Q`, so every `Z` run would invalidate itself for rasterizing, and
 /// a `Z` whose panels never reached the screen would be read as «the panel's colour path is free».
+fn counts_panel_emoji_as_colour(script: &str) -> bool {
+    let lines: Vec<_> = script.lines().collect();
+    lines.windows(3).any(|block| {
+        block
+            == [
+                "if [ \"${EMOJI:-}\" = 1 ] || [ \"${PANEL_EMOJI:-}\" = 1 ]; then",
+                "    COLOR_GLYPHS=1",
+                "fi",
+            ]
+    })
+}
+
 #[test]
 fn the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard() {
     assert!(
@@ -816,9 +828,7 @@ fn the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard() {
     // search for the test alone stays green with it deleted from the guard, and two assertions over
     // the `if` and its body separately stay green with the body moved under another `if`.
     assert!(
-        MEASURE.contains(
-            "if [ \"${EMOJI:-}\" = 1 ] || [ \"${PANEL_EMOJI:-}\" = 1 ]; then\n    COLOR_GLYPHS=1\nfi"
-        ),
+        counts_panel_emoji_as_colour(MEASURE),
         "the colour guard does not count the panel knob as a batch that must rasterize"
     );
     assert!(
@@ -829,6 +839,21 @@ fn the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard() {
         invalidates_on("[ \"$COLOR_GLYPHS\" != 1 ] && [ \"$RASTERIZED\" != 0 ]"),
         "a batch painting no emoji that rasterized some is not invalidated"
     );
+}
+
+#[test]
+fn the_colour_block_accepts_crlf_but_not_a_detached_assignment() {
+    for ending in ["\n", "\r\n"] {
+        let script = MEASURE.replace("\r\n", "\n").replace('\n', ending);
+        assert!(counts_panel_emoji_as_colour(&script));
+        assert!(!counts_panel_emoji_as_colour(
+            &script.replace(" || [ \"${PANEL_EMOJI:-}\" = 1 ]", "")
+        ));
+        assert!(!counts_panel_emoji_as_colour(&script.replace(
+            &format!("    COLOR_GLYPHS=1{ending}fi"),
+            &format!("fi{ending}    COLOR_GLYPHS=1"),
+        )));
+    }
 }
 
 /// Execute the shipped validator: deleting a direction changes the observed exit status.

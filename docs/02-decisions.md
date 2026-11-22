@@ -5649,6 +5649,14 @@ published crate. It is the **first patched dependency in this repository's histo
 `docs/05-roadmap.md` carries the amendment to the policy that said versions come from published
 releases.
 
+**Checkout representation, November 2026** ([#190](https://github.com/mashware/ivy/issues/190)).
+The source drift lock compares CRLF checkout pairs as LF before checking its recorded lengths and
+hashes, including the source left after the authorized patch regions are removed. Git's ordinary
+Windows checkout otherwise changes the manifest from 10,316 to 10,729 bytes without a source edit.
+The recorded snapshot remains unchanged. Every other byte, a lone carriage return and the presence
+of the final newline remain significant; trimming whitespace, regenerating hashes for Windows or
+omitting the guard there would hide changes the lock is meant to catch.
+
 **What was broken, said in product terms.** Pressing `Ctrl+V` with a **screenshot** on the clipboard
 did nothing at all. Not the paste — correctly, that is `Ctrl+Shift+V`'s job — but not the control
 byte either, and not even the keypress. In a terminal built to host agents that is the gesture for

@@ -366,30 +366,6 @@
     "issue": "https://github.com/mashware/ivy/issues/189"
   },
   {
-    "binary": "app/batches:test",
-    "name": "the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard",
-    "reason": "the repository guard reads the checkout in Unix form",
-    "issue": "https://github.com/mashware/ivy/issues/190"
-  },
-  {
-    "binary": "app/prose:test",
-    "name": "no_line_of_the_prototypes_reads_as_spanish",
-    "reason": "the repository guard reads the checkout in Unix form",
-    "issue": "https://github.com/mashware/ivy/issues/190"
-  },
-  {
-    "binary": "app/vendor_patch:test",
-    "name": "nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate",
-    "reason": "the repository guard reads the checkout in Unix form",
-    "issue": "https://github.com/mashware/ivy/issues/190"
-  },
-  {
-    "binary": "app/waits:test",
-    "name": "every_blocking_wait_in_production_code_is_bounded_or_declared_abandoned",
-    "reason": "the repository guard reads the checkout in Unix form",
-    "issue": "https://github.com/mashware/ivy/issues/190"
-  },
-  {
     "binary": "app/app:lib",
     "name": "tests::integrated_chrome::tests::search_blink_deadline_covers_both_halves_and_disarms_when_closed",
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
