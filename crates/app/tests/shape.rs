@@ -115,6 +115,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/provenance_route.rs"),
     ),
     (
+        "src/panel/provenance_route/windows_tests.rs",
+        include_str!("../src/panel/provenance_route/windows_tests.rs"),
+    ),
+    (
         "src/panel/provenance.rs",
         include_str!("../src/panel/provenance.rs"),
     ),

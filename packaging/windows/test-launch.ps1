@@ -1,7 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$Executable,
       [Parameter(Mandatory=$true)][string]$EvidenceDir,
       [ValidateSet('none', 'crash', 'shell', 'layout', 'deadline')][string]$Control = 'none',
-      [ValidateRange(1, 120)][int]$TimeoutSeconds = 30)
+      [ValidateRange(1, 120)][int]$TimeoutSeconds = 30,
+      [string]$ProvenancePublisher = '')
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:IVY_DISPOSABLE_RUNNER -ne 'yes') {
     throw 'Launch checks require a disposable GitHub Windows runner.'
@@ -33,8 +34,20 @@ public static class IvyLaunchNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int left, top, right, bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT rect);
+    [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
+    public static int[] CaptureBounds(IntPtr window) {
+        UIntPtr result;
+        if (SendMessageTimeout(window, 0, IntPtr.Zero, IntPtr.Zero, 2, 2000, out result) == IntPtr.Zero)
+            throw new Exception("Window did not answer the responsiveness check");
+        RECT rect;
+        if (!GetWindowRect(window, out rect)) throw new Exception("Window rectangle unavailable");
+        return new int[] { rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top };
+    }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint n, INPUT[] i, int size);
     [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public UNION u; }
     [StructLayout(LayoutKind.Explicit)] struct UNION {
@@ -191,6 +204,7 @@ try {
     }
     $Shell | Select-Object ProcessId, ParentProcessId, ExecutablePath, CommandLine | ConvertTo-Json | Set-Content (Join-Path $EvidenceDir 'shell.json')
     $ShellProcess = [Diagnostics.Process]::GetProcessById($Shell.ProcessId)
+    if ($ProvenancePublisher) { $null = $ShellProcess.Handle }
     $Activated = [IvyLaunchNative]::SetForegroundWindow($Window.Handle)
     if (-not $Activated -and [IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'shell: could not focus the application window' }
     while ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) {
@@ -214,6 +228,59 @@ try {
         }
         Start-Sleep -Milliseconds 50
     }
+    function Await-Witness([string]$Path, [string]$Expected) {
+        while ($true) {
+            Check-Alive
+            if (Test-Path $Path -PathType Leaf) {
+                try { $Value = [IO.File]::ReadAllText($Path) } catch [IO.IOException] { $Value = '' }
+                if ($Value -eq $Expected) { return }
+            }
+            Start-Sleep -Milliseconds 50
+        }
+    }
+    function Capture-Witness([string]$Name) {
+        Add-Type -AssemblyName System.Drawing
+        # Responsiveness is not proof of a fresh Ivy frame. Collect evidence samples; acceptance
+        # still requires reviewing the expected caption/notice in the panel, not console echo.
+        for ($Sample = 0; $Sample -lt 3; $Sample++) {
+            Check-Alive
+            if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Publication capture lost the controlled window focus' }
+            $Rect = [IvyLaunchNative]::CaptureBounds($Window.Handle)
+            if ($Rect[2] -lt 100 -or $Rect[3] -lt 100) { throw 'Publication window is too small' }
+            $Bitmap = [Drawing.Bitmap]::new($Rect[2], $Rect[3])
+            $Graphics = [Drawing.Graphics]::FromImage($Bitmap)
+            try {
+                $Graphics.CopyFromScreen($Rect[0], $Rect[1], 0, 0, $Bitmap.Size)
+                $Bitmap.Save((Join-Path $EvidenceDir "$Name-$Sample.png"), [Drawing.Imaging.ImageFormat]::Png)
+            } finally { $Graphics.Dispose(); $Bitmap.Dispose() }
+            if ($Sample -lt 2) { Start-Sleep -Milliseconds 100 }
+        }
+    }
+    function Type-Publication([string]$Body, [string]$AckName) {
+        $Ack = Join-Path $EvidenceDir $AckName
+        $Publisher = ([IO.Path]::GetFullPath($ProvenancePublisher)).Replace("'", "''")
+        $EscapedAck = $Ack.Replace("'", "''")
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Publication input lost the controlled window focus' }
+        [IvyLaunchNative]::Type("& '$Publisher' -PanelId '$($PaneIdentity[0])' -ServerPid $($Process.Id) -Text '$Body' -Ack '$EscapedAck'")
+        Await-Witness $Ack 'published'
+    }
+    if ($ProvenancePublisher) {
+        if ([IO.Path]::GetFileName($Expected) -ieq 'cmd.exe') { throw 'Publication desktop witness requires the PowerShell fixture' }
+        $Stage = 'publication identity'
+        if (-not [IvyLaunchNative]::SetWindowPos($Window.Handle, [IntPtr]::Zero, 0, 0, 960, 640, 20)) { throw 'Could not place the isolated desktop window' }
+        $IdentityFile = Join-Path $EvidenceDir 'pane-identity.txt'
+        $IdentityAck = Join-Path $EvidenceDir 'identity.ack'
+        $EscapedIdentity = $IdentityFile.Replace("'", "''")
+        $EscapedIdentityAck = $IdentityAck.Replace("'", "''")
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Identity input lost the controlled window focus' }
+        [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedIdentity', (`$env:PANEL_ID + '|' + `$env:PANEL_DIR + '|' + `$env:PANEL_SERVER_PID + '|' + `$PID)); [IO.File]::WriteAllText('$EscapedIdentityAck', '$Token')")
+        Await-Witness $IdentityAck $Token
+        $PaneIdentity = ([IO.File]::ReadAllText($IdentityFile)).Split('|')
+        if ($PaneIdentity.Count -ne 4 -or $PaneIdentity[2] -ne "$($Process.Id)" -or $PaneIdentity[3] -ne "$($Shell.ProcessId)") { throw 'Desktop witness identity did not come from this console' }
+        $Stage = 'inside publication'
+        Type-Publication 'OWN CONSOLE WITNESS' 'inside.ack'
+        Capture-Witness 'inside'
+    }
     # A window nobody rearranged writes no layout (opening.rs records the first mirror as seen), so
     # the trial splits the console the way a person would and waits for the second shell.
     $Stage = 'split'
@@ -223,6 +290,25 @@ try {
         $Children = @(Descendants $Process.Id)
         if (@($Children | Where-Object { $_.ExecutablePath -ieq $Expected }).Count -ge 2) { break }
         Start-Sleep -Milliseconds 250
+    }
+    if ($ProvenancePublisher) {
+        $Stage = 'second console identity'
+        $SecondShell = $Children | Where-Object { $_.ExecutablePath -ieq $Expected -and $_.ProcessId -ne $Shell.ProcessId } | Select-Object -First 1
+        if ($null -eq $SecondShell) { throw 'Second console program was not observed' }
+        $SecondWitness = Join-Path $EvidenceDir 'second-shell.txt'
+        $EscapedSecond = $SecondWitness.Replace("'", "''")
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Second console input lost the controlled window focus' }
+        [IvyLaunchNative]::Type("[IO.File]::WriteAllText('$EscapedSecond', '$Token|' + `$PID)")
+        Await-Witness $SecondWitness "$Token|$($SecondShell.ProcessId)"
+        $Stage = 'outside publication'
+        Type-Publication 'OTHER CONSOLE WITNESS' 'outside.ack'
+        Capture-Witness 'outside'
+        $Stage = 'revoked publication'
+        $ShellProcess.Kill()
+        while (-not $ShellProcess.HasExited) { Check-Alive; Start-Sleep -Milliseconds 50 }
+        Type-Publication 'ROOT ENDED WITNESS' 'revoked.ack'
+        Capture-Witness 'revoked'
+        [IO.File]::WriteAllText((Join-Path $EvidenceDir 'provenance.json'), (@{ app_pid=$Process.Id; root_pid=$Shell.ProcessId; inside='OWN CONSOLE WITNESS'; outside='OTHER CONSOLE WITNESS'; revoked='ROOT ENDED WITNESS'; visual_review_required=$true } | ConvertTo-Json))
     }
     $Stage = 'close'
     if ($Control -ne 'deadline') {

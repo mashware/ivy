@@ -2,12 +2,31 @@
 
 use std::sync::Arc;
 
+#[cfg(not(windows))]
 use panel_control::{DiagnosticPeer, PublicationInspector, PublicationOrigin};
-use term_core::{Ancestry, ForegroundScope};
+#[cfg(not(windows))]
+use term_core::Ancestry;
+use term_core::ForegroundScope;
+
+#[cfg(not(windows))]
+pub(crate) type Inspector = PublicationInspector;
+#[cfg(windows)]
+pub(crate) type Inspector = Option<Arc<ForegroundScope>>;
+
+#[cfg(windows)]
+pub(crate) fn inspector(scope: ForegroundScope) -> Inspector {
+    Some(Arc::new(scope))
+}
+
+#[cfg(windows)]
+pub(crate) fn unavailable() -> Inspector {
+    None
+}
 
 /// Build the per-listener observation callback. The captured scope is the pane's original PTY root;
 /// its native lifetime check makes every observation unknown once that PTY has been revoked.
-pub(crate) fn inspector(scope: ForegroundScope) -> PublicationInspector {
+#[cfg(not(windows))]
+pub(crate) fn inspector(scope: ForegroundScope) -> Inspector {
     Arc::new(move |peer: &DiagnosticPeer| {
         if !peer.is_alive() || !scope.is_open() {
             return PublicationOrigin::Unknown;
@@ -25,7 +44,8 @@ pub(crate) fn inspector(scope: ForegroundScope) -> PublicationInspector {
     })
 }
 
-pub(crate) fn unavailable() -> PublicationInspector {
+#[cfg(not(windows))]
+pub(crate) fn unavailable() -> Inspector {
     Arc::new(|_: &DiagnosticPeer| PublicationOrigin::Unknown)
 }
 
@@ -145,3 +165,7 @@ mod tests {
         drop(channel);
     }
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;

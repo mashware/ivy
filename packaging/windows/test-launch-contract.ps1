@@ -5,6 +5,12 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSS
 if ($errors.Count) { $errors | Format-List; exit 1 }
 $type = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value.StartsWith('using System;') }, $true)
 Add-Type -TypeDefinition $type[0].Value
+$publisherErrors = $null
+$publisherAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'publish-provenance-witness.ps1'), [ref]$null, [ref]$publisherErrors)
+if ($publisherErrors.Count) { $publisherErrors | Format-List; exit 1 }
+$publisherType = $publisherAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value.StartsWith('using System;') }, $true)
+if ($publisherType.Count -ne 1) { throw 'Publication witness native identity binding is missing' }
+Add-Type -TypeDefinition $publisherType[0].Value
 $function = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Saved-Leaves' }, $true)
 Invoke-Expression $function[0].Extent.Text
 $leaf = '{"leaf":{"panel_width":36,"folded":false}}' | ConvertFrom-Json

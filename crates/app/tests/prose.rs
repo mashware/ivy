@@ -164,6 +164,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/panel/provenance_route/windows_tests.rs",
+        include_str!("../src/panel/provenance_route/windows_tests.rs"),
+        2,
+    ),
+    (
         "src/panel/provenance.rs",
         include_str!("../src/panel/provenance.rs"),
         0,

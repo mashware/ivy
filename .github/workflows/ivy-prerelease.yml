@@ -67,6 +67,13 @@ jobs:
       - name: Check Windows launch helper contracts
         shell: pwsh
         run: ./packaging/windows/test-launch-contract.ps1
+      - name: Check native full-queue reader completion before the workspace
+        shell: pwsh
+        run: |
+          $name = 'tests::closing_with_the_channel_full_ends_reader_without_draining'
+          cargo test --locked -p term-core --lib -- $name --exact --nocapture 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
       - name: Lint all Windows workspace targets
         shell: pwsh
         run: |
@@ -141,6 +148,30 @@ jobs:
                             'windows_control_plan_snapshot_registration_cannot_miss_a_concurrent_commit') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
+      - name: Keep named native Windows process and publication witnesses
+        shell: pwsh
+        run: |
+          cargo test --locked -p term-core --lib -- foreground::windows --test-threads=1 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_foreground_root_and_other_console_and_revocation',
+                            'windows_foreground_scope_moved_to_worker_observes_root_exit',
+                            'windows_foreground_descendant_lifetime_signals_exit_259',
+                            'windows_foreground_nested_descendant_is_inside',
+                            'windows_foreground_sequence_agrees_with_telemetry_and_creation_order',
+                            'windows_foreground_wow64_parameters_are_unsupported_without_losing_native_evidence',
+                            'windows_foreground_observation_returns_the_exact_launched_executable',
+                            'current_process_directory_and_arguments_agree_with_runtime') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
+          cargo test --locked -p app --lib -- windows_provenance_opened_panes 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $name = 'windows_provenance_opened_panes_label_only_verified_outside_and_keep_unknown'
+          if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+      - name: Prove Windows publication and process regression witnesses with mutations
+        shell: pwsh
+        run: |
+          python scripts/windows-provenance-mutations.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the Windows path arms
         shell: pwsh
         # A filter exits 0 when it matches nothing, and a cfg typo compiles a test out in silence, so

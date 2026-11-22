@@ -75,6 +75,10 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/panel/provenance_route/windows_tests.rs",
+        include_str!("../src/panel/provenance_route/windows_tests.rs"),
+    ),
+    (
         "panel-control/src/endpoint/windows/negotiation.rs",
         include_str!("../../panel-control/src/endpoint/windows/negotiation.rs"),
     ),
@@ -428,6 +432,38 @@ const MODULES: &[(&str, &str)] = &[
     (
         "term-core/src/foreground/linux.rs",
         include_str!("../../term-core/src/foreground/linux.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows.rs",
+        include_str!("../../term-core/src/foreground/windows.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/process.rs",
+        include_str!("../../term-core/src/foreground/windows/process.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/ancestry.rs",
+        include_str!("../../term-core/src/foreground/windows/ancestry.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/chain.rs",
+        include_str!("../../term-core/src/foreground/windows/chain.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/parameters.rs",
+        include_str!("../../term-core/src/foreground/windows/parameters.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/memory.rs",
+        include_str!("../../term-core/src/foreground/windows/memory.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/arguments.rs",
+        include_str!("../../term-core/src/foreground/windows/arguments.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/tests.rs",
+        include_str!("../../term-core/src/foreground/windows/tests.rs"),
     ),
     (
         "term-core/src/foreground/tests.rs",

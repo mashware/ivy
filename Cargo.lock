@@ -2434,6 +2434,7 @@ dependencies = [
  "panel-contract",
  "serde",
  "serde_json",
+ "term-core",
  "tungstenite",
  "windows-sys 0.61.2",
 ]

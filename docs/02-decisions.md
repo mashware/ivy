@@ -11910,3 +11910,53 @@ returned startup error and is not covered.
 
 **Evidence limit.** Routing and formatting tests do not establish visibility on a real Windows
 desktop; that requires launching the installed app with insufficient and supported graphics.
+## D119 — Windows process observations describe ancestry, never foreground authority
+
+**Decided for #166.** Windows gains console-bound diagnostic ancestry and separate, handle-owned
+process observations. A descendant is not called foreground: `inspect` and `inspect_descendant`
+remain unsupported there. The explicit Ivy-owned agent launch approved for #185 remains the
+separate prerequisite for Windows hook authority. No observation converts into the Unix
+foreground evidence used for hooks or recovery.
+
+**Why.** ConPTY has no Unix foreground process group. Giving every shell descendant that meaning
+would let background programs claim the same authority. The user chose process identification
+and provenance while preserving the existing authorization boundary. D91's labels remain
+diagnostic: incomplete evidence is unknown and does not refuse a publication.
+
+The Windows scope pins its original child and revokes on console close or root exit. A validated
+peer chain reaching that exact root is inside; one reaching its verified, pinned Ivy parent first
+is outside. A coherent parent-PID-zero boundary is outside too. Missing or dead history is unknown;
+PID1 is ordinary. Each retained handle supplies a creation FILETIME for identity and a native
+process sequence number for ordering. Parent sequence must be strictly earlier than child's;
+missing, zero or malformed sequence evidence is unknown, with no wall-clock fallback. UTC clock
+rollback can make a recycled parent's creation date appear earlier, so FILETIME ordering is
+insufficient even with repeated reads. Sequences and handle revalidation provide a bounded
+observation, without claiming an atomic process tree.
+
+The sequence query uses dynamically resolved `NtQueryInformationProcess` class92, an existing
+native implementation surface documented by [PHNT](https://github.com/winsiderss/phnt/blob/master/ntpsapi.h).
+Microsoft documents the process sequence in its [telemetry header](https://learn.microsoft.com/en-us/windows/win32/devnotes/process_telemetry_id_information_type);
+the strict ordering premise relies on the native implementation, not a universal public API
+guarantee. A named native witness checks the exact8-byte result against telemetry, parent/child
+order and retained-handle stability after exit. Unsupported queries conservatively yield unknown.
+
+Executable and lifetime inspection use process handles. Directory and structural argument/script
+inspection are separate, bounded, best-effort reads of mutable process parameters, initially for
+native x64 only. Unsupported layouts are explicit. They grant no authority and expose no command
+line or prompt payload. #165 must supply exact connected-peer evidence before publication labels
+can be enabled. These are design decisions, not a claim of implemented or Windows-tested support.
+
+The Windows channel receives that scope as a concrete capability, not a caller callback. The
+Windows-only `panel-control` dependency on `term-core` reuses the same bounded native ancestry
+reader; the channel brackets classification with its pinned peer and scope liveness. Reads and
+wakeups remain concrete snapshots/native messages. A generic callback on a joined worker could
+block shutdown; duplicating the ancestry reader would let its identity rules drift. Unix keeps its
+existing inspector callback. No process-parameter read or UI lock enters classification.
+
+**Discarded.** Fabricated Unix group/session fields misrepresent evidence; ancestry-as-foreground
+changes the approved authority boundary; treating a missing parent as outside invents certainty;
+UTC timestamps are not a monotonic exclusion proof; whole-tree scans and elevated helpers are
+unnecessary for one diagnostic chain; raw command-line getters expose data the consumer did not
+request. The next implementation must prove native supported-runtime argument parsing rather
+than assume one parser represents every Windows program.
+
