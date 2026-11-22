@@ -4904,6 +4904,8 @@ mod tests {
         write_png(&path, 640, 400);
         let (mut window, ctx, _dir) = window_to_send(&path, &own);
         let other = window.active().panes()[0].name;
+        // A name long enough for Send's label to wrap, so it fills the room the picker leaves.
+        origin_pane(&mut window).label = Some("an agent at work on a long task in a b c d".into());
         ctx.enable_accesskit();
         let named = |output: &egui::FullOutput, wanted: &str| {
             accesskit_at(output, wanted).map(|bounds| bounds.center())
@@ -4917,6 +4919,12 @@ mod tests {
         assert!(
             label.right() <= picker.left(),
             "{label:?} runs under {picker:?}"
+        );
+        // A label wrapped for more room than it gets spills out of the column on its left.
+        let view = image_view(&window, &ctx);
+        assert!(
+            label.left() >= view.right(),
+            "{label:?} spills over the image {view:?}"
         );
         click(&mut window, &ctx, arrow);
         let other_label = {
