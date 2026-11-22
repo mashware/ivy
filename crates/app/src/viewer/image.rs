@@ -152,10 +152,15 @@ impl Slot {
     /// What a slot with no image has to say: its notice, with what a cancelled Send's worker left
     /// to say taken into it, since the empty tab is where this console's word is read.
     pub(super) fn word(&mut self) -> Option<&str> {
+        self.hear();
+        self.notice.as_deref()
+    }
+
+    /// Takes what a cancelled Send's worker left to say into the notice, where it is read.
+    fn hear(&mut self) {
         if let Some(said) = self.unshown.take() {
             send::join(&mut self.notice, said);
         }
-        self.notice.as_deref()
     }
 
     /// Whether there is an image to paint.
@@ -343,9 +348,7 @@ impl Viewer {
             return;
         };
         // Taken up where the notice is painted, never by a frame that only says the image loads.
-        if let Some(said) = slot.unshown.take() {
-            send::join(&mut slot.notice, said);
-        }
+        slot.hear();
         let panning = &mut self.panning;
         let notice = slot.notice.as_deref();
         let sending = &mut self.send;
@@ -1480,6 +1483,10 @@ mod tests {
             window.viewer.space && window.viewer.held,
             "a held Space was forgotten"
         );
+        assert!(
+            image_rect(&painted(&mut window, &ctx, vec![])).is_some(),
+            "closing the document blanked the image"
+        );
         assert!(crate::viewer::open_document_target(
             &mut window,
             name,
@@ -1490,6 +1497,111 @@ mod tests {
         click_strip(&mut window, &ctx, StripAction::Image);
         click_strip(&mut window, &ctx, StripAction::CloseImage);
         assert_eq!(active(&window), Some(Tool::Document));
+    }
+
+    /// Closing the document while it is the tab shown moves the drawer to Changes, which takes the
+    /// keys; a Space or a press the document held is not carried back when the document reopens.
+    #[test]
+    fn closing_the_shown_document_leaves_no_held_gesture_for_its_return() {
+        use crate::sidebar::{Tool, active};
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        let name = slot(&window).origin().unwrap().pane;
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide.clone(),
+            None
+        ));
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(active(&window), Some(Tool::Document));
+        let dock = window.sidebar.last_dock.unwrap();
+        assert!(crate::viewer::strip_place(&window, dock, StripAction::Changes).is_some());
+        window.viewer.space = true;
+        window.viewer.held = true;
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        assert_eq!(active(&window), Some(Tool::Git));
+        assert!(window.viewer.keyboard, "Changes did not take the keys");
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            name,
+            guide,
+            None
+        ));
+        assert_eq!(active(&window), Some(Tool::Document));
+        assert!(
+            !window.viewer.held && !window.viewer.space,
+            "the document came back holding a gesture"
+        );
+    }
+
+    /// A word parked for a console whose empty tab was never laid out waits through the next
+    /// image opened there and is said under it, once: the console's slot keeps it, as D113 has it,
+    /// not the image it was about.
+    #[test]
+    fn a_parked_word_is_said_under_the_next_image_when_the_empty_tab_was_never_shown() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let other = window.active().panes()[0].name;
+        assert_ne!(Some(other), slot(&window).origin().map(|o| o.pane));
+        slot_called(&mut window, other).unshown = Some("A parked word.".into());
+        let next = folder.0.join("next.png");
+        write_png(&next, 64, 32);
+        open_in(&mut window, &ctx, other, &next);
+        for _ in 0..2 {
+            let said = texts(&painted(&mut window, &ctx, vec![]), area());
+            let times: usize = said
+                .iter()
+                .map(|t| t.matches("A parked word.").count())
+                .sum();
+            assert_eq!(times, 1, "{said:?}");
+        }
+    }
+
+    /// A window too short for the drawer says why on the File door while the drawer is on its
+    /// image tab: the door is not lit for that tab, but it opened the drawer that is missing.
+    #[test]
+    fn a_window_too_short_for_the_image_says_so_on_the_file_door() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        // Every real window runs the integrated chrome, which paints the doors.
+        window.chrome.enable();
+        assert_eq!(active(&window), Some(Tool::Image));
+        let door = |window: &crate::Window| {
+            (window.sidebar.buttons.iter())
+                .find(|(tool, _)| *tool == Tool::Document)
+                .map(|(_, rect)| *rect)
+        };
+        let short = (100..400)
+            .step_by(20)
+            .map(|h| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, h as f32)))
+            .find(|&screen| {
+                pass_on(&mut window, &ctx, screen, vec![], |_| {});
+                window.sidebar.last_dock.is_none() && door(&window).is_some()
+            })
+            .expect("no height hides the drawer and keeps the door");
+        let at = door(&window).unwrap().center();
+        let taller = "Make the window taller to show File below the consoles.";
+        let mut hover = vec![egui::Event::PointerMoved(at)];
+        let said = (0..60).any(|_| {
+            let events = std::mem::take(&mut hover);
+            let shapes = pass_on(&mut window, &ctx, short, events, |_| {}).shapes;
+            text_rect(&shapes, |t| t == taller).is_some()
+        });
+        assert!(
+            said,
+            "the File door does not say why the image is not shown"
+        );
     }
 
     /// The wheel over the image pans it and Ctrl+wheel zooms it, and neither reaches a console,
@@ -2134,9 +2246,10 @@ mod tests {
         );
     }
 
-    /// On a console with no image the image tab stays selected and says how to open one, named
-    /// after that console and not as unavailable; the drawer neither closes nor switches, so no
-    /// console's grid changes.
+    /// On a console with no image the image tab stays selected and says how to open one with
+    /// Ctrl+click, named after that console and not as unavailable; the drawer neither closes nor
+    /// switches, so no console's grid changes. The agent's own way in is not named until the agent
+    /// has a tool that opens one.
     #[test]
     fn a_console_with_no_image_keeps_the_tab_and_says_how_to_open_one() {
         use crate::sidebar::{Tool, active};
@@ -2157,10 +2270,8 @@ mod tests {
         let shapes = painted(&mut window, &ctx, vec![]);
         let dock = window.sidebar.last_dock.unwrap();
         let said = texts(&shapes, dock);
-        assert!(
-            said.iter().any(|t| t == crate::viewer::view::NO_IMAGE),
-            "{said:?}"
-        );
+        let how = "No image in this console. Ctrl+click a PNG or JPEG path printed in it.";
+        assert!(said.iter().any(|t| t == how), "{said:?}");
         assert!(
             !said
                 .iter()
