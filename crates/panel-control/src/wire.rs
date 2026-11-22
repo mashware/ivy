@@ -989,6 +989,8 @@ mod tests {
         for remote in [
             r"\\host\share\a.png",
             r"\\?\UNC\host\share\a.png",
+            r"\\?\unc\host\share\a.png",
+            r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
             r"\\.\PhysicalDrive0",
         ] {
             assert_eq!(

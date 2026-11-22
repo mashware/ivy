@@ -12083,9 +12083,13 @@ image glyph until the drawer paints that image or its refusal. «Loading…» is
 reply says which of the two happened. A window that runs no pass answers nothing within the
 listener's five seconds and still applies the open on its next pass, as `split_open` does.
 
-**What is refused, and where.** The path must be absolute and local. On Windows a UNC, verbatim UNC
-or device path (`\\host\share\a.png`, `\\?\UNC\…`, `\\.\…`) is refused on the wire, because the
-image worker would otherwise authenticate to a remote host over SMB on an agent's word. The MCP
+**What is refused, and where.** The path must be absolute and local. On Windows only a drive
+letter (`C:\…`, `\\?\C:\…`) or a volume GUID (`\\?\Volume{…}\…`) is local; every other prefix is
+refused on the wire — a share, a device, and any other name in the NT object namespace
+(`\\host\share\a.png`, `\\?\UNC\…`, `\\?\GLOBALROOT\Device\Mup\…`, `\\.\…`) — because the image
+worker would otherwise authenticate to a remote host over SMB on an agent's word. It is an
+allowlist because a refusal list let `\\?\GLOBALROOT\…` and a lowercase `\\?\unc\…` through. A
+mapped drive letter passes: it is the user's own mapping, not a host the agent chose. The MCP
 bridge also `stat`s the file in the agent's own process, so a missing file, a folder, something
 that is not a regular file or a file over 32 MiB is refused at once. The interface pass never
 touches the file. **Those bridge checks are advisory**: the bridge and the window may see different

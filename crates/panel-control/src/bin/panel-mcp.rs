@@ -1772,6 +1772,28 @@ mod tests {
         );
     }
 
+    /// **A path on another machine is refused by its text, before the file is asked for**, which is
+    /// what would reach that host (D120): a refusal that came from asking would read «cannot open …»
+    /// or name what kind of file it found instead.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_on_another_machine_is_refused_by_the_bridge_before_it_is_asked_for() {
+        for remote in [
+            r"\\host\share\a.png",
+            r"\\?\UNC\host\share\a.png",
+            r"\\?\unc\host\share\a.png",
+            r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
+            r"\\.\PhysicalDrive0",
+        ] {
+            let result = open_an_image(serde_json::json!(remote));
+            assert_eq!(result["isError"], true, "{remote}");
+            assert_eq!(
+                result["content"][0]["text"],
+                format!("{remote} is not on this machine")
+            );
+        }
+    }
+
     /// The window's sentence is what the agent reads: the bridge adds no word of its own.
     #[test]
     fn an_image_opened_answers_with_the_windows_sentence() {

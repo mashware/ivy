@@ -727,8 +727,10 @@ pane, and a `pane` sent beside it reaches nothing (**D120**). Each console holds
 replaces it.
 
 - **`path` is absolute and on this machine.** A relative path is refused — there is no directory it
-  could honestly be read from — and on Windows so is a share or a device (`\\host\share\…`,
-  `\\?\UNC\…`, `\\.\…`). No extension is asked for: the file's bytes decide whether it is a PNG or
+  could honestly be read from — and on Windows anything but a drive letter or a volume GUID
+  (`C:\…`, `\\?\C:\…`, `\\?\Volume{…}\…`) is refused too: a share, a device or another name in
+  the object namespace (`\\host\share\…`, `\\?\UNC\…`, `\\?\GLOBALROOT\…`, `\\.\…`). A mapped
+  drive letter passes, because it is the user's own mapping. No extension is asked for: the file's bytes decide whether it is a PNG or
   a JPEG, and one that is neither is opened and says so in the drawer. The line's own bound is the
   only bound on the path's length.
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the

@@ -65,7 +65,8 @@ them takes it back**: from then on the handle answers with the reason and never 
 is given is «the app stops handing you that buffer; the program you opened does not».
 
 `image_open` fills **the image slot of the console whose endpoint asked** (D120), never another's: it
-names no pane. It takes an absolute path on this machine, which the bridge `stat`s in the agent's own
+names no pane. It takes an absolute path on this machine — on Windows a drive letter or a volume
+GUID, where a mapped drive is the user's own mapping and not a host the agent chose — which the bridge `stat`s in the agent's own
 process before the window is asked, so the interface pass never touches the file; the window's own
 read stays the enforcement. The drawer opens on the image only where the person is already working
 in that console and nothing else holds the screen or the keys; anywhere else the console's tab card
