@@ -6467,6 +6467,61 @@ mod tests {
         wait_for_text(&mut window, &ctx, "This file is not a PNG or JPEG image");
     }
 
+    /// Paints until the image of the console `name` is decoded or refused, under a hang guard.
+    fn decoded_or_why(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        name: usize,
+    ) -> Result<(), String> {
+        let started = Instant::now();
+        loop {
+            painted(window, ctx, vec![]);
+            let slot = slot_called(window, name);
+            if slot.loaded() {
+                return Ok(());
+            }
+            if let Some(why) = slot.message() {
+                return Err(why.to_owned());
+            }
+            assert!(started.elapsed() < Duration::from_secs(30));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// **An agent's image is refused through a link, and the person's own open of the same file is
+    /// not** (D120). This platform refuses no link, so the window is handed a reader for which
+    /// every entry is one: what is pinned is that the agent's open reaches the worker's walk and
+    /// the person's does not.
+    #[test]
+    fn an_agents_image_through_a_link_is_refused_and_the_persons_own_open_is_not() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        let every_entry_a_link: IsLink = |_| Ok(true);
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.image.links = Links(every_entry_a_link);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        assert_eq!(
+            decoded_or_why(&mut window, &ctx, focused),
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                path.display()
+            ))
+        );
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.image.links = Links(every_entry_a_link);
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        crate::viewer::open_image_target(&mut window, name, path.clone()).unwrap();
+        assert_eq!(decoded_or_why(&mut window, &ctx, name), Ok(()));
+    }
+
     /// Where the «new image» glyph was painted: the labels of the tab cards it sits on, and the
     /// consoles of the tab on show whose header it sits in.
     fn new_image_marks(

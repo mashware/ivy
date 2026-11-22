@@ -1826,6 +1826,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
+    /// **A link on the way refuses the path before the bridge asks for the file** (D120): the file
+    /// here does not exist, so a bridge that asked first, or never walked, would answer «cannot
+    /// open …». This platform refuses no link, so the folder is called one by the reader handed in.
+    #[test]
+    fn a_link_on_the_way_refuses_the_bridge_before_it_asks_for_the_file() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-link-{}", std::process::id()));
+        let file = folder.join("missing.png");
+        let said = image_to_open_with(file.to_str().unwrap(), |at: &std::path::Path| {
+            Ok(at == folder)
+        });
+        assert_eq!(
+            said,
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                file.display()
+            ))
+        );
+    }
+
+    /// **On a real Windows disk**, a PNG reached through a junction — which needs no privilege to
+    /// make — is refused by the bridge, and the same PNG by its own folder passes.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_through_a_junction_is_refused_by_the_bridge_on_windows() {
+        let folder =
+            std::env::temp_dir().join(format!("ivy-image-junction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let plain = folder.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        std::fs::write(plain.join("a.png"), png).unwrap();
+        let junction = folder.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let direct = plain.join("a.png");
+        assert_eq!(image_to_open(direct.to_str().unwrap()), Ok(direct.clone()));
+        let through = junction.join("a.png");
+        assert_eq!(
+            image_to_open(through.to_str().unwrap()),
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                through.display()
+            ))
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     /// Something that is neither a file nor a folder — here a FIFO, which would hang a reader — is
     /// refused by name.
     #[cfg(unix)]
