@@ -301,7 +301,15 @@ pub(crate) fn open_for_an_agent(
     // The Image tab on show already shows this console's image: nothing has to move for the new
     // one to be seen, the keys and a maximized drawer included.
     if !showing_image(window) {
-        if !free_to_switch(window) {
+        // Room is asked before switching: a window too short for the drawer keeps the consoles
+        // whole, and switching anyway would replace the person's Document or Changes for nothing.
+        let room_for_it = crate::tab_bar::drawer_has_room(
+            window,
+            room.whole_window,
+            room.metrics,
+            Tool::Image,
+        );
+        if !free_to_switch(window) || !room_for_it {
             return Ok(MARKED_FOR_THE_PERSON);
         }
         super::select_state(window, true);
@@ -309,7 +317,8 @@ pub(crate) fn open_for_an_agent(
         window.viewer.open = true;
     }
     room.ctx.request_repaint();
-    // Selected is not shown: a window too short for the drawer keeps the consoles whole.
+    // Selected is not shown: an Image tab that was already selected in a window too short for the
+    // drawer is still out of sight.
     let geometry = crate::tab_bar::geometry(window, room.whole_window, room.metrics);
     Ok(if geometry.dock.is_some() {
         SHOWN_TO_THE_PERSON

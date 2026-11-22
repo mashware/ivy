@@ -5,7 +5,7 @@ pub(crate) mod probe;
 
 use crate::{Window, painter::CellMetrics};
 use eframe::egui;
-pub(crate) use layout::{DIVIDER, partition};
+pub(crate) use layout::{DIVIDER, drawer_has_room, partition};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

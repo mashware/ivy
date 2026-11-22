@@ -119,6 +119,26 @@ fn tree_floor(node: &Node, leaf: f32, stacked: Orientation) -> f32 {
 }
 
 pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Layout {
+    partition_as(window, area, metrics, window.sidebar.active)
+}
+
+/// Whether the drawer, opened on `tool`, would get a dock in `area`: asked before the drawer is
+/// switched, so a window too short for it moves nothing (D120).
+pub(crate) fn drawer_has_room(
+    window: &Window,
+    area: egui::Rect,
+    metrics: &CellMetrics,
+    tool: Tool,
+) -> bool {
+    partition_as(window, area, metrics, Some(tool)).dock.is_some()
+}
+
+fn partition_as(
+    window: &Window,
+    area: egui::Rect,
+    metrics: &CellMetrics,
+    active: Option<Tool>,
+) -> Layout {
     let state = &window.sidebar;
     if !state.enabled {
         return Layout::bare(area);
@@ -136,7 +156,7 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
         height: tree_floor(root, leaf.y, Orientation::Rows),
     };
     let files = window.explorer.visible().then_some(state.files_width);
-    let drawer = matches!(state.active, Some(Tool::Document | Tool::Image | Tool::Git))
+    let drawer = matches!(active, Some(Tool::Document | Tool::Image | Tool::Git))
         .then_some(state.height);
     // A surface needs its minimum beside the consoles' floor (`layout`); past that, tiling clamps
     // degenerate weights, so the real allocations decide: Files steps aside when it is what
@@ -151,7 +171,7 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
     if files.is_some() && !wide(&probe(files, None)) && wide(&probe(None, None)) {
         files = None;
     }
-    if state.active == Some(Tool::Board) {
+    if active == Some(Tool::Board) {
         // The Board covers the content, Files included, and the consoles keep the size they
         // have beside Files: opening or closing it resizes no program.
         let mut result = probe(files, None);

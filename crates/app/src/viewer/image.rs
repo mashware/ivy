@@ -6076,6 +6076,21 @@ mod tests {
         Result<&'static str, String>,
         Vec<egui::epaint::ClippedShape>,
     ) {
+        agent_pass_on(window, ctx, area(), events, pane, path)
+    }
+
+    /// [`agent_pass`] in a window of the size `screen`.
+    fn agent_pass_on(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        screen: egui::Rect,
+        events: Vec<egui::Event>,
+        pane: usize,
+        path: &Path,
+    ) -> (
+        Result<&'static str, String>,
+        Vec<egui::epaint::ClippedShape>,
+    ) {
         let metrics =
             crate::painter::CellMetrics::measure(ctx, egui::FontId::monospace(window.font_size));
         let mut frame = eframe::Frame::_new_kittest();
@@ -6083,7 +6098,7 @@ mod tests {
         let mut answer = None;
         let mut output = ctx.run_ui(
             egui::RawInput {
-                screen_rect: Some(area()),
+                screen_rect: Some(screen),
                 max_texture_side: Some(MAX_SIDE),
                 events,
                 ..Default::default()
@@ -6092,7 +6107,7 @@ mod tests {
                 eframe::App::ui(window, ui, &mut frame);
                 let room = crate::viewer::Room {
                     ctx: ui.ctx(),
-                    whole_window: area(),
+                    whole_window: screen,
                     metrics: &metrics,
                 };
                 answer = Some(crate::viewer::open_for_an_agent(
@@ -6282,6 +6297,55 @@ mod tests {
                 shown,
                 "{surface} was moved"
             );
+        }
+    }
+
+    /// In a window too short for the drawer, an agent's image in the console being typed into moves
+    /// nothing — not a closed drawer, not the Changes tab the person had on — and the agent is told
+    /// the person is not looking.
+    #[test]
+    fn an_agents_image_in_a_window_too_short_for_the_drawer_moves_nothing() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        for from_changes in [false, true] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            let focused = window.active().focus;
+            crate::viewer::open_diff_for_pane(&mut window, focused);
+            crate::viewer::blur(&mut window);
+            // The tallest window of these whose drawer gets no dock, read off the partition the
+            // frame made.
+            let short = (100..700)
+                .step_by(20)
+                .rev()
+                .map(|h| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, h as f32)))
+                .find(|&screen| {
+                    pass_on(&mut window, &ctx, screen, vec![], |_| {});
+                    window.sidebar.last_dock.is_none()
+                })
+                .expect("no height leaves the drawer without a dock");
+            if !from_changes {
+                crate::sidebar::close(&mut window, &ctx);
+            }
+            pass_on(&mut window, &ctx, short, vec![], |_| {});
+            let drawer = |window: &crate::Window| {
+                (
+                    active(window),
+                    window.viewer.open,
+                    window.viewer_other.open,
+                )
+            };
+            let before = drawer(&window);
+            assert_eq!(before.0, from_changes.then_some(Tool::Git));
+            let (answer, _) = agent_pass_on(&mut window, &ctx, short, vec![], focused, &path);
+            assert_eq!(
+                answer,
+                Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON),
+                "from Changes: {from_changes}"
+            );
+            assert_eq!(drawer(&window), before, "from Changes: {from_changes}");
         }
     }
 
