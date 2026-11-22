@@ -11788,7 +11788,8 @@ Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so 
 takes a screenshot from:
 
 - **«Paste screenshot» in every console's header** (Phosphor's image glyph, between the review and
-  the panel; a narrow header gives up the splits first, then this, and keeps the rest) reads the
+  the panel; a narrow header gives up the splits first, then this, and below room for the rest,
+  every control but its title) reads the
   clipboard's image for that console. Found, it is written as
   `pasted-<n>.png` into that console's `PANEL_DIR` — the first `n` nothing there takes, a dangling
   link included, created with `create_new` on a worker, mode 0600 on Unix — and opened through the
@@ -11798,16 +11799,19 @@ takes a screenshot from:
   no image, after what went wrong when a retry can mend it (a read that failed or ran out of time,
   a paste already on its way, a clipboard still busy with another read), and what went wrong alone
   when it cannot (no folder, an image too large, a clipboard that is unavailable — never opened, or
-  its worker stopped — which only restarting Ivy mends).
+  its worker stopped — which only restarting Ivy mends, and says so).
 - **The paste chord inside the viewer** does the same for the console the viewer is pinned to —
   **only while the drawer holds the keys and no text field has the keyboard**, the condition D113
   gives Ctrl+Z, so a note being typed keeps its text paste, and not while a Send is on its way. The
   vendored egui-winit lets the chord through as a key when the clipboard holds no text — Ctrl+V or
   Ctrl+Shift+V (Cmd on macOS), the Paste key, and Shift+Insert on Windows, where Win+Shift+S
   leaves only an image — and turns every paste chord into `Event::Paste` when it does; both are
-  taken, but not a held chord's repeats. Over a picture already shown, a chord that finds no image
-  only says so, replacing the drawer's notice rather than the picture, and without taking the
-  keyboard back from a console the person moved to meanwhile. A paste asked over unsent marks is
+  taken once per hold: egui-winit turns a held chord's repeats into more text pastes, so the hold
+  ends when its modifier, or the Paste key, is let go. Over a picture already shown or still
+  loading, a chord that finds no image only says so, replacing the drawer's notice rather than the
+  picture; a late answer brings the drawer's document tab into view but never takes the keyboard
+  back from a console the person moved to meanwhile. A paste asked while another is on its way is
+  refused beside what is shown, never by opening another console's empty viewer. A paste asked over unsent marks is
   refused before the clipboard is read; marks drawn while it was being read are kept, and what
   the read found is said beside them, once.
 - **The file is the console's**: it joins the annotated copies the console removes when it closes

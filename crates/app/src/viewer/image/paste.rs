@@ -33,6 +33,10 @@ pub(crate) enum By {
 pub(crate) struct Pasting {
     /// The paste chord, taken by the viewer while it painted; the input pass asks for it.
     pub(super) key: bool,
+    /// Whether the chord that asked is still held: egui-winit turns every repeat of a held chord
+    /// into another text paste, repeat flag dropped, so the end of a hold is when its modifier
+    /// (or the Paste key) is let go.
+    held: bool,
     /// Who started the clipboard read outstanding; the clipboard answers every read it took.
     asked: Option<By>,
     writing: Option<Writing>,
@@ -74,14 +78,19 @@ pub(in crate::viewer) fn pin(
 }
 
 /// The paste chord is the viewer's only while the drawer holds the keys — a console that holds
-/// them leaves its Ctrl+Shift+V in the input when the clipboard holds no text, and that chord is
-/// the console's — and no note is being typed, which keeps it for its own text. Taken here, it is
-/// asked for in the next input pass.
+/// them leaves the chord in the input, its own (`a_paste_into_a_console_is_not_taken_by_the_viewer`)
+/// — and no note is being typed, which keeps it for its own text. Taken here, it is asked for in
+/// the next input pass, once per hold.
 pub(super) fn take_chord(viewer: &mut super::Viewer, ui: &mut egui::Ui, keys: bool) {
     let free = keys && !viewer.send.busy() && !ui.ctx().text_edit_focused();
     if free && ui.input_mut(take_key) {
-        viewer.paste.key = true;
-        ui.ctx().request_repaint();
+        if !viewer.paste.held {
+            viewer.paste.key = true;
+            ui.ctx().request_repaint();
+        }
+        viewer.paste.held = true;
+    } else if ui.input(|i| !i.modifiers.command && !i.key_down(egui::Key::Paste)) {
+        viewer.paste.held = false;
     }
 }
 
@@ -121,8 +130,11 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
     if origin::keeps_marks(window) {
         return;
     }
+    // Beside what is shown: pinning another console's empty viewer would be undone the moment
+    // the paste on its way answers for its own.
     if window.image.paste.busy() {
-        return tell(window, pane, by, Said::Retry(BUSY));
+        window.image.say(BUSY);
+        return origin::reveal_image(window);
     }
     let Some(console) = window.all_panes().find(|p| p.name == pane) else {
         return closed(&mut window.image);
@@ -137,12 +149,14 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
     }
 }
 
-/// Says that the viewer's console has closed where it is read: in the empty viewer's own text, or
-/// beside a picture.
+/// Says that the viewer's console has closed where the drawer paints it: the empty viewer's own
+/// text, a notice beside a picture, or — for an image that failed or is still loading, which paint
+/// no notice — standard error alone.
 fn closed(viewer: &mut super::Viewer) {
     match viewer.document.as_mut().map(|d| &mut d.load) {
         Some(super::Load::Empty(text)) => *text = CLOSED.to_owned(),
-        _ => viewer.say(CLOSED),
+        Some(super::Load::Ready { .. }) => viewer.say(CLOSED),
+        _ => eprintln!("A paste was asked for a console that has closed"),
     }
 }
 
@@ -171,7 +185,7 @@ pub(crate) fn received(
             tell(window, pane, by, Said::Retry(&said));
         }
         Pasted::Unavailable(why) => {
-            let said = format!("The clipboard is unavailable: {why}.");
+            let said = format!("The clipboard is unavailable ({why}); restart Ivy to paste.");
             tell(window, pane, by, Said::Final(&said));
         }
         Pasted::Expired => tell(window, pane, by, Said::Retry(EXPIRED)),
@@ -297,25 +311,26 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
     let path = match written {
         Ok(path) if gone => return forsake(&path),
         Ok(path) => path,
-        Err(why) if gone => return forsake_folder(&folder, &why),
+        Err(why) if gone => return forsake_folder(&folder, Some(&why)),
         Err(why) => return tell(window, pane, by, Said::Final(&why)),
     };
     // The console removes it when it closes, with Send's copies.
     if let Some(console) = window.all_panes_mut().find(|p| p.name == pane) {
         console.annotated.record(path.clone());
     }
-    match origin::open_image_target(window, pane, path.clone()) {
-        Ok(()) => {}
-        // Marks drawn on the image shown while the screenshot was written: they are kept, and
-        // the file stays the console's until it closes.
-        Err(origin::NotOpened::Marks) => {
-            let said = format!(
-                "The screenshot was saved to {}; send or clear the marks on this image to open it.",
-                path.display()
-            );
-            tell(window, pane, by, Said::Final(&said));
-        }
-        Err(origin::NotOpened::Gone) => forsake(&path),
+    if window.image.has_marks() {
+        // Marks drawn on the image shown while the screenshot was written: they are kept, and the
+        // file stays the console's until it closes. Asked before opening, which would take the
+        // keyboard and replace a notice not yet read.
+        let said = format!(
+            "The screenshot was saved to {}; send or clear the marks on this image to open it.",
+            path.display()
+        );
+        tell(window, pane, by, Said::Final(&said));
+    } else {
+        // The console is open (`gone` above) and nothing is marked: the image opens.
+        let opened = origin::open_image_target(window, pane, path);
+        debug_assert!(opened.is_ok(), "{opened:?}");
     }
     ctx.request_repaint();
 }
@@ -328,19 +343,24 @@ fn forsake(path: &Path) {
         return;
     }
     if let Some(folder) = path.parent() {
-        forsake_folder(folder, "");
+        forsake_folder(folder, None);
     }
 }
 
-/// The folder of a console that closed while its screenshot was being written goes once nothing
-/// is in it; a write that failed meanwhile is said on standard error, where nobody else will.
-fn forsake_folder(folder: &Path, why: &str) {
-    if !why.is_empty() {
+/// The folder of a console that closed while its screenshot was being written goes if nothing
+/// else is in it; a write that failed meanwhile is said on standard error, where nobody else will.
+fn forsake_folder(folder: &Path, failed: Option<&str>) {
+    if let Some(why) = failed {
         eprintln!("the pasted screenshot for a closed console was not written: {why}");
     }
     if std::fs::remove_dir(folder).is_ok() {
+        let after = if failed.is_some() {
+            "its failed paste"
+        } else {
+            "its pasted screenshot was gone"
+        };
         eprintln!(
-            "the panel directory {} was removed once its pasted screenshot was gone",
+            "the panel directory {} was removed after {after}",
             folder.display()
         );
     }
@@ -355,9 +375,9 @@ enum Said<'a> {
 }
 
 /// Says what became of a paste. Over unsent marks it is said beside them, after any notice not yet
-/// read; over a picture a key's paste found shown, it replaces the notice; neither takes the
-/// keyboard, which may be a console's by now. Anything else opens the viewer for that console,
-/// empty.
+/// read; over an image a key's paste found shown or still loading, it replaces the notice. Both
+/// bring the drawer's document tab into view without taking the keyboard, which may be a
+/// console's by now. Anything else opens the viewer for that console, empty.
 fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     let (alone, text) = match said {
         Said::Hint => (None, HINT.to_owned()),
@@ -365,18 +385,22 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
         Said::Final(said) => (Some(said), said.to_owned()),
     };
     let alone = alone.unwrap_or(NO_IMAGE).to_owned();
+    // Loading: shown with its notice once decoded. Failed: nothing to keep.
+    let image = &window.image;
+    let kept = image.shown() && empty(image).is_none() && image.message().is_none();
     if window.image.has_marks() {
         let notice = &mut window.image.notice;
         if !notice.as_deref().is_some_and(|n| n.ends_with(&alone)) {
             super::send::join(notice, alone);
         }
-        return;
+        return origin::reveal_image(window);
     }
-    if by == By::Key && window.image.original().is_some() {
-        return window.image.say(alone);
+    if by == By::Key && kept {
+        window.image.say(alone);
+        return origin::reveal_image(window);
     }
     if !origin::pin_empty_image(window, pane, text) {
-        eprintln!("A paste's answer arrived for a console that has closed");
+        closed(&mut window.image);
     }
 }
 

@@ -159,6 +159,15 @@ pub(super) fn show_image(window: &mut Window) {
     }
 }
 
+/// Brings the image into the drawer's document tab without taking the keyboard: what a paste
+/// answers late, when the person may be typing into a console by then.
+pub(super) fn reveal_image(window: &mut Window) {
+    super::select_state(window, true);
+    let keyboard = window.viewer.keyboard;
+    show_image(window);
+    window.viewer.keyboard = keyboard;
+}
+
 /// Whether the shown image carries marks or notes not yet sent, which would be lost: if so it is
 /// shown, says so, and keeps them, as unsent review comments keep their review.
 pub(super) fn keeps_marks(window: &mut Window) -> bool {

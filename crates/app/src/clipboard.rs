@@ -8,7 +8,7 @@ const DEADLINE: Duration = Duration::from_secs(2);
 /// 1.5–4 s under load (#178): the text deadline would expire on an ordinary capture.
 const IMAGE_DEADLINE: Duration = Duration::from_secs(10);
 const BUSY: &str = "The clipboard is still answering an earlier read; try again shortly.";
-const UNAVAILABLE: &str = "The clipboard is unavailable; restart Ivy to paste a screenshot.";
+const UNAVAILABLE: &str = "The clipboard is unavailable; restart Ivy to paste.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
@@ -145,8 +145,8 @@ impl Service {
         asked.map_err(said).is_ok()
     }
 
-    /// Asks for the image on the ordinary clipboard, for the console `pane`; refused, it says why
-    /// in words a person reads.
+    /// Asks for the image on the ordinary clipboard, for the console `pane`; refused, it says
+    /// whether asking again can help (`Refused::says` has the words).
     pub(crate) fn request_image(&mut self, pane: usize, now: Instant) -> Result<(), Refused> {
         let read = Read {
             pane,
@@ -257,6 +257,10 @@ fn pasted(read: Result<arboard::ImageData<'_>, arboard::Error>) -> Pasted {
     let data = match read {
         Ok(data) => data,
         Err(arboard::Error::ContentNotAvailable) => return Pasted::Absent,
+        // The same answer however often it is asked.
+        Err(error @ arboard::Error::ClipboardNotSupported) => {
+            return Pasted::Unavailable(error.to_string());
+        }
         Err(error) => return Pasted::Failed(error.to_string()),
     };
     let (Ok(width), Ok(height)) = (u32::try_from(data.width), u32::try_from(data.height)) else {
@@ -839,7 +843,7 @@ mod tests {
         );
     }
 
-    /// A worker that stops with an image read outstanding answers it as failed: otherwise the
+    /// A worker that stops with an image read outstanding answers it as unavailable: otherwise the
     /// paste waiting on it waits for ever, and every later one is refused as busy.
     #[test]
     fn a_stopped_worker_answers_the_image_read_it_held() {
@@ -904,6 +908,10 @@ mod tests {
         );
         assert!(matches!(
             pasted(Err(arboard::Error::ClipboardNotSupported)),
+            Pasted::Unavailable(_)
+        ));
+        assert!(matches!(
+            pasted(Err(arboard::Error::ClipboardOccupied)),
             Pasted::Failed(_)
         ));
         assert!(matches!(

@@ -267,7 +267,8 @@ fn consoles(window: &crate::Window) -> Vec<(usize, String)> {
 }
 
 /// The console Send types into, and its name: the one picked beside Send while it is open, the
-/// image's own otherwise. Every place that names or uses Send's console asks here (D117).
+/// image's own otherwise. Every place that names or uses Send's console asks here (D117), but for
+/// a Send on its way, which keeps the console its request named.
 fn destination(window: &crate::Window, consoles: &[(usize, String)]) -> Option<(usize, String)> {
     let origin = window.image.origin()?;
     let named = |name: usize| consoles.iter().find(|(open, _)| *open == name).cloned();

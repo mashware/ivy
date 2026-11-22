@@ -1663,13 +1663,15 @@ mod tests {
     fn layout(window: &crate::Window, ctx: &egui::Context) -> tools::Layout {
         let marks = &window.image.document.as_ref().unwrap().marks;
         let something_to_send = !marks.is_empty();
-        let label = window.image.origin().unwrap().label.as_str();
+        // As `show` works them out.
+        let origin = window.image.origin().unwrap();
         let sending = &window.image.send;
-        let send = something_to_send.then(|| (label, sending.busy(), sending.parked()));
+        let to = (sending.to.clone()).unwrap_or_else(|| (origin.pane, origin.label.clone()));
+        let send = something_to_send.then(|| (to.1.as_str(), sending.busy(), sending.parked()));
         let notice = window.image.notice.as_deref();
         let style = ctx.global_style();
         let refused = egui::Color32::RED;
-        let choose = something_to_send && sending.consoles.len() > 1;
+        let choose = something_to_send && sending.consoles.iter().any(|(open, _)| *open != to.0);
         let fixed = tools::Fixed::new(ctx, &style, body(window), notice, refused, send, choose);
         tools::split(
             body(window),
@@ -4964,8 +4966,14 @@ mod tests {
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
         marks_mut(&mut window).general = "keep".into();
+        // The person moves to a console before the answer comes.
+        crate::viewer::blur(&mut window);
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
+        assert!(
+            !window.viewer.keyboard,
+            "the answer took the keys from the console"
+        );
         assert_eq!(window.image.path(), Some(path.as_path()));
         assert_eq!(marks_of(&window).general, "keep");
         assert_eq!(
@@ -4982,8 +4990,9 @@ mod tests {
         let name = window.image.origin().unwrap().pane;
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
-        // Drawn while the read and the write are on their way.
+        // Drawn while the read and the write are on their way; the person then types elsewhere.
         marks_mut(&mut window).general = "keep".into();
+        crate::viewer::blur(&mut window);
         harness.reply_image(name, crate::clipboard::Pasted::Image(screenshot()));
         painted(&mut window, &ctx, vec![]);
         let started = Instant::now();
@@ -4992,10 +5001,22 @@ mod tests {
             painted(&mut window, &ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
         }
+        assert!(
+            !window.viewer.keyboard,
+            "the write took the keys from the console"
+        );
         assert_eq!(window.image.path(), Some(path.as_path()));
-        let notice = window.image.notice.clone().unwrap_or_default();
-        assert!(notice.contains("pasted-1.png"), "{notice}");
-        assert!(notice.ends_with("send or clear the marks on this image to open it."));
+        let saved = origin_pane(&mut window)
+            .panel
+            .as_ref()
+            .unwrap()
+            .path()
+            .join("pasted-1.png");
+        let said = format!(
+            "The screenshot was saved to {}; send or clear the marks on this image to open it.",
+            saved.display()
+        );
+        assert_eq!(window.image.notice.as_deref(), Some(said.as_str()));
     }
 
     /// The clipboard's own refusals reach the drawer: busy with the hint to try again, unavailable
@@ -5015,7 +5036,83 @@ mod tests {
         paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(
             paste::empty(&window.image),
-            Some("The clipboard is unavailable; restart Ivy to paste a screenshot.")
+            Some("The clipboard is unavailable; restart Ivy to paste.")
+        );
+    }
+
+    /// A clipboard that answers unavailable is said without the hint, with what mends it.
+    #[test]
+    fn an_unavailable_clipboard_answer_says_to_restart() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        let stopped = crate::clipboard::Pasted::Unavailable("stopped".into());
+        paste::received(&mut window, name, stopped, &ctx);
+        assert_eq!(
+            paste::empty(&window.image),
+            Some("The clipboard is unavailable (stopped); restart Ivy to paste.")
+        );
+    }
+
+    /// The chord in an empty viewer whose console has closed says so in the viewer's own text.
+    #[test]
+    fn a_chord_for_a_closed_console_says_so_in_the_empty_viewer() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        paste::ask(&mut window, name, paste::By::Button);
+        harness.requested_image();
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        window.close_a_pane_called(name, &ctx).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![chord()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), None);
+        assert_eq!(
+            paste::empty(&window.image),
+            Some("This console has closed.")
+        );
+    }
+
+    /// A chord held down asks once: egui-winit turns each repeat into another text paste, with no
+    /// repeat flag, while the modifier stays down.
+    #[test]
+    fn a_held_chord_asks_once() {
+        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
+        let name = window.image.origin().unwrap().pane;
+        let paste = || egui::Event::Paste("text".into());
+        let command = egui::Event::ModifiersChanged(egui::Modifiers::COMMAND);
+        painted(&mut window, &ctx, vec![command, paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+        harness.reply_image(name, crate::clipboard::Pasted::Absent);
+        painted(&mut window, &ctx, vec![]);
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![paste()]);
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert_eq!(harness.requested_image(), None, "a repeat pasted again");
+        // Let go, then press again: a new paste.
+        let released = egui::Event::ModifiersChanged(egui::Modifiers::NONE);
+        painted(&mut window, &ctx, vec![released]);
+        let command = egui::Event::ModifiersChanged(egui::Modifiers::COMMAND);
+        painted(&mut window, &ctx, vec![command, paste()]);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(harness.requested_image(), Some(name));
+    }
+
+    /// A paste asked while another is on its way is refused beside what is shown: it does not open
+    /// the other console's empty viewer, which the first paste's answer would then undo.
+    #[test]
+    fn a_second_paste_on_another_console_does_not_take_the_viewer() {
+        let (mut window, _ctx, harness, name, _folder) = window_to_paste();
+        let other = window.active().panes()[0].name;
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        paste::ask(&mut window, other, paste::By::Button);
+        assert_ne!(window.image.origin().map(|o| o.pane), Some(other));
+        assert_eq!(
+            window.image.notice.as_deref(),
+            Some("A paste is already on its way.")
         );
     }
 }
