@@ -1805,7 +1805,11 @@ mod tests {
         ] {
             let file = folder.join(name);
             std::fs::write(&file, bytes).unwrap();
-            assert_eq!(image_to_open(file.to_str().unwrap()), Ok(file.clone()), "{name}");
+            assert_eq!(
+                image_to_open(file.to_str().unwrap()),
+                Ok(file.clone()),
+                "{name}"
+            );
         }
         let _ = std::fs::remove_dir_all(&folder);
     }

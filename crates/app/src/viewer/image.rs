@@ -6334,11 +6334,7 @@ mod tests {
             }
             pass_on(&mut window, &ctx, short, vec![], |_| {});
             let drawer = |window: &crate::Window| {
-                (
-                    active(window),
-                    window.viewer.open,
-                    window.viewer_other.open,
-                )
+                (active(window), window.viewer.open, window.viewer_other.open)
             };
             let before = drawer(&window);
             assert_eq!(before.0, from_changes.then_some(Tool::Git));

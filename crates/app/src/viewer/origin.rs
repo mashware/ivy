@@ -304,12 +304,8 @@ pub(crate) fn open_for_an_agent(
     if !showing_image(window) {
         // Room is asked before switching: a window too short for the drawer keeps the consoles
         // whole, and switching anyway would replace the person's Document or Changes for nothing.
-        let room_for_it = crate::tab_bar::drawer_has_room(
-            window,
-            room.whole_window,
-            room.metrics,
-            Tool::Image,
-        );
+        let room_for_it =
+            crate::tab_bar::drawer_has_room(window, room.whole_window, room.metrics, Tool::Image);
         if !free_to_switch(window) || !room_for_it {
             return Ok(MARKED_FOR_THE_PERSON);
         }
