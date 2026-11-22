@@ -453,15 +453,15 @@ fn forsake(window: &mut crate::Window, parked: &Parked, written: Result<PathBuf,
             let Some(slot) = slot(window, request.pane) else {
                 return;
             };
-            let ready = ready && slot.has_marks();
-            let notice = &mut slot.notice;
-            if notice
-                .as_deref()
-                .is_some_and(|n| n.contains(STILL_FINISHING))
-            {
-                let ready = if ready { "; Send is ready" } else { "" };
-                *notice = Some(format!("{CANCELLED} Its copy is gone{ready}."));
-            }
+            let ready = if ready && slot.has_marks() {
+                "; Send is ready"
+            } else {
+                ""
+            };
+            settle(
+                &mut slot.notice,
+                &format!("{CANCELLED} Its copy is gone{ready}."),
+            );
             return;
         }
     };
@@ -469,14 +469,23 @@ fn forsake(window: &mut crate::Window, parked: &Parked, written: Result<PathBuf,
     tell(&request.console, &said);
     // The worker it waited for has ended: a notice saying so is no longer true, and is not kept.
     if let Some(slot) = slot(window, request.pane) {
-        let notice = &mut slot.notice;
-        if notice
-            .as_deref()
-            .is_some_and(|n| n.contains(STILL_FINISHING))
-        {
-            *notice = Some(CANCELLED.into());
-        }
+        settle(&mut slot.notice, CANCELLED);
         join(&mut slot.unshown, said);
+    }
+}
+
+/// Puts `now` where `notice` said Send waits for a cancelled Send's worker, which has ended, and
+/// keeps what was added after it: a refusal nobody has read yet.
+fn settle(notice: &mut Option<String>, now: &str) {
+    let Some(text) = notice.as_mut() else {
+        return;
+    };
+    let waited = [
+        format!("{CANCELLED} {STILL_FINISHING}."),
+        format!("{STILL_FINISHING}; nothing was sent."),
+    ];
+    if let Some(waited) = waited.iter().find(|w| text.contains(w.as_str())) {
+        *text = text.replacen(waited.as_str(), now, 1);
     }
 }
 

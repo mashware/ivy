@@ -241,13 +241,18 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
 }
 
 /// A file Files activated for a console that has since closed says so, rather than blaming review
-/// comments nobody wrote; a console that is still there opens it.
+/// comments nobody wrote, in the same sentence for an image as for a document; a console that is
+/// still there opens it.
 #[test]
 fn a_file_for_a_closed_console_says_the_console_closed() {
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
     let gone = window.all_panes().map(|p| p.name).max().unwrap() + 1;
     assert_eq!(
         open_in_drawer(&mut window, gone, PathBuf::from("/docs/guide.md")),
+        Err(GONE.to_owned())
+    );
+    assert_eq!(
+        open_in_drawer(&mut window, gone, PathBuf::from("/shots/shot.png")),
         Err(GONE.to_owned())
     );
     let here = window.active().panes()[0].name;

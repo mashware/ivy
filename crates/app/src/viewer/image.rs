@@ -173,8 +173,12 @@ impl Slot {
     }
 
     /// Says `said` after the notice rather than in its place, unless it already says it: the
-    /// notice may be a failed Send nobody has read yet.
+    /// notice may be a failed Send nobody has read yet. A delivered Send's word is no such thing,
+    /// and gives way.
     pub(super) fn add(&mut self, said: &str) {
+        if self.notice.is_some() && self.notice == self.delivered() {
+            self.notice = None;
+        }
         if !self.notice.as_deref().is_some_and(|n| n.contains(said)) {
             send::join(&mut self.notice, said.to_owned());
         }
@@ -193,10 +197,16 @@ impl Slot {
 
     /// The marks reached their console: they are forgotten, and the drawer says where they went.
     fn sent(&mut self) {
-        if let Some(document) = self.document.as_mut() {
-            document.marks.clear();
-            self.notice = Some(format!("Sent to {}.", document.origin.label));
-        }
+        let Some(document) = self.document.as_mut() else {
+            return;
+        };
+        document.marks.clear();
+        self.notice = self.delivered();
+    }
+
+    /// What the drawer says once this image's marks reached its console.
+    fn delivered(&self) -> Option<String> {
+        Some(format!("Sent to {}.", self.document.as_ref()?.origin.label))
     }
 
     pub(super) fn origin(&self) -> Option<&Source> {
@@ -4382,6 +4392,64 @@ mod tests {
             submitted
         );
         let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A refusal said after Cancel, while that Send's worker still writes its copy, outlives the
+    /// worker's end: only the words saying Send waits for it are replaced.
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_said_while_a_cancelled_worker_writes_outlives_it() {
+        let received = term_core::received::Received::new("annotated-refusal-outlives");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        let name = slot(&window).origin().unwrap().pane;
+        let other = folder.0.join("other.png");
+        assert!(crate::viewer::open_image_target(&mut window, name, other).is_err());
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        assert_eq!(
+            slot(&window).notice.as_deref(),
+            Some(
+                "Send cancelled; nothing was sent. Its copy is gone; Send is ready. Send or \
+                 clear the marks on the image before closing it or opening another image."
+            )
+        );
+    }
+
+    /// A refusal takes the place of a delivered Send's word, which is not a failure waiting to be
+    /// read, and joins one that is.
+    #[test]
+    fn a_refusal_after_a_delivered_send_replaces_its_word() {
+        let mut slot = Slot::default();
+        let source = crate::viewer::Source {
+            pane: 0,
+            label: "bash".into(),
+            cwd: None,
+        };
+        slot.open(1, source, PathBuf::from("/a.png"));
+        slot.sent();
+        assert_eq!(slot.notice.as_deref(), Some("Sent to bash."));
+        slot.add("Send or clear the marks.");
+        assert_eq!(slot.notice.as_deref(), Some("Send or clear the marks."));
+        slot.say("The copy failed.");
+        slot.add("Send or clear the marks.");
+        assert_eq!(
+            slot.notice.as_deref(),
+            Some("The copy failed. Send or clear the marks.")
+        );
     }
 
     /// A console that closes between its typed line and the Enter owed to it has no image left to

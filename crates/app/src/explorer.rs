@@ -456,16 +456,17 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
 }
 
 /// Opens what Files activated in the drawer, for the console `pane`, or says why it did not open:
-/// the console gone is not the review's unsent comments.
+/// the console gone is not the review's unsent comments, and is said in one sentence whatever the
+/// file was.
 fn open_in_drawer(
     window: &mut crate::Window,
     pane: usize,
     path: std::path::PathBuf,
 ) -> Result<(), String> {
-    if crate::viewer::is_image(&path) {
-        crate::viewer::open_image_target(window, pane, path).map_err(|why| why.to_string())
-    } else if !window.all_panes().any(|p| p.name == pane) {
+    if !window.all_panes().any(|p| p.name == pane) {
         Err(GONE.into())
+    } else if crate::viewer::is_image(&path) {
+        crate::viewer::open_image_target(window, pane, path).map_err(|why| why.to_string())
     } else if crate::viewer::open_document_target(window, pane, path, None) {
         Ok(())
     } else {
