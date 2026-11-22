@@ -126,6 +126,8 @@ pub(crate) enum Target {
     Close,
     /// Opens or closes the search on this console, focused or not, and hands it the keyboard (D61).
     Search,
+    /// Opens the clipboard's screenshot in the drawer, pinned to this console (D117).
+    Paste,
 }
 
 /// Which controls a header carries. Painting and pressing build it with this one constructor
@@ -172,7 +174,7 @@ struct Layout {
 
 fn layout(strip: egui::Rect, offer: Offer) -> Layout {
     let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let mut base = vec![Target::Search, Target::Review, Target::Panel];
+    let mut base = vec![Target::Search, Target::Review, Target::Paste, Target::Panel];
     if offer.can_close {
         base.extend([Target::Zoom, Target::Close]);
     }
@@ -510,6 +512,7 @@ fn tooltip(target: Target, folded: bool, zoomed: bool) -> &'static str {
         Target::Zoom => "Maximize console",
         Target::Close => "Close console",
         Target::Search => "Search this console",
+        Target::Paste => "Paste screenshot",
     }
 }
 
@@ -533,6 +536,7 @@ pub(crate) fn paint_icon(
         Target::Zoom => Icon::Expand,
         Target::Close => Icon::Close,
         Target::Search => Icon::Search,
+        Target::Paste => Icon::PasteImage,
         Target::Label => unreachable!(),
     };
     paint(painter, center, icon, size, color);

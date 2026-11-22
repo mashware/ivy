@@ -262,6 +262,27 @@ pub(crate) fn open_image_target(
     Ok(())
 }
 
+/// Opens the image viewer empty, pinned to the console `pane`, saying `text` — where a paste for
+/// that console that brought no image ends. An image with unsent marks stays, and says it instead.
+pub(crate) fn pin_empty_image(
+    window: &mut Window,
+    pane: usize,
+    text: String,
+) -> Result<(), NotOpened> {
+    let Some(source) = source(window, pane) else {
+        return Err(NotOpened::Gone);
+    };
+    if window.image.has_marks() {
+        window.image.say(text);
+        show_image(window);
+        return Err(NotOpened::Marks);
+    }
+    replace_document(window, Keep::Image);
+    window.image.pin(source, text);
+    show_image(window);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 mod flatten;
 mod marks;
+pub(crate) mod paste;
 pub(crate) mod send;
 mod tools;
 mod viewport;
@@ -39,6 +40,7 @@ pub(crate) struct Viewer {
     /// Why the last thing asked of the marks was refused, or what became of them.
     notice: Option<String>,
     send: send::Sending,
+    paste: paste::Pasting,
     /// How many images were opened, which names each opening: see [`send::Request::document`].
     opened: u64,
 }
@@ -66,6 +68,8 @@ enum Load {
         gpu: Gpu,
     },
     Failed(String),
+    /// No image: the viewer was opened for a console to paste into, and says what to do.
+    Empty(String),
 }
 
 /// The display copy until the first frame that shows it hands it to the GPU, then the texture.
@@ -78,13 +82,24 @@ impl Viewer {
     /// Replaces whatever image was shown with `path`, read from `origin`'s console. A relative
     /// path is one whose console's directory is unknown: it is refused and says so.
     pub(super) fn open(&mut self, origin: Source, path: PathBuf) {
-        self.clear();
-        self.notice = None;
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
         } else {
             Load::Pending
         };
+        self.start(origin, path, load);
+    }
+
+    /// Replaces whatever image was shown with an empty viewer for `origin`'s console, saying `text`.
+    pub(super) fn pin(&mut self, origin: Source, text: String) {
+        self.start(origin, PathBuf::new(), Load::Empty(text));
+    }
+
+    fn start(&mut self, origin: Source, path: PathBuf, load: Load) {
+        self.clear();
+        self.notice = None;
+        // Another image goes to its own console until another is picked for it.
+        self.send.chosen = None;
         self.opened += 1;
         self.document = Some(Opened {
             id: self.opened,
@@ -148,10 +163,10 @@ impl Viewer {
     }
 
     /// The marks reached their console: they are forgotten, and the drawer says where they went.
-    fn sent(&mut self) {
+    fn sent(&mut self, to: &str) {
         if let Some(document) = self.document.as_mut() {
             document.marks.clear();
-            self.notice = Some(format!("Sent to {}.", document.origin.label));
+            self.notice = Some(format!("Sent to {to}."));
         }
     }
 
@@ -164,6 +179,9 @@ impl Viewer {
     }
 
     pub(super) fn file_name(&self) -> Option<String> {
+        if self.empty().is_some() {
+            return Some("Paste screenshot".into());
+        }
         self.path()?
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -175,6 +193,24 @@ impl Viewer {
             Load::Failed(why) => Some(why),
             _ => None,
         }
+    }
+
+    /// What the empty viewer says, when no image was pasted into it.
+    pub(crate) fn empty(&self) -> Option<&str> {
+        match &self.document.as_ref()?.load {
+            Load::Empty(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Whether a picture is shown, where a notice is laid out beside it.
+    pub(super) fn loaded_picture(&self) -> bool {
+        self.original().is_some()
+    }
+
+    /// Whether a paste has a screenshot being written, for the input pass.
+    pub(super) fn paste_pending(&self) -> bool {
+        self.paste.pending()
     }
 
     /// The decoded image at full resolution, once it has arrived.
@@ -245,18 +281,28 @@ impl Viewer {
                 document.marks.cancel();
             }
         }
+        // The paste chord reaches here only while the drawer holds the keys, as Ctrl+Z does; a
+        // note being typed keeps it for its own text.
+        if !self.send.busy() && !ui.ctx().text_edit_focused() && ui.input_mut(paste::take_key) {
+            self.paste.key = true;
+            ui.ctx().request_repaint();
+        }
         let Some(size) = self.size() else {
             let message = self.message();
+            let empty = self.empty();
             egui::Frame::new()
                 .inner_margin(14)
-                .show(ui, |ui| match message {
-                    Some(why) => {
+                .show(ui, |ui| match (message, empty) {
+                    (Some(why), _) => {
                         ui.colored_label(
                             theme.panel_color(Some(panel_contract::Mark::Block), None),
                             why,
                         );
                     }
-                    None => {
+                    (None, Some(hint)) => {
+                        ui.label(hint);
+                    }
+                    (None, None) => {
                         ui.label("Loading…");
                     }
                 });
@@ -298,9 +344,10 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send =
-            something_to_send.then(|| (origin.label.as_str(), sending.busy(), sending.parked()));
-        let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
+        let to = sending.to.as_ref().map_or(origin.label.as_str(), |(_, l)| l.as_str());
+        let send = something_to_send.then(|| (to, sending.busy(), sending.parked()));
+        let choose = something_to_send && sending.consoles.len() > 1;
+        let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send, choose);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
         let roles = crate::ui::style::roles(ui.ctx(), &theme);
@@ -1634,7 +1681,8 @@ mod tests {
         let notice = window.image.notice.as_deref();
         let style = ctx.global_style();
         let refused = egui::Color32::RED;
-        let fixed = tools::Fixed::new(ctx, &style, body(window), notice, refused, send);
+        let choose = something_to_send && sending.consoles.len() > 1;
+        let fixed = tools::Fixed::new(ctx, &style, body(window), notice, refused, send, choose);
         tools::split(
             body(window),
             tools::rows(marks),
@@ -2999,6 +3047,7 @@ mod tests {
             let request = send::Request {
                 document: viewer.document().unwrap(),
                 pane: 0,
+                label: "x".into(),
                 path: PathBuf::from("/a/annotated-1.png"),
                 line: "x".into(),
             };
@@ -3051,6 +3100,7 @@ mod tests {
         viewer.send.ask(send::Request {
             document: viewer.document().unwrap(),
             pane: 0,
+            label: "x".into(),
             path: PathBuf::from("/a/annotated-1.png"),
             line: "x".into(),
         });
@@ -3767,6 +3817,7 @@ mod tests {
         window.image.send.ask(send::Request {
             document: window.image.document().unwrap(),
             pane: window.image.origin().unwrap().pane,
+            label: "x".into(),
             path: copy.clone(),
             line: "x".into(),
         });
@@ -4224,6 +4275,7 @@ mod tests {
         window.image.send.ask(send::Request {
             document,
             pane,
+            label: "x".into(),
             path: dir.join("annotated-9.png"),
             line: "a second Send".into(),
         });

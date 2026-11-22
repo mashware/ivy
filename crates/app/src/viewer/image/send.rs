@@ -8,14 +8,15 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// The copies Send delivered to one console, removed when the console closes. Only the paths it
-/// recorded go, with `remove_file`, which unlinks a link rather than what it points to; whatever
-/// else the console's program left in its directory stays, and keeps the directory.
+/// The copies Send delivered to one console, and the screenshots pasted for it (D117), removed when
+/// the console closes. Only the paths it recorded go, with `remove_file`, which unlinks a link
+/// rather than what it points to; whatever else the console's program left in its directory stays,
+/// and keeps the directory.
 #[derive(Default)]
 pub(crate) struct Written(Vec<PathBuf>);
 
 impl Written {
-    fn record(&mut self, path: PathBuf) {
+    pub(super) fn record(&mut self, path: PathBuf) {
         self.0.push(path);
     }
 }
@@ -43,6 +44,8 @@ pub(super) struct Request {
     /// that refusal ever give.
     pub(super) document: u64,
     pub(super) pane: usize,
+    /// The console's name as the button showed it, for what the drawer says once it is sent.
+    pub(super) label: String,
     pub(super) path: PathBuf,
     pub(super) line: String,
 }
@@ -61,8 +64,14 @@ enum Phase {
 
 #[derive(Default)]
 pub(crate) struct Sending {
-    /// Where the copy would go for the image's console this frame, or why it cannot.
+    /// Where the copy would go for the console Send types into this frame, or why it cannot.
     pub(super) target: Option<Result<PathBuf, String>>,
+    /// The console picked beside Send; `None`, or one that closed, sends to the image's own.
+    pub(super) chosen: Option<usize>,
+    /// The console Send types into this frame, and its name: [`destination`]'s answer.
+    pub(super) to: Option<(usize, String)>,
+    /// The consoles that can be picked beside Send, while there is something to send.
+    pub(super) consoles: Vec<(usize, String)>,
     phase: Phase,
     /// The worker of a Send cancelled while it wrote its copy. A write cannot be interrupted, so
     /// it is kept and polled until it ends, and what it wrote is removed then; no other Send
@@ -103,6 +112,7 @@ impl Sending {
                 self.ask(request);
                 *notice = None;
             }
+            Some(Asked::Aim(name)) if !self.busy() => self.chosen = Some(name),
             Some(Asked::Cancel) if self.cancel() => {
                 *notice = Some(if self.parked.is_some() {
                     format!("{CANCELLED} {STILL_FINISHING}.")
@@ -236,6 +246,17 @@ fn copy_path(window: &crate::Window, name: usize) -> Result<PathBuf, String> {
     Ok(free)
 }
 
+/// The console Send types into, and its name: the one picked beside Send while it is open, the
+/// image's own otherwise. Every place that names or uses Send's console asks here (D117).
+fn destination(window: &crate::Window) -> Option<(usize, String)> {
+    let origin = window.image.origin()?;
+    let chosen = window.image.send.chosen.and_then(|name| {
+        let pane = window.all_panes().find(|pane| pane.name == name)?;
+        Some((name, crate::pane_view::display_label(pane).into_owned()))
+    });
+    Some(chosen.unwrap_or_else(|| (origin.pane, origin.label.clone())))
+}
+
 /// Works out, before the drawer paints, where Send would write the shown image's copy. Only an
 /// image with something to send asks the disk: an image merely looked at costs no call per frame.
 pub(crate) fn aim(window: &mut crate::Window) {
@@ -250,12 +271,19 @@ pub(crate) fn aim(window: &mut crate::Window) {
         window.image.send.target = Some(Ok(path));
         return;
     }
-    let target = window
-        .image
-        .origin()
-        .filter(|_| window.image.has_marks())
-        .map(|origin| copy_path(window, origin.pane));
-    window.image.send.target = target;
+    let to = destination(window).filter(|_| window.image.has_marks());
+    window.image.send.consoles = match to {
+        Some(_) => window
+            .all_panes()
+            .map(|pane| {
+                let label = crate::pane_view::display_label(pane).into_owned();
+                (pane.name, label)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    window.image.send.target = to.as_ref().map(|(pane, _)| copy_path(window, *pane));
+    window.image.send.to = to;
 }
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
@@ -342,10 +370,7 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             // ends cleanly, that is no longer true. Send is said ready only where it would be:
             // with marks to send and a folder to write their copy into.
             let ready = window.image.has_marks()
-                && window
-                    .image
-                    .origin()
-                    .is_some_and(|o| copy_path(window, o.pane).is_ok());
+                && destination(window).is_some_and(|(pane, _)| copy_path(window, pane).is_ok());
             let notice = &mut window.image.notice;
             if notice
                 .as_deref()
@@ -451,7 +476,7 @@ fn deliver(
             if let Some(pane) = window.all_panes_mut().find(|p| p.name == request.pane) {
                 pane.annotated.record(path.to_owned());
             }
-            window.image.sent();
+            window.image.sent(&request.label);
             ctx.request_repaint();
             enter.map_or(Phase::Idle, |enter| {
                 Phase::Enter(enter, ctx.cumulative_frame_nr())

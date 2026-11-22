@@ -3,12 +3,16 @@
 use eframe::egui;
 
 pub(super) fn deliver(window: &mut crate::Window, ctx: &egui::Context) {
-    if window.viewer.pending_send.is_none() && !window.image.send_pending() {
+    if window.viewer.pending_send.is_none()
+        && !window.image.send_pending()
+        && !window.image.paste_pending()
+    {
         return;
     }
     let started = std::time::Instant::now();
     deliver_inner(window, ctx);
     super::image::send::poll(window, ctx);
+    super::image::paste::poll(window, ctx);
     window.viewer.record(started.elapsed());
     window.timed_separately += window.viewer.take_cost();
 }

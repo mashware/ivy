@@ -128,13 +128,16 @@ pub(super) fn rows(marks: &Marks) -> usize {
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
     send: Option<Arc<egui::Galley>>,
+    /// The height of the console picker over the button, when there is a console to pick.
+    chooser: Option<f32>,
     padding: egui::Vec2,
     spacing: f32,
 }
 
 impl Fixed {
     /// `send` is the console Send names, whether a Send is on its way and whether a cancelled
-    /// one's worker is still writing, once there is something to send.
+    /// one's worker is still writing, once there is something to send; `choose`, whether another
+    /// console can be picked for it.
     pub(super) fn new(
         ctx: &egui::Context,
         style: &egui::Style,
@@ -142,6 +145,7 @@ impl Fixed {
         notice: Option<&str>,
         refused: egui::Color32,
         send: Option<(&str, bool, bool)>,
+        choose: bool,
     ) -> Self {
         let column = if side_by_side(body) {
             COLUMN
@@ -161,9 +165,11 @@ impl Fixed {
             let label = send_label(console, busy, parked).into();
             lay(label, wrapped(width - 2.0 * padding.x), font)
         });
+        let chooser = (choose && send.is_some()).then_some(style.spacing.interact_size.y);
         let mut fixed = Self {
             notice: notice.map(|n| lay(said(n), wrapped(width), egui::FontSelection::Default)),
             send,
+            chooser,
             padding,
             spacing: style.spacing.item_spacing.y,
         };
@@ -186,7 +192,8 @@ impl Fixed {
             .send
             .as_ref()
             .map_or(0.0, |send| self.button_height(send) + self.spacing);
-        notice + send
+        let chooser = self.chooser.map_or(0.0, |height| height + self.spacing);
+        notice + send + chooser
     }
 
     /// Whether the notice and the button together are taller than `room`, the column's height
@@ -300,6 +307,8 @@ pub(super) fn toolbar(
 /// What a click in the column asked of Send.
 pub(super) enum Asked {
     Send(Request),
+    /// Send to the console named here instead (D117).
+    Aim(usize),
     /// Take back the Send whose line is not typed yet.
     Cancel,
 }
@@ -408,6 +417,12 @@ pub(super) fn notes(
         });
         (false, inner.inner)
     });
+    // Over the button, laid out after it in this bottom-up column: the console Send types into.
+    let to = sending.to.clone().unwrap_or((origin.pane, origin.label.clone()));
+    let picked = match fixed.chooser.filter(|_| foot.is_some()) {
+        Some(height) => chooser(&mut column, &to, &sending.consoles, height, sending.busy()),
+        None => None,
+    };
     let rest = column.available_size();
     column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
         // Nothing here is painted over the button under it.
@@ -442,13 +457,48 @@ pub(super) fn notes(
     if cancelled {
         return Some(Asked::Cancel);
     }
+    if let Some(name) = picked {
+        return Some(Asked::Aim(name));
+    }
     let (line, path) = line.ok().filter(|_| clicked)?;
+    let (pane, label) = to;
     Some(Asked::Send(Request {
         document,
-        pane: origin.pane,
+        pane,
+        label,
         path: path.clone(),
         line,
     }))
+}
+
+/// The console Send types into, which can be changed for another open one while nothing is on its
+/// way: the image, its marks and its notes stay as they are. Answers the console picked.
+fn chooser(
+    ui: &mut egui::Ui,
+    (to, label): &(usize, String),
+    consoles: &[(usize, String)],
+    height: f32,
+    busy: bool,
+) -> Option<usize> {
+    let size = egui::vec2(ui.available_width(), height);
+    let row = egui::Layout::left_to_right(egui::Align::Center);
+    let mut picked = None;
+    ui.allocate_ui_with_layout(size, row, |ui| {
+        ui.add_enabled_ui(!busy, |ui| {
+            ui.label("Send to");
+            egui::ComboBox::from_id_salt("image-send-target")
+                .selected_text(label.as_str())
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for (name, label) in consoles {
+                        if ui.selectable_label(name == to, label.as_str()).clicked() && name != to {
+                            picked = Some(*name);
+                        }
+                    }
+                });
+        });
+    });
+    picked
 }
 
 /// The primary action: filled with the accent, the column's width, its `label` laid out wrapped

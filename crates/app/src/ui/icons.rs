@@ -45,6 +45,8 @@ pub(crate) enum Icon {
     Rectangle,
     Marker,
     Undo,
+    /// The header's paste of a screenshot from the clipboard (D117).
+    PasteImage,
 }
 
 impl Icon {
@@ -87,6 +89,7 @@ impl Icon {
             Self::Rectangle => glyph::RECTANGLE,
             Self::Marker => glyph::NUMBER_CIRCLE_ONE,
             Self::Undo => glyph::ARROW_COUNTER_CLOCKWISE,
+            Self::PasteImage => glyph::IMAGE,
         }
     }
 }
@@ -179,6 +182,7 @@ mod tests {
             Icon::Rectangle,
             Icon::Marker,
             Icon::Undo,
+            Icon::PasteImage,
         ];
         all.extend(FileKind::ALL.map(Icon::File));
         for icon in &all {
@@ -217,7 +221,8 @@ mod tests {
                 | Icon::Ellipse
                 | Icon::Rectangle
                 | Icon::Marker
-                | Icon::Undo => {}
+                | Icon::Undo
+                | Icon::PasteImage => {}
             }
         }
         all
