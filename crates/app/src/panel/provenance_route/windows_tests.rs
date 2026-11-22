@@ -187,7 +187,9 @@ fn windows_provenance_opened_panes_label_only_verified_outside_and_keep_unknown(
     let raw_dir = endpoint.clone();
     let raw_id = id.clone();
     let raw = std::thread::spawn(move || {
-        let mut stream = panel_control::endpoint::connect(&raw_dir, &raw_id).unwrap();
+        let mut stream =
+            panel_control::endpoint::connect_authenticated(&raw_dir, &raw_id, std::process::id())
+                .unwrap();
         stream
             .set_recv_timeout(Some(Duration::from_secs(5)))
             .unwrap();
