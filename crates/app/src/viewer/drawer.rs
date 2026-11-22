@@ -425,8 +425,14 @@ fn tab(
     };
     let count = count.filter(|_| place.width() >= 20.0 + TAB_CLOSE + 6.0 + 26.0);
     let room = place.width() - 20.0 - TAB_CLOSE - 6.0 - count.as_ref().map_or(0.0, |_| 26.0);
+    let label_bounds = Rect::from_min_size(
+        pos2(place.left() + 10.0, place.top()),
+        vec2(room.max(0.0), place.height()),
+    );
+    // Egui can return an ellipsis wider than the requested width. Its visible edge, rather than
+    // that galley's natural edge, is where the count starts on a compressed tab.
     let written = text(
-        painter,
+        &painter.with_clip_rect(label_bounds),
         pos2(place.left() + 10.0, place.center().y),
         egui::Align2::LEFT_CENTER,
         &label,
@@ -440,7 +446,10 @@ fn tab(
     );
     if let Some(count) = count {
         let chip = Rect::from_min_size(
-            pos2(written.right() + 6.0, place.center().y - 8.0),
+            pos2(
+                written.right().min(label_bounds.right()) + 6.0,
+                place.center().y - 8.0,
+            ),
             vec2(20.0, 16.0),
         );
         painter.rect_filled(chip, 4, roles.hover);
@@ -589,6 +598,57 @@ mod tests {
             );
             assert_paired_hit_targets(&strip);
         }
+    }
+
+    #[test]
+    fn painted_tab_content_stays_before_its_close_target() {
+        let roles = Roles::of(&crate::theme::Theme::default());
+        let mut overlaps = Vec::new();
+        for width in [100.0, 140.0, 142.0, 150.0, 300.0] {
+            let tabs = three_tabs(Tool::Git);
+            let strip = strip(width, &tabs);
+            let body = place(&strip, StripAction::Changes).unwrap();
+            let close = place(&strip, StripAction::CloseChanges).unwrap();
+            let mut output = egui::Context::default().run_ui(Default::default(), |ui| {
+                super::tab(
+                    ui.painter(),
+                    StripAction::Changes,
+                    body,
+                    &tabs,
+                    &roles,
+                    true,
+                    false,
+                );
+            });
+            output.textures_delta.clear();
+            let mut texts = 0;
+            let mut chips = 0;
+            for shape in output.shapes {
+                let bounds = match shape.shape {
+                    egui::Shape::Text(text) => {
+                        texts += 1;
+                        text.galley.rect.translate(text.pos.to_vec2())
+                    }
+                    egui::Shape::Rect(rect) if rect.fill == roles.hover => {
+                        chips += 1;
+                        rect.rect
+                    }
+                    _ => continue,
+                };
+                let visible = bounds.intersect(shape.clip_rect);
+                if visible.is_positive() && visible.right() > close.left() {
+                    overlaps.push((width, visible, close));
+                }
+            }
+            if width == 300.0 {
+                assert_eq!(texts, 2, "ordinary tab paints its label and count");
+                assert_eq!(chips, 1, "ordinary tab paints its count chip");
+            }
+        }
+        assert!(
+            overlaps.is_empty(),
+            "tab content overlaps close targets: {overlaps:?}"
+        );
     }
 
     /// With an image beside the document and the review, the strip lays out all three tabs, each
