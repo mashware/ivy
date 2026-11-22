@@ -716,6 +716,8 @@ fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
     if let Some(elsewhere) = panel_control::image::elsewhere(&file) {
         return Err(format!("{path} {}", elsewhere.says()));
     }
+    // Before the metadata below, which would follow a link to another machine and reach it.
+    panel_control::image::links_stay_on_this_machine(&file)?;
     let found = std::fs::metadata(&file).map_err(|why| format!("cannot open {path}: {why}"))?;
     if found.is_dir() {
         return Err(format!("{path} is a folder, not an image"));

@@ -12104,7 +12104,17 @@ refused prefix is answered «is not a drive path; give it as C:\…», because i
 whether it stays here — `\\.\C:\…` and `\\?\GLOBALROOT\Device\HarddiskVolume3\…` do,
 `\\?\GLOBALROOT\Device\Mup\…` does not — and the agent can act on the form where it could not act
 on a false «elsewhere». A mapped drive letter passes: it is the user's own mapping, not a host the
-agent chose. The MCP bridge also `stat`s the file in its own process, which is not always the
+agent chose. **A link is a prefix too** (review, 22 November 2026): a symbolic link under `C:\` —
+the file, or any folder on its way — can point at `\\host\share`, and a cloned repository or an
+unpacked archive is where one comes from. So on Windows the path is walked from its root, each
+symbolic link or junction's target is read with `read_link`, which does not follow it, a relative
+target is read from the link's folder, and a target that is not local refuses the path with
+`<path> leads to <target>, which is not on this machine`; a target is walked in turn before
+anything past its link is looked at, and more than 40 links refuse the path. The bridge walks
+before its `stat`, and the image worker walks before it opens, for every image the drawer opens:
+the drawer does not know who named the path, so a person's click on such a link is refused too,
+while a share path the person types is not. A link swapped in between the walk and the open is not
+caught. Elsewhere nothing is walked: a link to a mount is to a mount the user made. The MCP bridge also `stat`s the file in its own process, which is not always the
 agent's, so a missing file, a folder, something that is not a regular file or a file over 32 MiB
 is refused at once. It then reads the file's first bytes and refuses anything that begins as
 neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to say
@@ -12141,3 +12151,5 @@ published figure changes. The glyph's read sits inside the tab bar's and the hea
 | An extension gate on the wire | The bytes decide the format, and extension-less PNGs exist. |
 | Replacing the Board, or switching a maximized drawer | Both take away what the person is reading. |
 | Opening the drawer while the drawer or Files holds the keys | The person is typing there, and switching the drawer's tab or blurring Files would take the keys from them. |
+| Refusing every link on Windows, as D108 does at an untracked file's last component | A screenshot folder reached through a junction to another local drive is ordinary; what reaches a host is where the link leads, not that it is one. |
+| Canonicalizing the path and testing the result | `canonicalize` opens the path, following each link, so it reaches the host it was meant to detect. |

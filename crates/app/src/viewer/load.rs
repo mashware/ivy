@@ -236,6 +236,9 @@ fn read_text(path: &Path) -> Result<String, String> {
 fn decode_image(path: &Path, max_side: usize) -> Result<Picture, String> {
     use image::{ImageDecoder, ImageFormat, ImageReader};
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
+    // The enforcement of what the bridge only advises (D120). It holds for every image the drawer
+    // opens, the person's own included: the drawer does not know who named the path.
+    panel_control::image::links_stay_on_this_machine(path)?;
     let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
