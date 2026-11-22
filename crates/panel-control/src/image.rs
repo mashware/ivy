@@ -83,16 +83,26 @@ fn is_volume(component: &OsStr) -> bool {
 /// and opening through it authenticates to that host exactly as the prefixes `is_local` refuses
 /// would. Where a link leads is never read: reading a target and checking it is what review found
 /// three ways around (D120). Entries are asked from the root down and the walk stops at the first
-/// link, so nothing is asked through one. An entry that is not there stops the walk without a
-/// refusal, since the open that follows fails and says why; any other error refuses, because the
-/// walk can no longer tell what is there.
+/// link, so nothing is asked through one. A path with a `..` in it is refused before anything is
+/// asked: Windows collapses `..` by the text, without asking the disk, so in
+/// `C:\repo\gone\..\shots\a.png` the open reaches `shots` — a link, maybe — through an entry the
+/// walk stopped at because it is not there. Without a `..`, an entry that is not there stops the
+/// walk without a refusal, since the open that follows has to pass through that same entry and
+/// fails; any other error refuses, because the walk can no longer tell what is there.
 ///
 /// `is_link` answers for one entry without following it: [`refused_link`] in the bridge and the
-/// window, and a table in the tests, so the walk and both callers are pinned where no entry is one.
+/// window, and a stand-in in the tests, so the walk and both callers are pinned where no entry is
+/// one.
 pub fn no_link_on_the_way(
     path: &Path,
     mut is_link: impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Result<(), String> {
+    if path.components().any(|c| c == Component::ParentDir) {
+        return Err(format!(
+            "{} has a «..» in it; give the path without one",
+            path.display()
+        ));
+    }
     let mut walked = std::path::PathBuf::new();
     for component in path.components() {
         walked.push(component);
@@ -308,8 +318,24 @@ mod tests {
         assert_eq!(asked, paths(&["/home", "/home/me"]));
     }
 
-    /// An entry that is not there leaves the path to the open, which fails and says why, and
-    /// nothing under it is asked.
+    /// **A `..` anywhere refuses the path before any entry is asked**: Windows collapses it by the
+    /// text, so a missing entry before it would end the walk while the open reaches the link after
+    /// it. Here `/home/gone` is not there and `/home/me` is a link.
+    #[test]
+    fn a_path_with_a_parent_step_is_refused_before_anything_is_asked() {
+        for path in ["/home/gone/../me/a.png", "/home/me/a.png/..", "/../home/me/a.png"] {
+            let (said, asked) = walk(path, &[("/home/gone", gone), ("/home/me", link)]);
+            assert_eq!(
+                said,
+                Err(format!("{path} has a «..» in it; give the path without one")),
+                "{path}"
+            );
+            assert_eq!(asked, paths(&[]), "{path}");
+        }
+    }
+
+    /// Without a `..`, an entry that is not there leaves the path to the open, which has to pass
+    /// through it and fails, and nothing under it is asked.
     #[test]
     fn an_entry_that_is_not_there_is_left_to_the_open() {
         let (said, asked) = walk("/home/gone/a.png", &[("/home/gone", gone)]);

@@ -741,6 +741,9 @@ replaces it.
   Where a link leads is never read. `panel-mcp` refuses before it asks for the file, and the window
   refuses again before its worker reads, where the refusal is painted in the drawer. A person's own
   open of the same file is not refused, and other platforms refuse no link (**D120**).
+- **No `..`.** On every platform a path with a `..` in it is refused with `<path> has a «..» in it;
+  give the path without one`, before anything is asked of the disk: Windows collapses it by the
+  text, so it could step past a missing folder onto a link (**D120**).
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
   person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
   image — it opened on it, or its Image tab was already on show for that console — and `opened; the
