@@ -351,13 +351,7 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send = something_to_send.then(|| {
-            (
-                origin.label.as_str(),
-                sending.busy_for(*id),
-                sending.parked(),
-            )
-        });
+        let send = something_to_send.then(|| (origin.label.as_str(), sending.button(*id)));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
@@ -481,21 +475,27 @@ impl Viewer {
     }
 }
 
-/// The slot of the console called `pane`, in whichever tab it is.
-pub(super) fn slot_of(tabs: &mut [crate::tree::Tab], pane: usize) -> Option<&mut Slot> {
+/// What the console called `pane` holds of images, in whichever tab it is.
+pub(super) fn console_of(tabs: &mut [crate::tree::Tab], pane: usize) -> Option<&mut Console> {
     tabs.iter_mut()
         .find_map(|tab| tab.pane_called(pane))
-        .map(|pane| &mut pane.image.slot)
+        .map(|pane| &mut pane.image)
+}
+
+/// The slot of the console called `pane`, in whichever tab it is.
+pub(super) fn slot_of(tabs: &mut [crate::tree::Tab], pane: usize) -> Option<&mut Slot> {
+    console_of(tabs, pane).map(|console| &mut console.slot)
+}
+
+/// The focused console of the tab on show.
+pub(super) fn focused_pane(window: &crate::Window) -> Option<&crate::Pane> {
+    let tab = window.active();
+    tab.panes().into_iter().find(|pane| pane.name == tab.focus)
 }
 
 /// The slot the image tab shows: the focused console's, in the tab on show.
 pub(super) fn focused(window: &crate::Window) -> Option<&Slot> {
-    let tab = window.active();
-    let pane = tab
-        .panes()
-        .into_iter()
-        .find(|pane| pane.name == tab.focus)?;
-    Some(&pane.image.slot)
+    Some(&focused_pane(window)?.image.slot)
 }
 
 /// The same, to change it, borrowing only the tabs so the drawer's own state stays at hand.
@@ -1759,8 +1759,8 @@ mod tests {
         let marks = &slot(window).document.as_ref().unwrap().marks;
         let something_to_send = !marks.is_empty();
         let label = slot(window).origin().unwrap().label.as_str();
-        let sending = &window.image.send;
-        let send = something_to_send.then(|| (label, sending.busy(), sending.parked()));
+        let id = slot(window).document().unwrap();
+        let send = something_to_send.then(|| (label, window.image.send.button(id)));
         let notice = slot(window).notice.as_deref();
         let style = ctx.global_style();
         let refused = egui::Color32::RED;
@@ -3317,6 +3317,7 @@ mod tests {
             let request = send::Request {
                 document: viewer.document().unwrap(),
                 pane: 0,
+                console: "test".into(),
                 path: PathBuf::from("/a/annotated-1.png"),
                 line: "x".into(),
             };
@@ -3369,6 +3370,7 @@ mod tests {
         viewer.image.send.ask(send::Request {
             document: viewer.document().unwrap(),
             pane: 0,
+            console: "test".into(),
             path: PathBuf::from("/a/annotated-1.png"),
             line: "x".into(),
         });
@@ -3723,7 +3725,8 @@ mod tests {
 
     /// A Send follows its image, not the focus: with another console's image shown while the copy
     /// is written, the line is typed into the Send's own console and its marks clear there, while
-    /// the other console's image keeps its notes, says nothing and offers no Cancel for it.
+    /// the other console's image takes a tool, a marker and a note as a person gives them, keeps
+    /// them, offers no Cancel for that Send and greys its own Send naming the console it waits for.
     #[cfg(unix)]
     #[test]
     fn a_send_reaches_its_own_console_while_another_consoles_image_is_shown() {
@@ -3747,11 +3750,44 @@ mod tests {
         let other = folder.0.join("other.png");
         write_png(&other, 64, 32);
         open_in(&mut window, &ctx, beside, &other);
-        marks_mut(&mut window).general = "on the other console".into();
+        let marker = icon_place(
+            &mut window,
+            &ctx,
+            egui_phosphor::regular::NUMBER_CIRCLE_ONE,
+            |l| l.bar,
+        );
+        press(&mut window, &ctx, marker);
+        assert!(
+            marks_of(&window).tool == marks::Tool::Marker,
+            "the tool was not taken"
+        );
+        let on_image = image_rect(&painted(&mut window, &ctx, vec![]))
+            .unwrap()
+            .center();
+        painted(&mut window, &ctx, vec![egui::Event::PointerMoved(on_image)]);
+        click(&mut window, &ctx, on_image);
+        assert_eq!(
+            marks_of(&window).marks().len(),
+            1,
+            "no marker on the other image"
+        );
+        let field = place_of(&mut window, &ctx, "A note on the whole image");
+        press(&mut window, &ctx, field);
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Text("on the other console".into())],
+        );
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(
             text_rect(&shapes, |t| t == "Cancel").is_none(),
             "the other console's image offers to take this Send back"
+        );
+        let waiting = format!("Waiting for the Send to {}…", origin.1);
+        assert!(
+            text_rect(&shapes, |t| t == waiting).is_some(),
+            "{:?}",
+            texts(&shapes, area())
         );
         flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
         sender.send(Ok(copy.clone())).unwrap();
@@ -3773,6 +3809,77 @@ mod tests {
             "on the other console"
         );
         let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A console that closes while its Send's copy is written takes that Send back as Cancel would:
+    /// standard error is told whose Send went, the console left greys its own Send saying the
+    /// worker is still finishing rather than waiting for a console that is gone, and once the
+    /// worker ends its copy and folder are removed and that Send answers a click.
+    #[cfg(unix)]
+    #[test]
+    fn a_console_closed_mid_send_frees_the_other_consoles_send_once_its_worker_ends() {
+        let received = term_core::received::Received::new("annotated-closed-frees");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        let origin = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        origin_pane(&mut window).panel = Some(crate::PanelDir::create().unwrap());
+        marks_mut(&mut window).general = "on the console left".into();
+        let painted_texts =
+            |window: &mut crate::Window| texts(&painted(window, &ctx, vec![]), area());
+        let waiting = format!("Waiting for the Send to {}…", origin.1);
+        assert!(painted_texts(&mut window).contains(&waiting));
+        // The worker's copy, which keeps the closing console's folder.
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        send::TOLD.with(|told| told.borrow_mut().clear());
+        window.close_a_pane_called(origin.0, &ctx).unwrap();
+        let said = painted_texts(&mut window);
+        assert!(
+            window.image.send.parked(),
+            "the closed console's worker was not parked"
+        );
+        assert!(!said.contains(&waiting), "{said:?}");
+        assert!(
+            said.iter()
+                .any(|t| t == "Still finishing the previous copy…"),
+            "{said:?}"
+        );
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [format!(
+                "Send to {}: The origin console has closed; nothing was sent.",
+                origin.1
+            )]
+        );
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        assert!(
+            !copy.exists() && !dir.exists(),
+            "the copy or its folder stayed"
+        );
+        click_send(&mut window, &ctx);
+        assert!(
+            window.image.send.before_the_line(),
+            "the console left's Send did not answer"
+        );
+        until_written(&mut window, &ctx);
     }
 
     /// A cancelled Send whose worker ends after the focus moved to another console's image says
@@ -4186,6 +4293,7 @@ mod tests {
         window.image.send.ask(send::Request {
             document: slot(&window).document().unwrap(),
             pane: slot(&window).origin().unwrap().pane,
+            console: "test".into(),
             path: copy.clone(),
             line: "x".into(),
         });
@@ -4630,6 +4738,7 @@ mod tests {
         window.image.send.ask(send::Request {
             document,
             pane,
+            console: "test".into(),
             path: dir.join("annotated-9.png"),
             line: "a second Send".into(),
         });

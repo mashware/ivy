@@ -11615,6 +11615,20 @@ that closes takes its image, marks and notice with it, so what a Send for it sti
 refusal, a failed write, a cancelled worker's last word — goes to standard error only, never under
 another console's image.
 
+**One Send runs at a time for the whole window, and a greyed Send says whose (#198).** While
+another console's Send is between its click and its Enter, this console's button reads «Waiting for
+the Send to <console>…»: the label and whether the button answers are read from one value, so no
+greyed button reads «Send to … and press Enter». **A console that closes with its Send in flight
+takes that Send back as Cancel would**, on the next input pass and whichever way it closed — the
+console, its tab, a split or a retirement: its Cancel went with its image, and otherwise every
+console's Send stayed greyed, with no Cancel anywhere, until the worker ended. Its worker is parked
+as Cancel parks one, so the other consoles' Send reads «Still finishing the previous copy…» until it
+ends: the rule of one parked worker is kept. Every line a Send tells standard error names its
+console — «Send to <console>: …» — because that stream is shared by every console. Discarded:
+cancelling in each place a console is closed, which the next way of closing one would miss; and
+letting the other consoles' Send start while a closed console's worker is still parked, which needs
+more than one parked worker and is a decision of its own.
+
 **The copies are the app's to remove.** A console records the copies delivered to it in a field
 declared before its `PanelDir` (since #198 the console's image, `image: viewer::image::Console`), so when its `Pane` is dropped — the console, its tab or the window
 closed — they are removed first, by the paths recorded and with `remove_file`; then `PanelDir`

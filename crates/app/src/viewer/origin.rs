@@ -186,8 +186,7 @@ pub(super) fn empty_image_tab(window: &Window) -> Option<&crate::Pane> {
     if !showing_image(window) || super::image::focused(window).is_some_and(|s| s.shown()) {
         return None;
     }
-    let tab = window.active();
-    tab.panes().into_iter().find(|pane| pane.name == tab.focus)
+    super::image::focused_pane(window)
 }
 
 /// The console the shown document was opened from.
