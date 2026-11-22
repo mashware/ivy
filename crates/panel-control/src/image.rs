@@ -71,6 +71,10 @@ mod tests {
             Prefix::Verbatim(name("Volume{")),
             Prefix::Verbatim(name("Volume{}")),
             Prefix::Verbatim(name("Volumes")),
+            // Longer than `Volume{}` and opened like it, so only the closing brace refuses it.
+            Prefix::Verbatim(name("Volume{0c1a2b3c-0000")),
+            // The `€` spans bytes 5..8: slicing the prefix there would panic instead of refusing.
+            Prefix::Verbatim(name("Volum€{abc}")),
             Prefix::UNC(name("host"), name("share")),
             Prefix::VerbatimUNC(name("host"), name("share")),
             Prefix::DeviceNS(name("PhysicalDrive0")),
