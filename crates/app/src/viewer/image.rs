@@ -6467,7 +6467,7 @@ mod tests {
     /// An agent's image in a console the person is not looking at marks that console's header and
     /// its tab's card, and nothing else; the marks stay through a focus change, a closed drawer,
     /// the Changes tab and «Loading…», and go on the frame the drawer paints the image or why it
-    /// cannot, which asks for the next frame itself.
+    /// cannot.
     #[test]
     fn a_new_image_is_marked_on_its_tab_and_header_until_the_drawer_paints_it() {
         use crate::sidebar::{Tool, active};
@@ -6539,23 +6539,12 @@ mod tests {
             "a painted refusal left the mark"
         );
         // Opened again by the agent, beside a drawer that already shows that console: the frame
-        // that paints the image takes the mark down and asks for the next frame.
+        // that paints the image takes the mark down. That it also asks for the next frame is
+        // pinned by `taking_the_mark_down_asks_for_the_next_frame`, where nothing else in the
+        // frame asks for one; here the image's first paint does.
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, &path);
         assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
-        let started = Instant::now();
-        let output = loop {
-            let output = pass(&mut window, &ctx, vec![]);
-            if image_rect(&output.shapes).is_some() {
-                break output;
-            }
-            assert!(started.elapsed() < Duration::from_secs(30));
-            std::thread::sleep(Duration::from_millis(5));
-        };
-        assert_eq!(
-            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
-            Duration::ZERO,
-            "the frame that took the mark down asked for no next frame"
-        );
+        until_an_image(&mut window, &ctx);
         assert_eq!(marks(&mut window), (vec![], vec![]));
     }
 
@@ -6610,29 +6599,16 @@ mod tests {
             "the refusal was not painted"
         );
         // The header is painted before the drawer: the frame that first shows the refusal still
-        // carries the mark, asks for the next frame itself, and the next one carries none.
+        // carries the mark, and the next one carries none. The request for that next frame is
+        // pinned by `taking_the_mark_down_asks_for_the_next_frame`: in this window something
+        // else in the same frames asks for one too, so no assertion here could tell.
         assert_eq!(
             new_image_marks(&window, &output.shapes).1,
             vec![other],
             "a blank frame took it down"
         );
-        let delay = |output: &egui::FullOutput| {
-            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
-        };
-        assert_eq!(
-            delay(&output),
-            Duration::ZERO,
-            "no next frame was asked for"
-        );
         let output = pass(&mut window, &ctx, vec![]);
         assert_eq!(new_image_marks(&window, &output.shapes), (vec![], vec![]));
-        // The control: a frame with nothing new asks for none, so the one above was this.
-        let output = pass(&mut window, &ctx, vec![]);
-        assert_ne!(
-            delay(&output),
-            Duration::ZERO,
-            "the window is never at rest"
-        );
     }
 
     /// The frame that takes the mark down asks for the next one, where the tab card and the header,
