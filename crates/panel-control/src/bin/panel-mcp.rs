@@ -691,8 +691,8 @@ fn tools() -> serde_json::Value {
     })
 }
 
-/// What `image_open` tells the agent it does, worded for the agent; docs/04 states the same rules
-/// for the verb (D120).
+/// What `image_open` tells the agent it does: a shorter wording, for the agent, of the rules docs/04
+/// states for the verb (D120).
 const IMAGE_OPEN: &str = "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.";
 
 /// The file `path` names, if an agent may hand it to the window: refused with the sentence the agent

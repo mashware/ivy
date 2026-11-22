@@ -158,7 +158,8 @@ impl Slot {
 
     /// Forgets the image and what was said about it, keeping an unfinished decode's handle.
     /// Answers whether it took down the «new image» mark: the tab card and the header painted it
-    /// earlier in the frame, so whoever clears asks for the next one, as `mark_seen` does.
+    /// earlier in the frame, so `close_tab` asks for the next one when it did, as `mark_seen` does.
+    /// `open` discards the answer: it puts another image in the slot rather than taking one down.
     pub(super) fn clear(&mut self) -> bool {
         self.notice = None;
         let was_unseen = std::mem::take(&mut self.unseen);
