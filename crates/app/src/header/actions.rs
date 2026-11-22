@@ -290,7 +290,7 @@ pub(crate) fn pointer(
                 }
                 super::integrated::Target::Paste => {
                     use crate::viewer::image::paste;
-                    paste::ask(window, name, paste::Asked::Button);
+                    paste::ask(window, name, paste::By::Button);
                     ui.ctx().request_repaint();
                     false
                 }

@@ -71,14 +71,12 @@ pub(super) enum Refusal {
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Closed => f.write_str("The origin console has closed"),
-            Self::Held => f.write_str("The origin console has a paste waiting for an answer"),
-            Self::Deaf => f.write_str("The origin console cannot receive input"),
-            Self::Multiline => f.write_str("The origin console does not take a multiline paste"),
-            Self::TooLong => {
-                f.write_str("The text is longer than the origin console takes in one paste")
-            }
-            Self::Failed(error) => write!(f, "Writing to the origin console failed: {error}"),
+            Self::Closed => f.write_str("The console has closed"),
+            Self::Held => f.write_str("The console has a paste waiting for an answer"),
+            Self::Deaf => f.write_str("The console cannot receive input"),
+            Self::Multiline => f.write_str("The console does not take a multiline paste"),
+            Self::TooLong => f.write_str("The text is longer than the console takes in one paste"),
+            Self::Failed(error) => write!(f, "Writing to the console failed: {error}"),
         }
     }
 }

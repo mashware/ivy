@@ -1,5 +1,6 @@
-//! Send: a copy of the image with its marks written into the origin console's own folder, then one
-//! line naming the copy, with the notes, typed into that console and submitted with Enter.
+//! Send: a copy of the image with its marks written into the own folder of the console Send types
+//! into — the image's, or the one picked beside Send (D117) — then one line naming the copy, with
+//! the notes, typed into that console and submitted with Enter.
 use super::super::delivery::{self, Enter, Refusal};
 use super::flatten;
 use super::tools::Asked;
@@ -246,44 +247,67 @@ fn copy_path(window: &crate::Window, name: usize) -> Result<PathBuf, String> {
     Ok(free)
 }
 
-/// The console Send types into, and its name: the one picked beside Send while it is open, the
-/// image's own otherwise. Every place that names or uses Send's console asks here (D117).
-fn destination(window: &crate::Window) -> Option<(usize, String)> {
-    let origin = window.image.origin()?;
-    let chosen = window.image.send.chosen.and_then(|name| {
-        let pane = window.all_panes().find(|pane| pane.name == name)?;
-        Some((name, crate::pane_view::display_label(pane).into_owned()))
-    });
-    Some(chosen.unwrap_or_else(|| (origin.pane, origin.label.clone())))
+/// Every open console with the name it is picked by: its own, told apart by its tab and place
+/// where two share one, because several agents' consoles often carry the same title.
+fn consoles(window: &crate::Window) -> Vec<(usize, String)> {
+    let mut all = Vec::new();
+    for (tab, panes) in window.tabs.iter().map(|tab| tab.panes()).enumerate() {
+        for (at, pane) in panes.iter().enumerate() {
+            let label = crate::pane_view::display_label(pane).into_owned();
+            all.push((pane.name, label, tab + 1, at + 1));
+        }
+    }
+    let named = |label: &String| all.iter().filter(|other| other.1 == *label).count();
+    all.iter()
+        .map(|(name, label, tab, at)| match named(label) {
+            1 => (*name, label.clone()),
+            _ => (*name, format!("{label} (tab {tab}, console {at})")),
+        })
+        .collect()
 }
 
-/// Works out, before the drawer paints, where Send would write the shown image's copy. Only an
-/// image with something to send asks the disk: an image merely looked at costs no call per frame.
+/// The console Send types into, and its name: the one picked beside Send while it is open, the
+/// image's own otherwise. Every place that names or uses Send's console asks here (D117).
+fn destination(window: &crate::Window, consoles: &[(usize, String)]) -> Option<(usize, String)> {
+    let origin = window.image.origin()?;
+    let named = |name: usize| consoles.iter().find(|(open, _)| *open == name).cloned();
+    let chosen = window.image.send.chosen.and_then(named);
+    Some(
+        chosen
+            .or_else(|| named(origin.pane))
+            .unwrap_or((origin.pane, origin.label.clone())),
+    )
+}
+
+/// Works out, before the drawer paints, where Send would write the shown image's copy and which
+/// consoles it can be picked for. Only an image with something to send asks: an image merely
+/// looked at costs no call per frame.
 pub(crate) fn aim(window: &mut crate::Window) {
+    let consoles = match window.image.has_marks() {
+        true => consoles(window),
+        false => Vec::new(),
+    };
+    let to = destination(window, &consoles).filter(|_| !consoles.is_empty());
+    // A picked console that closed is forgotten, so it is not picked again should its name return.
+    let send = &mut window.image.send;
+    if send
+        .chosen
+        .is_some_and(|c| !consoles.iter().any(|(open, _)| *open == c))
+    {
+        send.chosen = None;
+    }
     // A Send on its way keeps the name its line showed: the first free name is no longer it once
     // the worker creates the copy, and the line painted must stay the line that will be typed.
     let shown = window.image.document();
-    let in_flight = window.image.send.in_flight();
-    let kept = in_flight
+    let kept = (window.image.send.in_flight())
         .filter(|r| Some(r.document) == shown)
         .map(|r| r.path.clone());
-    if let Some(path) = kept {
-        window.image.send.target = Some(Ok(path));
-        return;
-    }
-    let to = destination(window).filter(|_| window.image.has_marks());
-    window.image.send.consoles = match to {
-        Some(_) => window
-            .all_panes()
-            .map(|pane| {
-                let label = crate::pane_view::display_label(pane).into_owned();
-                (pane.name, label)
-            })
-            .collect(),
-        None => Vec::new(),
+    window.image.send.target = match kept {
+        Some(path) => Some(Ok(path)),
+        None => to.as_ref().map(|(pane, _)| copy_path(window, *pane)),
     };
-    window.image.send.target = to.as_ref().map(|(pane, _)| copy_path(window, *pane));
     window.image.send.to = to;
+    window.image.send.consoles = consoles;
 }
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
@@ -370,7 +394,8 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             // ends cleanly, that is no longer true. Send is said ready only where it would be:
             // with marks to send and a folder to write their copy into.
             let ready = window.image.has_marks()
-                && destination(window).is_some_and(|(pane, _)| copy_path(window, pane).is_ok());
+                && destination(window, &consoles(window))
+                    .is_some_and(|(pane, _)| copy_path(window, pane).is_ok());
             let notice = &mut window.image.notice;
             if notice
                 .as_deref()
@@ -454,7 +479,7 @@ fn start(
     Ok(Phase::Writing(request, job))
 }
 
-/// The copy is written and closed: the line goes to the image's own console in this frame, or the
+/// The copy is written and closed: the line goes to the request's console in this frame, or the
 /// copy is removed and nothing is written anywhere. Answers what is left: the Enter, or nothing.
 fn deliver(
     window: &mut crate::Window,
@@ -605,6 +630,33 @@ mod tests {
         assert!(
             !folders[0].1.exists(),
             "the retired console's copy or folder stayed"
+        );
+    }
+
+    /// Consoles that share a name are told apart in the picker by their tab and place: the line
+    /// and its Enter go to whichever is picked, so two identical rows would be a guess.
+    #[test]
+    fn consoles_that_share_a_name_are_told_apart() {
+        let mut window =
+            crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        for pane in window.all_panes_mut() {
+            pane.label = Some("agent".into());
+        }
+        let unique = window.tabs[1].panes()[1].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == unique)
+            .unwrap()
+            .label = Some("solo".into());
+        let labels: Vec<String> = consoles(&window).into_iter().map(|(_, l)| l).collect();
+        assert_eq!(
+            labels,
+            [
+                "agent (tab 1, console 1)",
+                "agent (tab 1, console 2)",
+                "agent (tab 2, console 1)",
+                "solo",
+            ]
         );
     }
 }

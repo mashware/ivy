@@ -18,11 +18,12 @@ pub(crate) const NO_IMAGE: &str = "The clipboard holds no image.";
 pub(crate) const NO_FOLDER: &str = "This console has no folder to keep the screenshot in.";
 pub(crate) const EXPIRED: &str = "The clipboard did not answer in time.";
 const BUSY: &str = "A paste is already on its way.";
+const CLOSED: &str = "This console has closed.";
 
-/// Who asked for a paste: the header's button opens the viewer whatever the clipboard holds, a key
-/// pressed over an image already shown only says what it found.
+/// Who started a paste: the header's button opens the viewer whatever came of it; the chord over
+/// a document already shown only says what went wrong, and leaves the document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Asked {
+pub(crate) enum By {
     Button,
     Key,
 }
@@ -32,8 +33,16 @@ pub(crate) enum Asked {
 pub(crate) struct Pasting {
     /// The paste chord, taken by the viewer while it painted; the input pass asks for it.
     pub(super) key: bool,
-    asked: Option<Asked>,
-    writing: Option<(usize, Asked, Job<PathBuf>)>,
+    /// Who started the clipboard read outstanding; the clipboard answers every read it took.
+    asked: Option<By>,
+    writing: Option<Writing>,
+}
+
+/// A screenshot being encoded and written into a console's folder.
+struct Writing {
+    pane: usize,
+    by: By,
+    job: Job<PathBuf>,
 }
 
 impl Pasting {
@@ -63,55 +72,63 @@ pub(in crate::viewer) fn pin(
     viewer.start(origin, PathBuf::new(), super::Load::Empty(text));
 }
 
-/// The paste chord reaches the viewer only while the drawer holds the keys, as Ctrl+Z does; a note
-/// being typed keeps it for its own text. Taken here, it is asked for in the next input pass.
-pub(super) fn take_chord(viewer: &mut super::Viewer, ui: &mut egui::Ui) {
-    if !viewer.send.busy() && !ui.ctx().text_edit_focused() && ui.input_mut(take_key) {
+/// The paste chord is the viewer's only while the drawer holds the keys — a console that holds
+/// them leaves its Ctrl+V in the input, and it is the program's — and no note is being typed,
+/// which keeps it for its own text. Taken here, it is asked for in the next input pass.
+pub(super) fn take_chord(viewer: &mut super::Viewer, ui: &mut egui::Ui, keys: bool) {
+    let free = keys && !viewer.send.busy() && !ui.ctx().text_edit_focused();
+    if free && ui.input_mut(take_key) {
         viewer.paste.key = true;
         ui.ctx().request_repaint();
     }
 }
 
-/// Takes the paste chord out of `input`: as a key when the clipboard held no text — the vendored
-/// egui-winit lets it through then — or as the text paste egui-winit made of it otherwise. Shift
-/// is not looked at: egui-winit does not, so both chords reach here as the same paste.
+/// Takes the paste chord out of `input`: as the text paste egui-winit makes of every paste chord
+/// when the clipboard holds text, or as the key it lets through — the vendored copy does — when it
+/// holds none, which is when a screenshot is there: Ctrl+V or Ctrl+Shift+V (Cmd on macOS), the
+/// Paste key, and Shift+Insert on Windows, where Win+Shift+S leaves only an image.
 fn take_key(input: &mut egui::InputState) -> bool {
     let before = input.events.len();
-    input.events.retain(|event| match event {
-        egui::Event::Paste(_) => false,
-        egui::Event::Key {
-            key: egui::Key::V,
+    input.events.retain(|event| {
+        let egui::Event::Key {
+            key,
             pressed: true,
-            modifiers,
+            modifiers: m,
             ..
-        } => !(modifiers.command && !modifiers.alt),
-        _ => true,
+        } = event
+        else {
+            return !matches!(event, egui::Event::Paste(_));
+        };
+        let insert = cfg!(windows) && m.shift && !m.ctrl && !m.alt && !m.command;
+        !match key {
+            egui::Key::V => m.command && !m.alt,
+            egui::Key::Paste => true,
+            egui::Key::Insert => insert,
+            _ => false,
+        }
     });
     input.events.len() != before
 }
 
 /// A paste for the console `pane`. Refused, before the clipboard is read, when the image shown
-/// keeps unsent marks or the console has no folder to keep the file in.
-pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: Asked) {
+/// keeps unsent marks, the console has closed, or it has no folder to keep the file in.
+pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
     if origin::keeps_marks(window) {
         return;
     }
     if window.image.paste.busy() {
-        tell(window, pane, by, Some(BUSY));
-        return;
+        return tell(window, pane, by, Said::Retry(BUSY));
     }
     let Some(console) = window.all_panes().find(|p| p.name == pane) else {
-        return;
+        return window.image.say(CLOSED);
     };
     if console.panel.is_none() {
-        tell(window, pane, by, Some(NO_FOLDER));
-        return;
+        return tell(window, pane, by, Said::Final(NO_FOLDER));
     }
-    if !window.clipboard.request_image(pane, Instant::now()) {
-        tell(window, pane, by, Some("The clipboard is busy; try again."));
-        return;
+    match window.clipboard.request_image(pane, Instant::now()) {
+        Ok(()) => window.image.paste.asked = Some(by),
+        Err(why) => tell(window, pane, by, Said::Final(why)),
     }
-    window.image.paste.asked = Some(by);
 }
 
 /// What the clipboard answered for the console `pane`.
@@ -121,20 +138,23 @@ pub(crate) fn received(
     pasted: Pasted,
     ctx: &egui::Context,
 ) {
-    let by = window.image.paste.asked.take().unwrap_or(Asked::Button);
+    // Only `ask` starts an image read, and it records who did; the clipboard answers each once.
+    let by = window.image.paste.asked.take();
+    debug_assert!(by.is_some(), "an image read nobody asked for");
+    let by = by.unwrap_or(By::Button);
     match pasted {
         Pasted::Image(image) => {
             if let Err(why) = write(window, pane, by, image, ctx) {
-                tell(window, pane, by, Some(&why));
+                tell(window, pane, by, Said::Final(&why));
             }
         }
-        Pasted::Absent if by == Asked::Button => tell(window, pane, by, None),
-        Pasted::Absent => tell(window, pane, by, Some(NO_IMAGE)),
+        Pasted::Absent if by == By::Button => tell(window, pane, by, Said::Hint),
+        Pasted::Absent => tell(window, pane, by, Said::Retry(NO_IMAGE)),
         Pasted::Failed(why) => {
             let said = format!("The clipboard could not be read: {why}.");
-            tell(window, pane, by, Some(&said));
+            tell(window, pane, by, Said::Retry(&said));
         }
-        Pasted::Expired => tell(window, pane, by, Some(EXPIRED)),
+        Pasted::Expired => tell(window, pane, by, Said::Retry(EXPIRED)),
     }
 }
 
@@ -143,7 +163,7 @@ pub(crate) fn received(
 fn write(
     window: &mut crate::Window,
     pane: usize,
-    by: Asked,
+    by: By,
     image: image::RgbaImage,
     ctx: &egui::Context,
 ) -> Result<(), String> {
@@ -160,7 +180,7 @@ fn write(
         let png = encode(&image, IMAGE_LIMIT)?;
         write_new(&folder, &png)
     })?;
-    window.image.paste.writing = Some((pane, by, job));
+    window.image.paste.writing = Some(Writing { pane, by, job });
     Ok(())
 }
 
@@ -216,9 +236,14 @@ fn write_new(folder: &Path, png: &[u8]) -> Result<PathBuf, String> {
             Ok(()) => Ok(path),
             Err(e) => {
                 drop(file);
-                let _ = std::fs::remove_file(&path);
+                let left = match std::fs::remove_file(&path) {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                        format!("; the half-written file could not be removed: {error}")
+                    }
+                    _ => String::new(),
+                };
                 Err(format!(
-                    "The screenshot could not be written at {}: {e}",
+                    "The screenshot could not be written at {}: {e}{left}",
                     path.display()
                 ))
             }
@@ -233,34 +258,33 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
     if std::mem::take(&mut window.image.paste.key)
         && let Some(pane) = window.image.origin().map(|o| o.pane)
     {
-        ask(window, pane, Asked::Key);
+        ask(window, pane, By::Key);
     }
-    let Some((_, _, job)) = &window.image.paste.writing else {
+    let Some(writing) = &window.image.paste.writing else {
         return;
     };
-    let Some(written) = take(job) else {
+    let Some(written) = take(&writing.job) else {
         ctx.request_repaint_after(Duration::from_millis(50));
         return;
     };
-    let (pane, by, _) = window
-        .image
-        .paste
-        .writing
-        .take()
-        .expect("a paste being written");
+    let Writing { pane, by, .. } = window.image.paste.writing.take().expect("a paste");
     let path = match written {
         Ok(path) => path,
-        Err(why) => return tell(window, pane, by, Some(&why)),
+        Err(why) => return tell(window, pane, by, Said::Final(&why)),
     };
     let Some(console) = window.all_panes_mut().find(|p| p.name == pane) else {
         return forsake(&path);
     };
     // The console removes it when it closes, with Send's copies.
     console.annotated.record(path.clone());
-    if let Err(why) = origin::open_image_target(window, pane, path) {
+    if origin::open_image_target(window, pane, path.clone()).is_err() {
         // Marks drawn on the image shown while the screenshot was written: they are kept, and
         // the file stays the console's until it closes.
-        window.image.say(why.to_string());
+        let said = format!(
+            "The screenshot was saved to {}; send or clear the marks on this image to open it.",
+            path.display()
+        );
+        window.image.say(said);
     }
     ctx.request_repaint();
 }
@@ -282,21 +306,31 @@ fn forsake(path: &Path) {
     }
 }
 
-/// Says what became of a paste: over an image already shown, a key's paste only says it; anything
-/// else opens the viewer for that console, empty, with the hint after what is said.
-fn tell(window: &mut crate::Window, pane: usize, by: Asked, said: Option<&str>) {
-    if by == Asked::Key
-        && window.image.original().is_some()
-        && let Some(said) = said
-    {
-        window.image.say(said);
-        return;
-    }
-    let text = match said {
-        Some(said) => format!("{said} {HINT}"),
-        None => HINT.to_owned(),
+/// What a paste that opened nothing says: the hint alone, something a retry can mend followed by
+/// the hint, or something it cannot, alone.
+enum Said<'a> {
+    Hint,
+    Retry(&'a str),
+    Final(&'a str),
+}
+
+/// Says what became of a paste. Over unsent marks, or over a document a key's paste found shown,
+/// it is said beside what is there; anything else opens the viewer for that console, empty.
+fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
+    let (alone, text) = match said {
+        Said::Hint => (None, HINT.to_owned()),
+        Said::Retry(said) => (Some(said), format!("{said} {HINT}")),
+        Said::Final(said) => (Some(said), said.to_owned()),
     };
-    let _ = origin::pin_empty_image(window, pane, text);
+    let shown = window.image.shown() && empty(&window.image).is_none();
+    if window.image.has_marks() || (by == By::Key && shown && alone.is_some()) {
+        let alone = alone.unwrap_or(NO_IMAGE);
+        super::send::join(&mut window.image.notice, alone.to_owned());
+        return origin::show_image(window);
+    }
+    if !origin::pin_empty_image(window, pane, text) {
+        eprintln!("A paste's answer arrived for a console that has closed");
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +376,53 @@ mod tests {
         assert!(!folder.join("nowhere").exists());
         for name in ["pasted-1.png", "pasted-2.png", "pasted-3.png"] {
             let _ = std::fs::remove_file(folder.join(name));
+        }
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// Which presses are the paste chord: Ctrl+V with or without Shift (Cmd on macOS), the Paste
+    /// key and egui's text paste; not Ctrl+Alt+V, a plain V, or a release.
+    #[test]
+    fn the_paste_chord_is_taken_and_nothing_else() {
+        use egui::{Key, Modifiers};
+        let shift_command = Modifiers::COMMAND | Modifiers::SHIFT;
+        let taken = [
+            key(Key::V, Modifiers::COMMAND),
+            key(Key::V, shift_command),
+            key(Key::Paste, Modifiers::NONE),
+            egui::Event::Paste("text".into()),
+        ];
+        let kept = [
+            key(Key::V, Modifiers::COMMAND | Modifiers::ALT),
+            key(Key::V, Modifiers::NONE),
+            egui::Event::Key {
+                key: Key::V,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            },
+        ];
+        for event in taken {
+            let mut input = egui::InputState::default();
+            input.events = vec![event.clone()];
+            assert!(take_key(&mut input), "{event:?} was not taken");
+            assert!(input.events.is_empty());
+        }
+        for event in kept {
+            let mut input = egui::InputState::default();
+            input.events = vec![event.clone()];
+            assert!(!take_key(&mut input), "{event:?} was taken");
+            assert_eq!(input.events, vec![event]);
         }
     }
 }

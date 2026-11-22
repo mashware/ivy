@@ -120,7 +120,7 @@ pub(super) fn show(
                     roles.base,
                 );
                 match image {
-                    Some(image) => image.show(&mut body_ui, theme, state.space),
+                    Some(image) => image.show(&mut body_ui, theme, (state.space, state.keys)),
                     None => body_content(state, &mut body_ui, theme, unavailable),
                 }
             });

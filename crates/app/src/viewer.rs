@@ -52,6 +52,8 @@ pub(crate) struct State {
     keyboard: bool,
     /// Whether the Space held now was pressed while the drawer held the keys.
     space: bool,
+    /// Whether the drawer holds the keys this pass, once a press has handed them over.
+    keys: bool,
     held: bool,
     blocked_frame: Option<u64>,
     events: Option<Vec<egui::Event>>,
@@ -86,6 +88,7 @@ impl Default for State {
             refresh_at: None,
             keyboard: false,
             space: false,
+            keys: false,
             held: false,
             blocked_frame: None,
             events: None,
@@ -468,6 +471,7 @@ pub(crate) fn before_keys(
             window.viewer.keyboard = over;
             window.viewer.held = over;
         }
+        window.viewer.keys = window.viewer.keyboard || window.sidebar.maximized;
         let gesture_owned = window.viewer.held;
         if !ctx.input(|i| i.focused && i.pointer.any_down()) {
             window.viewer.held = false;

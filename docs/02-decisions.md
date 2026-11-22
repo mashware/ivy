@@ -11788,31 +11788,44 @@ Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so 
 takes a screenshot from:
 
 - **«Paste screenshot» in every console's header** (Phosphor's image glyph, between the review and
-  the panel) reads the clipboard's image for that console. Found, it is written as
+  the panel, and the first control a narrow header gives up, before the splits) reads the
+  clipboard's image for that console. Found, it is written as
   `pasted-<n>.png` into that console's `PANEL_DIR` — the first `n` nothing there takes, a dangling
   link included, created with `create_new` on a worker, mode 0600 on Unix — and opened through the
   same entry as a clicked image path (D72, D113), pinned to that console. Not found, the drawer
   opens an **empty viewer pinned to that console** saying «Copy a screenshot and press Paste
-  screenshot again, or press Ctrl+V here.» (Cmd+V on macOS), after whatever went wrong: no image,
-  no folder, a clipboard that did not answer, a read that failed.
-- **The paste chord inside the viewer** (Ctrl+V or Ctrl+Shift+V, Cmd on macOS) does the same for
-  the console the viewer is pinned to — **only while no text field has the keyboard**, the condition
-  D113 gives Ctrl+Z, so a note being typed keeps its text paste. The vendored egui-winit already lets
-  the chord through as a key when the clipboard holds no text, and turns it into `Event::Paste`
-  when it does; both are taken. Over an image already shown, a chord that finds no image only says
-  so, rather than replacing the image.
+  screenshot again, or press Ctrl+V here.» (Cmd+V on macOS) — alone when the clipboard simply held
+  no image, after what went wrong when a retry can mend it (a read that failed or ran out of time,
+  a paste already on its way), and what went wrong alone when it cannot (no folder, an image too
+  large, a clipboard that is unavailable).
+- **The paste chord inside the viewer** does the same for the console the viewer is pinned to —
+  **only while the drawer holds the keys and no text field has the keyboard**, the condition D113
+  gives Ctrl+Z, so a note being typed keeps its text paste, and not while a Send is on its way. The
+  vendored egui-winit lets the chord through as a key when the clipboard holds no text — Ctrl+V or
+  Ctrl+Shift+V (Cmd on macOS), the Paste key, and Shift+Insert on Windows, where Win+Shift+S
+  leaves only an image — and turns every paste chord into `Event::Paste` when it does; both are
+  taken. Over a document already shown, a chord that finds no image only says so, rather than
+  replacing the document; over unsent marks, any paste says what it found beside them.
 - **The file is the console's**: it joins the annotated copies the console removes when it closes
   (D113's cleanup, the same field). A console that closes while its screenshot is written takes the
-  file and its folder when the write ends.
+  file when the write ends, and its folder if nothing else is in it. A screenshot written while
+  marks were drawn on the image shown is kept, and the drawer says where.
 - **The same limits as an opened image** — a decode over 256 MiB, a PNG over 32 MiB — refuse it
   **before** a file is written, with `The clipboard image is too large to open (limit: … MiB).`
+  They keep the file off the disk, not the memory: arboard has decoded the clipboard's image whole
+  by the time it is measured, and offers no size to look at first.
 - **An image read has a deadline of its own, 10 s**: arboard decodes the clipboard's PNG inside the
   read, and a debug build decoded a 2400×1600 PNG in 1.5–4 s under load (#178), so the 2 s text
   deadline would expire on an ordinary capture. Expiring is said in the drawer — `The clipboard did
   not answer in time.` — because a button pressed for nothing visible reads as a button that does
-  not work. The read stays on the clipboard's one worker, one read at a time, keyed by console.
+  not work. The read stays on the clipboard's one worker, one read at a time, keyed by console: a text
+  paste asked while a screenshot is being read is refused, as it already was behind another text
+  read, and said on standard error. A worker that stops answers the read it held as failed, so
+  the paste waiting on it ends.
 - **Beside Send, an arrow picks another open console** to send to, in case the wrong header was
-  pressed. It changes only where Send goes: the copy is written into the picked console's folder
+  pressed — listed by name, and where two share one, by tab and place as well, because several
+  agents' consoles often carry the same title; the arrow is named for assistive technology and
+  hidden while a Send is on its way. It changes only where Send goes: the copy is written into the picked console's folder
   and the line typed there, and the image, its file, its marks and its notes stay as they are. A
   picked console that closes gives Send back to the image's own. One function answers which
   console that is for every place that names or uses it — the button, the line, the request, the

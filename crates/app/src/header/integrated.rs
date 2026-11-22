@@ -174,7 +174,7 @@ struct Layout {
 
 fn layout(strip: egui::Rect, offer: Offer) -> Layout {
     let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let mut base = vec![Target::Search, Target::Review, Target::Paste, Target::Panel];
+    let mut base = vec![Target::Search, Target::Review, Target::Panel];
     if offer.can_close {
         base.extend([Target::Zoom, Target::Close]);
     }
@@ -185,12 +185,17 @@ fn layout(strip: egui::Rect, offer: Offer) -> Layout {
             separators: Vec::new(),
         };
     }
-    // The splits are the first to go when the header is narrow: they are also in the titlebar.
+    // What is not essential goes first when the header is narrow: the splits, which are also in
+    // the titlebar, and before them the paste (D117), which a wider console still offers.
+    let spare = ((room / CELL) as usize).saturating_sub(base.len());
+    if spare > 0 {
+        base.insert(2, Target::Paste);
+    }
     let splits: Vec<Target> = [Target::SplitRight, Target::SplitDown]
         .into_iter()
         .zip(offer.split)
         .filter_map(|(target, offered)| offered.then_some(target))
-        .take(((room / CELL) as usize).saturating_sub(base.len()))
+        .take(spare.saturating_sub(1))
         .collect();
     let order: Vec<Target> = splits.iter().copied().chain(base).collect();
     let left = right - order.len() as f32 * CELL;
@@ -1214,7 +1219,7 @@ mod tests {
     #[test]
     fn a_narrow_header_drops_its_splits_before_the_rest() {
         for (can_close, label_only, base, with_split) in
-            [(true, 185.0, 186.0, 211.0), (false, 135.0, 136.0, 161.0)]
+            [(true, 160.0, 161.0, 211.0), (false, 110.0, 111.0, 161.0)]
         {
             let offer = Offer {
                 can_close,
@@ -1225,9 +1230,12 @@ mod tests {
             assert!(
                 base_set.contains(&Target::Search)
                     && base_set.contains(&Target::Review)
-                    && base_set.contains(&Target::Paste)
                     && base_set.contains(&Target::Panel)
             );
+            // The paste comes one cell later, and a split only after it (D117).
+            assert!(!base_set.contains(&Target::Paste));
+            assert!(!kinds(strip_of(base + 24.0), offer).contains(&Target::Paste));
+            assert!(kinds(strip_of(base + 25.0), offer).contains(&Target::Paste));
             assert!(!base_set.contains(&Target::SplitDown));
             assert!(!kinds(strip_of(with_split - 1.0), offer).contains(&Target::SplitDown));
             assert!(kinds(strip_of(with_split), offer).contains(&Target::SplitDown));
