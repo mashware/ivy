@@ -110,8 +110,7 @@ impl<R: Units> Parser<'_, R> {
     }
 }
 
-pub(super) fn matches(reader: &mut impl Units, shapes: &[&[Argument<'_>]]) -> io::Result<bool> {
-    let mut parser = Parser { input: reader };
+fn executable_token<R: Units>(parser: &mut Parser<'_, R>) -> io::Result<bool> {
     let mut argv0 = 0;
     let mut high = false;
     let mut malformed = false;
@@ -130,7 +129,12 @@ pub(super) fn matches(reader: &mut impl Units, shapes: &[&[Argument<'_>]]) -> io
     if malformed || high {
         return Err(io::ErrorKind::InvalidData.into());
     }
-    if first != Some(true) || argv0 == 0 {
+    Ok(first == Some(true) && argv0 > 0)
+}
+
+pub(super) fn matches(reader: &mut impl Units, shapes: &[&[Argument<'_>]]) -> io::Result<bool> {
+    let mut parser = Parser { input: reader };
+    if !executable_token(&mut parser)? {
         return Ok(false);
     }
     let mut candidates: Vec<_> = shapes.to_vec();
@@ -210,13 +214,7 @@ fn complete(argument: &Argument<'_>, position: usize) -> bool {
 
 pub(super) fn script_slot(reader: &mut impl Units) -> io::Result<Option<String>> {
     let mut parser = Parser { input: reader };
-    let mut count = 0;
-    if parser.token(true, |_| {
-        count += 1;
-        count <= 4096
-    })? != Some(true)
-        || count == 0
-    {
+    if !executable_token(&mut parser)? {
         return Ok(None);
     }
     let mut units = Vec::new();
@@ -325,6 +323,34 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::InvalidData
+        );
+    }
+    #[test]
+    fn malformed_executable_is_rejected_by_both_invocation_readers() {
+        for prefix in [vec![0xd800], vec![0xdc00], vec![0xd800, u16::from(b'x')]] {
+            let mut data = prefix;
+            data.push(u16::from(b' '));
+            data.extend(r"C:\valid\app.js".encode_utf16());
+            let mut input = Source {
+                data: data.clone(),
+                pos: 0,
+            };
+            assert_eq!(
+                script_slot(&mut input).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            let mut input = Source { data, pos: 0 };
+            assert_eq!(
+                matches(&mut input, &[&[Argument::Literal(r"C:\valid\app.js")]])
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+        let mut input = source("x😀 C:\\valid\\app.js");
+        assert_eq!(
+            script_slot(&mut input).unwrap().as_deref(),
+            Some(r"C:\valid\app.js")
         );
     }
     #[test]
