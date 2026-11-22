@@ -9103,6 +9103,15 @@ its dismissal consumes the input that closed it. Tool state remains retained whi
 shown. Viewer, Board and sidebar host frame work are separately named and discounted once from the
 framework remainder; the host span excludes viewer and Board spans.
 
+**One-click return — 22 November 2026, #214.** A bare primary press on a visible console's body
+returns the keyboard from the drawer and focuses that console in the same input pass, before any
+typing is dispatched. This also releases a note or review field's editor focus. A gesture begun
+inside the drawer stays there until it ends; headers, panels, links, dividers and modal surfaces
+keep their own input rules. Discarded: requiring a second click, which makes returning from a note
+or review unlike switching consoles; relying on the console's later egui click response, which
+cannot choose the destination of text already dispatched earlier in that pass. No new frame span
+is introduced: the handoff stays in the existing viewer input span.
+
 Until #93 the sidebar reserved a 36 point navigation rail, a 6 point divider and a preferred 480
 point body of at least 320 points. The rail is gone and the geometry is the one the last section
 states. What stays: the console tree keeps its metric-derived floor (at least 320 points wide),
