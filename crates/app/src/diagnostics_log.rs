@@ -1,5 +1,7 @@
 //! The window's own standard error, kept in a file as well, and a panic recorded there (D114).
 
+#[cfg(any(windows, test))]
+mod graphics;
 mod sink;
 mod swap;
 
@@ -101,6 +103,8 @@ pub fn finish(outcome: eframe::Result, capture: Capture) -> std::process::ExitCo
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             let _ = writeln!(std::io::stderr().lock(), "Error: {error:?}");
+            #[cfg(windows)]
+            graphics::notify(&error);
             std::process::ExitCode::FAILURE
         }
     };
@@ -114,6 +118,8 @@ pub fn start() -> Capture {
     if crate::any_measurement_variable(|which| std::env::var_os(which).is_some()) {
         return Capture { live: None };
     }
+    #[cfg(windows)]
+    graphics::start();
     start_in(directory_here())
 }
 
@@ -398,3 +404,9 @@ fn absolute(value: Option<&OsStr>) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests;
+
+/// Graphics initialization succeeded before the app creation closure is entered.
+#[cfg(windows)]
+pub(crate) fn graphics_ready() {
+    graphics::ready();
+}
