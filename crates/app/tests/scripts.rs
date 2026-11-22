@@ -406,6 +406,38 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/src/foreground/linux.rs"),
     ),
     (
+        "term-core/src/foreground/windows.rs",
+        include_str!("../../term-core/src/foreground/windows.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/process.rs",
+        include_str!("../../term-core/src/foreground/windows/process.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/ancestry.rs",
+        include_str!("../../term-core/src/foreground/windows/ancestry.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/chain.rs",
+        include_str!("../../term-core/src/foreground/windows/chain.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/parameters.rs",
+        include_str!("../../term-core/src/foreground/windows/parameters.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/memory.rs",
+        include_str!("../../term-core/src/foreground/windows/memory.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/arguments.rs",
+        include_str!("../../term-core/src/foreground/windows/arguments.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/tests.rs",
+        include_str!("../../term-core/src/foreground/windows/tests.rs"),
+    ),
+    (
         "term-core/src/foreground/tests.rs",
         include_str!("../../term-core/src/foreground/tests.rs"),
     ),
