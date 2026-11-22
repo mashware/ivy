@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use crate::endpoint::windows;
 use std::sync::Arc;

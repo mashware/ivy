@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use panel_contract::PanelDir;
 use std::sync::mpsc::{Receiver, sync_channel};

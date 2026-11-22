@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use crate::{DiagnosticPeer, session::Peer};
 use panel_contract::PanelDir;

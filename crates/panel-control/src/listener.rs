@@ -2663,11 +2663,13 @@ mod tests {
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[cfg(windows)]
 #[path = "listener/windows_peer_tests.rs"]
 mod windows_peer_tests;
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[cfg(windows)]
 mod windows_lifecycle_tests {
     use super::*;
     use panel_contract::PanelDir;
