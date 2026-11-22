@@ -24,6 +24,9 @@ public static class IvyGraphicsTrial {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, StringBuilder text, uint flags, uint timeout, out IntPtr result);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
@@ -59,6 +62,7 @@ public static class IvyGraphicsTrial {
 }
 $Start = [Diagnostics.ProcessStartInfo]::new($Executable)
 $Start.UseShellExecute = $false
+$Start.CreateNoWindow = $true
 $Start.WorkingDirectory = $EvidenceDir
 $Start.RedirectStandardOutput = $true
 $Start.RedirectStandardError = $true
@@ -90,6 +94,11 @@ try {
         $Text -cnotmatch 'Detected OpenGL version: (unavailable|[0-9][^\r\n]*)' -or
         $Text -cnotmatch 'Details:') { throw "Incomplete native graphics notice: $Text" }
     Set-Content (Join-Path $EvidenceDir 'dialog.txt') $Text -Encoding utf8NoBOM
+    $Button = [IvyGraphicsTrial]::GetDlgItem($Dialog, 1)
+    if ($Button -eq [IntPtr]::Zero) { throw 'The native graphics notice has no OK button.' }
+    if (-not [IvyGraphicsTrial]::SetForegroundWindow($Dialog) -and [IvyGraphicsTrial]::GetForegroundWindow() -ne $Dialog) {
+        throw 'Could not activate the native graphics notice.'
+    }
     Add-Type -AssemblyName System.Drawing
     $Bounds = [IvyGraphicsTrial+Rect]::new()
     if (-not [IvyGraphicsTrial]::GetWindowRect($Dialog, [ref]$Bounds)) { throw 'Could not read native dialog bounds.' }
@@ -100,8 +109,13 @@ try {
         finally { $Graphics.Dispose() }
         $Bitmap.Save((Join-Path $EvidenceDir 'dialog.png'), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $Bitmap.Dispose() }
-    if (-not [IvyGraphicsTrial]::PostMessage($Dialog, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { throw 'Could not dismiss native graphics notice.' }
-    if (-not $Process.WaitForExit(5000)) { throw 'Ivy did not exit after the graphics notice was dismissed.' }
+    # Activate the actual OK control so its own notification, with its control handle,
+    # reaches the dialog.
+    if (-not [IvyGraphicsTrial]::PostMessage($Button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not click the native OK button.' }
+    if (-not $Process.WaitForExit(5000)) {
+        if ([IvyGraphicsTrial]::Dialog($Process.Id) -ne [IntPtr]::Zero) { throw 'The native graphics notice stayed open after OK button activation.' }
+        throw 'The native notice closed, but Ivy did not exit.'
+    }
     if ($Process.ExitCode -ne 1) { throw "Expected graphics failure exit 1, got $($Process.ExitCode)." }
     if (-not $Stderr.Wait(5000) -or $Stderr.Result -notmatch 'Error: (OpenGL|Glutin|NoGlutinConfigs)') {
         throw 'Original typed graphics error was not preserved on standard error.'
