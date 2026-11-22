@@ -9271,6 +9271,14 @@ keep no loose floating window, and to put Markdown in the drawer as a tab.
   uses. Review rows show the file's name first, its folder dimmed and its counts on the same row;
   diff rows touch, with dim line numbers and the change's mark in its colour. Side by side divides
   its two columns where the person drags the handle between Before and After.
+- **The active drawer tab has priority in a narrow strip** (#215). After the source label,
+  Git controls and diff toggle have given way, inactive tabs give way before the selected one.
+  Retained tabs keep their Changes / Document / Image order; a tab and its close target are
+  retained or omitted together. If the selected tab alone cannot keep its usual width, its label
+  is shortened inside the remaining tab space. Maximize and drawer close keep their places.
+  This replaces dropping the last tab by position, which could hide the view being read and
+  leave only its close button. Reordering the active tab first was discarded: selecting a tab
+  should not shuffle the strip when the retained tabs fit in their original order.
 - **Not modal.** Neither the drawer, Files nor a press on the title bar dims the consoles: only a
   modal surface does (a console's rename or menu, the title bar's menu, a dialog). Dimming on the
   drawer shaded the window beside it, and dimming on a title-bar press painted every console at half

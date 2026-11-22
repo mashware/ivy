@@ -1,6 +1,6 @@
 //! The drawer's top strip: its source, the Changes, document and image tabs, the diff layout,
-//! maximize and close. Its places are fixed widths so the host can resolve a click before the frame's tiling
-//! with the same rectangles the painting uses (D72).
+//! maximize and close. The host resolves clicks before frame tiling using the same layout
+//! rectangles as the painting (D72).
 use super::State;
 use crate::sidebar::Tool;
 use crate::theme::Roles;
@@ -94,25 +94,60 @@ impl Strip {
             if room >= 60.0 { room.min(SOURCE) } else { 0.0 },
         );
         let mut places = Vec::new();
-        let crowded = source.width() == 0.0 || (git && !controls);
+        let mut crowded = source.width() == 0.0 || (git && !controls);
         let mut x = source.right() + 4.0;
         let closer = |tab: Rect| middle(TAB_CLOSE, tab.right() - 6.0 - TAB_CLOSE);
-        if tabs.changes.is_some() {
-            let place = tab(x, CHANGES);
-            places.push((StripAction::CloseChanges, closer(place)));
-            places.push((StripAction::Changes, place));
-            x += CHANGES;
+        let candidates = [
+            (
+                tabs.changes.is_some(),
+                Tool::Git,
+                CHANGES,
+                StripAction::Changes,
+                StripAction::CloseChanges,
+            ),
+            (
+                tabs.document.is_some(),
+                Tool::Document,
+                DOCUMENT,
+                StripAction::Document,
+                StripAction::CloseDocument,
+            ),
+            (
+                tabs.image.is_some(),
+                Tool::Image,
+                IMAGE,
+                StripAction::Image,
+                StripAction::CloseImage,
+            ),
+        ];
+        let active = candidates
+            .iter()
+            .position(|(present, tool, ..)| *present && Some(*tool) == tabs.active);
+        let mut remaining = (maximize.left() - x).max(0.0);
+        let mut widths = [0.0; 3];
+        // Reserve the selected tab before giving space to inactive tabs, then paint in the usual
+        // order. Even a shortened tab needs room for its complete close target and side padding.
+        if let Some(active) = active {
+            let width = candidates[active].2.min(remaining);
+            if width >= TAB_CLOSE + 12.0 {
+                widths[active] = width;
+                remaining -= width;
+            }
         }
-        if tabs.document.is_some() {
-            let place = tab(x, DOCUMENT);
-            places.push((StripAction::CloseDocument, closer(place)));
-            places.push((StripAction::Document, place));
-            x += DOCUMENT;
+        for (i, &(present, _, width, ..)) in candidates.iter().enumerate() {
+            if present && Some(i) != active && width <= remaining {
+                widths[i] = width;
+                remaining -= width;
+            }
         }
-        if tabs.image.is_some() {
-            let place = tab(x, IMAGE);
-            places.push((StripAction::CloseImage, closer(place)));
-            places.push((StripAction::Image, place));
+        for (i, &(present, _, width, action, close_action)) in candidates.iter().enumerate() {
+            crowded |= present && widths[i] < width;
+            if widths[i] > 0.0 {
+                let place = tab(x, widths[i]);
+                places.push((close_action, closer(place)));
+                places.push((action, place));
+                x += widths[i];
+            }
         }
         places.push((StripAction::Maximize, maximize));
         places.push((StripAction::Close, close));
@@ -131,12 +166,6 @@ impl Strip {
         }
         let controls = controls
             .then(|| Rect::from_min_size(pos2(right - CONTROLS, top), vec2(CONTROLS, height)));
-        // A narrow drawer keeps maximize and close; a tab that would run under them is dropped.
-        let reserved = maximize.left();
-        places.retain(|(action, place)| {
-            matches!(action, StripAction::Maximize | StripAction::Close)
-                || place.right() <= reserved
-        });
         Self {
             rect,
             source,
@@ -394,6 +423,7 @@ fn tab(
         StripAction::Image => (tabs.image.clone().unwrap_or_default(), None),
         _ => (tabs.document.clone().unwrap_or_default(), None),
     };
+    let count = count.filter(|_| place.width() >= 20.0 + TAB_CLOSE + 6.0 + 26.0);
     let room = place.width() - 20.0 - TAB_CLOSE - 6.0 - count.as_ref().map_or(0.0, |_| 26.0);
     let written = text(
         painter,
@@ -452,6 +482,114 @@ pub(super) fn hint(action: StripAction, maximized: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::viewer::StripAction;
+
+    const TAB_PAIRS: [(Tool, StripAction, StripAction); 3] = [
+        (Tool::Git, StripAction::Changes, StripAction::CloseChanges),
+        (
+            Tool::Document,
+            StripAction::Document,
+            StripAction::CloseDocument,
+        ),
+        (Tool::Image, StripAction::Image, StripAction::CloseImage),
+    ];
+
+    fn three_tabs(active: Tool) -> Tabs {
+        Tabs {
+            changes: Some(Some(3)),
+            document: Some("plan.md".into()),
+            image: Some("shot.png".into()),
+            active: Some(active),
+            side_by_side: false,
+        }
+    }
+
+    fn strip(width: f32, tabs: &Tabs) -> Strip {
+        Strip::framed(
+            Rect::from_min_size(pos2(20.0, 30.0), vec2(width, 370.0)),
+            tabs,
+        )
+    }
+
+    fn place(strip: &Strip, action: StripAction) -> Option<Rect> {
+        strip
+            .places
+            .iter()
+            .find(|(a, _)| *a == action)
+            .map(|(_, r)| *r)
+    }
+
+    fn assert_paired_hit_targets(strip: &Strip) {
+        let maximize = place(strip, StripAction::Maximize).unwrap();
+        for (_, tab, close) in TAB_PAIRS {
+            match (place(strip, tab), place(strip, close)) {
+                (Some(body), Some(button)) => {
+                    assert!(strip.rect.contains_rect(body), "{tab:?} escapes the strip");
+                    assert!(body.right() <= maximize.left(), "{tab:?} overlaps controls");
+                    assert!(body.contains_rect(button), "{close:?} escapes its tab");
+                    assert_eq!(strip.at(button.center()), Some(close));
+                    assert_eq!(
+                        strip.at(pos2(body.left() + 2.0, body.center().y)),
+                        Some(tab)
+                    );
+                }
+                (None, None) => {}
+                _ => panic!("{tab:?} and {close:?} must appear together"),
+            }
+        }
+    }
+
+    #[test]
+    fn selected_tab_stays_visible_and_hittable_in_a_narrow_drawer() {
+        for width in [300.0, 450.0, 550.0] {
+            for (active, tab, _) in TAB_PAIRS {
+                let strip = strip(width, &three_tabs(active));
+                assert!(place(&strip, tab).is_some(), "{active:?} hidden at {width}");
+                assert_paired_hit_targets(&strip);
+            }
+        }
+    }
+
+    #[test]
+    fn omitted_tabs_leave_no_orphan_close_targets() {
+        for width in [300.0, 450.0, 550.0] {
+            for (active, _, _) in TAB_PAIRS {
+                assert_paired_hit_targets(&strip(width, &three_tabs(active)));
+            }
+        }
+    }
+
+    #[test]
+    fn selected_tab_compresses_when_its_normal_width_does_not_fit() {
+        for (active, tab, _) in TAB_PAIRS {
+            let strip = strip(180.0, &three_tabs(active));
+            let body = place(&strip, tab).expect("selected tab must fit by compressing");
+            let normal = if active == Tool::Git {
+                CHANGES
+            } else {
+                DOCUMENT
+            };
+            assert!(body.width() > TAB_CLOSE && body.width() < normal);
+            assert_paired_hit_targets(&strip);
+            assert!(strip.crowded);
+        }
+    }
+
+    #[test]
+    fn wide_strip_keeps_tab_order_and_each_close_target() {
+        for (active, _, _) in TAB_PAIRS {
+            let strip = strip(1400.0, &three_tabs(active));
+            let bodies: Vec<_> = TAB_PAIRS
+                .iter()
+                .map(|(_, tab, _)| place(&strip, *tab).expect("wide drawer keeps every tab"))
+                .collect();
+            assert!(
+                bodies
+                    .windows(2)
+                    .all(|pair| pair[0].right() <= pair[1].left())
+            );
+            assert_paired_hit_targets(&strip);
+        }
+    }
 
     /// With an image beside the document and the review, the strip lays out all three tabs, each
     /// with its close button, at 718 points: the width the review's narrow-strip test holds the
