@@ -2367,6 +2367,93 @@ mod tests {
         }
     }
 
+    // Real byte witnesses use POSIX shell preludes to disable echo and canonical input.
+    #[cfg(unix)]
+    #[test]
+    fn drawer_boundaries_keep_focus_and_input_away_from_console_programs() {
+        use term_core::received::Received;
+        for boundary in ["drawer", "files", "divider", "modal", "held gesture"] {
+            let folder = Folder::new();
+            let path = folder.0.join("shot.png");
+            write_png(&path, 120, 60);
+            let first = Received::new("boundary-first");
+            let second = Received::new("boundary-second");
+            let programs = [
+                first.script("stty raw -echo"),
+                second.script("stty raw -echo"),
+            ];
+            let (mut window, ctx, _) = window_with_image_in(&path, [&programs[0], &programs[1]]);
+            first.wait_until_ready(Duration::from_secs(5));
+            second.wait_until_ready(Duration::from_secs(5));
+            crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+            painted(&mut window, &ctx, vec![]);
+            let field = place_of(&mut window, &ctx, "A note on the whole image");
+            press(&mut window, &ctx, field);
+            assert!(window.viewer.keyboard);
+            assert!(ctx.memory(|m| m.focused()).is_some());
+            let focus = window.active().focus;
+            let other = window.active().panes()[0]
+                .painted_console
+                .as_ref()
+                .unwrap()
+                .area
+                .center();
+            // Mouse reports make a leaked gesture observable in the same byte witness as text.
+            for pane in window.active_mut().panes_mut() {
+                pane.screen.advance(b"\x1b[?1003h\x1b[?1006h");
+            }
+            let at = match boundary {
+                "files" => window.sidebar.last_files.unwrap().center(),
+                "divider" => {
+                    let dock = window.sidebar.last_dock.unwrap();
+                    egui::pos2(dock.center().x, dock.top() - crate::sidebar::DIVIDER / 2.0)
+                }
+                "modal" => {
+                    window
+                        .pane_view
+                        .begin_rename(window.active, focus, "Rename".into());
+                    painted(&mut window, &ctx, vec![]);
+                    other
+                }
+                _ => field,
+            };
+            painted(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+            painted(
+                &mut window,
+                &ctx,
+                vec![button(egui::PointerButton::Primary, at, true)],
+            );
+            let released = if boundary == "held gesture" {
+                other
+            } else {
+                at
+            };
+            painted(
+                &mut window,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(released),
+                    egui::Event::Text("private".into()),
+                ],
+            );
+            assert_eq!(window.active().focus, focus, "{boundary}");
+            painted(
+                &mut window,
+                &ctx,
+                vec![button(egui::PointerButton::Primary, released, false)],
+            );
+            assert_eq!(window.active().focus, focus, "{boundary} release");
+            assert!(
+                first.so_far().is_empty(),
+                "{boundary}: first program received input"
+            );
+            assert!(
+                second.so_far().is_empty(),
+                "{boundary}: second program received input"
+            );
+        }
+    }
+
     /// On a console with no image the image tab stays selected and says how to open one with
     /// Ctrl+click, named after that console and not as unavailable; the drawer neither closes nor
     /// switches, so no console's grid changes. The agent's own way in is not named until the agent
