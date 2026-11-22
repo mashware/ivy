@@ -3,6 +3,17 @@ use super::{Kind, State};
 use eframe::egui::{self, FontId};
 use std::path::Path;
 
+/// What the drawer's body shows: the document state's, or the focused console's image, which it
+/// may not have.
+pub(super) enum Body<'a> {
+    Document,
+    Image(Option<(&'a mut super::image::Viewer, &'a mut super::image::Slot)>),
+}
+
+/// What the image tab says on a console with no image.
+pub(super) const NO_IMAGE: &str =
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it.";
+
 /// The radius of the body's bottom corners, inside the drawer's one-point frame.
 pub(super) const BODY_CORNER: u8 = crate::theme::metrics::RADIUS_CARD - 1;
 
@@ -16,7 +27,7 @@ pub(super) fn show(
     (tabs, title, image): (
         &super::drawer::Tabs,
         &super::drawer::Title,
-        Option<(&mut super::image::Viewer, &mut super::image::Slot)>,
+        Body,
     ),
 ) {
     let namespace = if state.kind.is_document() {
@@ -120,8 +131,15 @@ pub(super) fn show(
                     roles.base,
                 );
                 match image {
-                    Some((image, slot)) => image.show(slot, &mut body_ui, theme, state.space),
-                    None => body_content(state, &mut body_ui, theme, unavailable),
+                    Body::Image(Some((image, slot))) => {
+                        image.show(slot, &mut body_ui, theme, state.space);
+                    }
+                    Body::Image(None) => {
+                        egui::Frame::new().inner_margin(14).show(&mut body_ui, |ui| {
+                            ui.label(NO_IMAGE);
+                        });
+                    }
+                    Body::Document => body_content(state, &mut body_ui, theme, unavailable),
                 }
             });
         });
@@ -458,7 +476,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
-                        (&tabs(true), &title(), None),
+                        (&tabs(true), &title(), super::Body::Document),
                     )
                 },
             );
@@ -522,7 +540,7 @@ mod tests {
                             theme,
                             true,
                             false,
-                            (&tabs(false), &title(), None),
+                            (&tabs(false), &title(), super::Body::Document),
                         )
                     },
                 );
@@ -588,7 +606,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         true,
                         false,
-                        (&tabs(false), &gone, None),
+                        (&tabs(false), &gone, super::Body::Document),
                     )
                 },
             )

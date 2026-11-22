@@ -543,10 +543,15 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         (
             &tabs,
             &title,
-            image
-                .then(|| image::focused_mut(&mut window.tabs, window.active))
-                .flatten()
-                .map(|slot| (&mut window.image, slot)),
+            if image {
+                view::Body::Image(
+                    image::focused_mut(&mut window.tabs, window.active)
+                        .filter(|slot| slot.shown())
+                        .map(|slot| (&mut window.image, slot)),
+                )
+            } else {
+                view::Body::Document
+            },
         ),
     );
     ctx.input_mut(|input| input.events = filtered);
@@ -558,6 +563,19 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
 /// The strip's name for what the drawer shows: the source console's project, or the folder it
 /// reads; the terminal's own title says nothing a person needs here.
 fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
+    // An empty image tab names the focused console, which is there by definition.
+    if let Some(pane) = origin::empty_image_tab(window) {
+        return drawer::Title {
+            project: pane.project.as_ref().map(|badge| (badge.name.clone(), badge.ink)),
+            folder: pane
+                .program
+                .as_ref()
+                .map(|(folder, _)| folder.clone())
+                .filter(|folder| !folder.is_empty())
+                .unwrap_or_else(|| crate::pane_view::display_label(pane).into_owned()),
+            unavailable: false,
+        };
+    }
     let origin = origin::shown_origin(window);
     let project = origin
         .and_then(|origin| window.all_panes().find(|pane| pane.name == origin.pane))

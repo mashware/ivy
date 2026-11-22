@@ -150,7 +150,6 @@ impl Slot {
     }
 
     /// Whether there is an image to paint.
-    #[cfg(test)]
     pub(super) fn shown(&self) -> bool {
         self.document.is_some()
     }
@@ -1973,6 +1972,38 @@ mod tests {
             same_place(settle(&mut window, &ctx), zoomed),
             "the second console's zoom was lost"
         );
+    }
+
+    /// On a console with no image the image tab stays selected and says how to open one, named
+    /// after that console and not as unavailable; the drawer neither closes nor switches, so no
+    /// console's grid changes.
+    #[test]
+    fn a_console_with_no_image_keeps_the_tab_and_says_how_to_open_one() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let grids = |window: &crate::Window| {
+            window.all_panes().map(|p| p.measured).collect::<Vec<_>>()
+        };
+        let before = grids(&window);
+        let empty = window.active().panes()[0].name;
+        let active_tab = window.active;
+        window.tabs[active_tab].focus = empty;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let dock = window.sidebar.last_dock.unwrap();
+        let said = texts(&shapes, dock);
+        assert!(said.iter().any(|t| t == crate::viewer::view::NO_IMAGE), "{said:?}");
+        assert!(
+            !said.iter().any(|t| t.contains("unavailable") || t.contains("No source")),
+            "{said:?}"
+        );
+        assert!(image_rect(&shapes).is_none());
+        assert_eq!(active(&window), Some(Tool::Image));
+        assert!(crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Image).is_some());
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(grids(&window), before);
     }
 
     /// A pan latched on one console's image does not carry over to another console's when the

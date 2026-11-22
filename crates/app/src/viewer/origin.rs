@@ -181,6 +181,15 @@ pub(super) fn showing_image(window: &Window) -> bool {
     crate::sidebar::active(window) == Some(crate::sidebar::Tool::Image)
 }
 
+/// The focused console, while the image tab is on and that console has no image.
+pub(super) fn empty_image_tab(window: &Window) -> Option<&crate::Pane> {
+    if !showing_image(window) || super::image::focused(window).is_some_and(|s| s.shown()) {
+        return None;
+    }
+    let tab = window.active();
+    tab.panes().into_iter().find(|pane| pane.name == tab.focus)
+}
+
 /// The console the shown document was opened from.
 pub(super) fn shown_origin(window: &Window) -> Option<&super::Source> {
     if showing_image(window) {
