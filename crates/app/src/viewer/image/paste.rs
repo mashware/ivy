@@ -44,8 +44,9 @@ pub(crate) struct Pasting {
     /// Who started the clipboard read outstanding; the clipboard answers every read it took.
     asked: Option<By>,
     writing: Option<Writing>,
-    /// Whether a paste was asked while this one was on its way, which the drawer says for as long
-    /// as it stays on its way (`shown_notice`, `shown_empty`).
+    /// Whether a paste was asked again over what the drawer shows while this one was on its way.
+    /// Read only through `says_busy`, which also needs the paste still on its way; cleared when
+    /// the next read starts or another document is opened.
     asked_again: bool,
 }
 
@@ -71,8 +72,15 @@ impl Pasting {
     }
 }
 
+/// Another document took the drawer: nothing said beside the one it replaces stays, and nothing was
+/// asked again over it.
+pub(super) fn opened(viewer: &mut super::Viewer) {
+    viewer.notice = None;
+    viewer.paste.asked_again = false;
+}
+
 /// The notice beside a picture as the drawer paints it: «a paste is already on its way» ahead of
-/// it while that is true. It is composed here and never written into the notice, which Send, the
+/// it while a paste asked again over this picture is on its way. It is composed here and never written into the notice, which Send, the
 /// marks and every answer write too; a copy kept to restore later went stale with each of them.
 pub(super) fn shown_notice<'a>(
     paste: &Pasting,
@@ -87,11 +95,11 @@ pub(super) fn shown_notice<'a>(
     })
 }
 
-/// The empty viewer's text as the drawer paints it: while a paste asked again is on its way, that
-/// and how to paste once it ends, in place of the text kept underneath.
+/// The empty viewer's text as the drawer paints it: while a paste asked again over it is on its
+/// way, «a paste is already on its way» ahead of that text — a final one stays readable.
 pub(super) fn shown_empty<'a>(paste: &Pasting, text: &'a str) -> std::borrow::Cow<'a, str> {
     if paste.says_busy() {
-        return format!("{BUSY} {HINT}").into();
+        return format!("{BUSY} {text}").into();
     }
     text.into()
 }
@@ -493,7 +501,8 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     origin::pin_empty_image(window, pane, text);
 }
 
-/// The end of a paste for a console that closed: said in its own viewer, and nowhere else.
+/// The end of a paste for a console that closed: said in its own viewer; anywhere else only on
+/// standard error, never beside another console's picture.
 fn gone(viewer: &mut super::Viewer, pane: usize) {
     if viewer.origin().is_some_and(|o| o.pane == pane) {
         return closed(viewer);

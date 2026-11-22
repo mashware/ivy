@@ -11797,7 +11797,7 @@ takes a screenshot from:
   opens an **empty viewer pinned to that console** saying «Copy a screenshot and press Paste
   screenshot again, or press Ctrl+V here.» (Cmd+V on macOS) — alone when the clipboard simply held
   no image, after what went wrong when a retry can mend it (a read that failed or ran out of time,
-  a paste already on its way, a clipboard still busy with another read), and what went wrong alone
+  a clipboard still busy with another read), and what went wrong alone
   when it cannot (no folder, an image too large, a clipboard that is unavailable — never opened, not
   offered by the system, or its worker stopped — said with its cause; a paste refused because
   the clipboard's worker is gone adds that restarting Ivy mends it).
@@ -11816,8 +11816,8 @@ takes a screenshot from:
   paints it — the empty viewer's text, or beside a picture, shown or still loading — never by
   opening another console's empty viewer; over a failed image or none, on standard error, since
   the paste on its way opens the viewer unless its console closes first. The «on its way» is
-  **painted, never written**: ahead of the notice beside a picture, and in place of the empty
-  viewer's text with how to paste once it ends, for as long as that paste is on its way. What the
+  **painted, never written**: ahead of the notice beside a picture or the empty viewer's text, for
+  as long as that paste is on its way and nothing else has been opened in the drawer. What the
   drawer keeps underneath is not touched, so when the paste ends it is simply there again, and
   what the paste found is said as any answer is. Discarded after three review rounds: writing it
   into the notice and keeping what it covered to give back later. The notice is written by Send,
