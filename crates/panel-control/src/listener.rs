@@ -38,6 +38,8 @@ struct Services {
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
     inspector: Option<PublicationInspector>,
     #[cfg(windows)]
+    publication_scope: Option<Arc<term_core::ForegroundScope>>,
+    #[cfg(windows)]
     connection_workers: Option<Arc<std::sync::Mutex<Vec<JoinHandle<()>>>>>,
     #[cfg(windows)]
     releases: Option<crate::windows_services::ReleaseRegistry>,
@@ -375,6 +377,8 @@ impl Channel {
             plan_reader: Arc::default(),
             inspector,
             #[cfg(windows)]
+            publication_scope: None,
+            #[cfg(windows)]
             connection_workers: None,
             #[cfg(windows)]
             releases: None,
@@ -497,6 +501,7 @@ impl Channel {
                     None
                 }
             },
+            publication_scope: windows.publication_scope.clone(),
             connection_workers: Some(Arc::clone(&workers)),
             releases: Some(windows.release_registry()),
             document_snapshot: Some(document),
@@ -797,15 +802,24 @@ fn serve(
                             Peer::capture(&stream)
                                 .map_err(|_| "verified socket peer unavailable".to_owned())
                         });
+                    #[cfg(windows)]
+                    if stop.load(Ordering::Acquire) {
+                        return;
+                    }
                     // Capture and classify before interpreting any control operation.
-                    let origin =
-                        services
-                            .inspector
-                            .as_ref()
-                            .map_or(PublicationOrigin::Unknown, |inspect| {
-                                DiagnosticPeer::capture(&stream)
-                                    .map_or(PublicationOrigin::Unknown, |peer| inspect(&peer))
-                            });
+                    let origin = DiagnosticPeer::capture(&stream).map_or(
+                        PublicationOrigin::Unknown,
+                        |peer| {
+                            #[cfg(windows)]
+                            if let Some(scope) = &services.publication_scope {
+                                return crate::windows_services::publication_origin(scope, &peer);
+                            }
+                            services
+                                .inspector
+                                .as_ref()
+                                .map_or(PublicationOrigin::Unknown, |inspect| inspect(&peer))
+                        },
+                    );
                     converse(
                         stream,
                         connection,

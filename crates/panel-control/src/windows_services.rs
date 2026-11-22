@@ -1,7 +1,7 @@
 //! Callback-free capabilities used by the Windows channel workers.
 //!
-//! The worker side only clones bounded, already-serialized values and posts a native message. App
-//! state stays on the UI thread; this module deliberately has no generic callback surface.
+//! The worker side reads bounded snapshots, posts a native message and may inspect a concrete
+//! native process scope. App state stays on the UI thread; there is no generic callback surface.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -440,6 +440,7 @@ pub struct WindowsServices {
     pub(crate) plan: PlanReader,
     pub(crate) wake: WindowsWake,
     pub(crate) releases: ReleaseRegistry,
+    pub(crate) publication_scope: Option<Arc<term_core::ForegroundScope>>,
 }
 impl WindowsServices {
     pub fn new(hwnd: isize) -> io::Result<(Self, DocumentPublisher, PlanPublisher)> {
@@ -450,8 +451,17 @@ impl WindowsServices {
             plan,
             wake: WindowsWake::from_hwnd(hwnd)?,
             releases: ReleaseRegistry::new(),
+            publication_scope: None,
         };
         Ok((services, document_publisher, plan_publisher))
+    }
+    /// Diagnostic ancestry uses only native handles; no app callback can hold a joined worker.
+    pub fn with_publication_scope(
+        mut self,
+        scope: Option<Arc<term_core::ForegroundScope>>,
+    ) -> Self {
+        self.publication_scope = scope;
+        self
     }
     pub fn release_registry(&self) -> ReleaseRegistry {
         self.releases.clone()
@@ -461,6 +471,27 @@ impl WindowsServices {
         self.plan.0.revoke();
         self.wake.revoke();
         self.releases.revoke();
+    }
+}
+
+/// A scope classifies only a retained kernel peer, with revocation checked on both sides.
+pub(crate) fn publication_origin(
+    scope: &term_core::ForegroundScope,
+    peer: &crate::DiagnosticPeer,
+) -> crate::PublicationOrigin {
+    use crate::PublicationOrigin;
+    if !peer.is_alive() || !scope.is_open() {
+        return PublicationOrigin::Unknown;
+    }
+    let origin = match scope.classify_ancestry(peer.pid()) {
+        term_core::Ancestry::Inside => PublicationOrigin::Inside,
+        term_core::Ancestry::Outside => PublicationOrigin::Outside,
+        term_core::Ancestry::Unknown => PublicationOrigin::Unknown,
+    };
+    if peer.is_alive() && scope.is_open() {
+        origin
+    } else {
+        PublicationOrigin::Unknown
     }
 }
 

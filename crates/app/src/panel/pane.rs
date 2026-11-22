@@ -24,7 +24,7 @@ pub(crate) fn state_and_control_with_authority(
     reads: crate::control::ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
     authority: Option<std::sync::Arc<panel::overlay::Authority>>,
-    inspector: panel_control::PublicationInspector,
+    inspector: crate::panel::provenance_route::Inspector,
 ) -> (panel::PanelState, Option<crate::control::PaneControl>) {
     #[allow(unused_mut)]
     let mut state = panel::PanelState::default();
