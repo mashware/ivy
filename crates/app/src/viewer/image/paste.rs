@@ -44,10 +44,9 @@ pub(crate) struct Pasting {
     /// Who started the clipboard read outstanding; the clipboard answers every read it took.
     asked: Option<By>,
     writing: Option<Writing>,
-    /// What the viewer said — the empty viewer's text, or the notice beside a picture — before «a
-    /// paste is already on its way» covered it. `unbusy` gives it back; an answer that opens the
-    /// viewer anew, or a console that closes over its own unmarked picture, replaces it instead.
-    covered: Option<String>,
+    /// Whether a paste was asked while this one was on its way, which the drawer says for as long
+    /// as it stays on its way (`shown_notice`, `shown_empty`).
+    asked_again: bool,
 }
 
 /// A screenshot being encoded and written into a console's folder.
@@ -67,11 +66,34 @@ impl Pasting {
         self.key || self.writing.is_some()
     }
 
-    /// The notice kept under «a paste is already on its way», for whoever corrects a notice that
-    /// stopped being true while it was covered.
-    pub(super) fn covered_mut(&mut self) -> &mut Option<String> {
-        &mut self.covered
+    fn says_busy(&self) -> bool {
+        self.asked_again && self.busy()
     }
+}
+
+/// The notice beside a picture as the drawer paints it: «a paste is already on its way» ahead of
+/// it while that is true. It is composed here and never written into the notice, which Send, the
+/// marks and every answer write too; a copy kept to restore later went stale with each of them.
+pub(super) fn shown_notice<'a>(
+    paste: &Pasting,
+    notice: Option<&'a str>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    if !paste.says_busy() {
+        return notice.map(Into::into);
+    }
+    Some(match notice {
+        Some(notice) => format!("{BUSY} {notice}").into(),
+        None => BUSY.into(),
+    })
+}
+
+/// The empty viewer's text as the drawer paints it: while a paste asked again is on its way, that
+/// and how to paste once it ends, in place of the text kept underneath.
+pub(super) fn shown_empty<'a>(paste: &Pasting, text: &'a str) -> std::borrow::Cow<'a, str> {
+    if paste.says_busy() {
+        return format!("{BUSY} {HINT}").into();
+    }
+    text.into()
 }
 
 /// What the empty viewer says, when no image was pasted into it.
@@ -174,19 +196,12 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
     // Where it is painted, and never by pinning another console's empty viewer, which the paste
     // on its way would undo when it answers for its own.
     if window.image.paste.busy() {
-        let retry = format!("{BUSY} {HINT}");
-        match window.image.document.as_mut().map(|d| &mut d.load) {
-            Some(super::Load::Empty(text)) if *text != retry => {
-                window.image.paste.covered = Some(std::mem::replace(text, retry));
-            }
-            Some(super::Load::Empty(_)) => {}
+        match window.image.document.as_ref().map(|d| &d.load) {
             // A failed image paints no notice, and with none there is nowhere to say it; the paste
             // on its way opens the viewer unless its console closes first.
             Some(super::Load::Failed(_)) | None => return eprintln!("{BUSY}"),
-            // A picture, shown or still loading (painted once decoded).
-            // Already said, perhaps with something joined after it: what it covered stays kept.
-            Some(_) if busy_said(window.image.notice.as_deref()) => {}
-            Some(_) => window.image.paste.covered = window.image.notice.replace(BUSY.to_owned()),
+            // The empty viewer, or a picture shown or still loading (painted once decoded).
+            Some(_) => window.image.paste.asked_again = true,
         }
         return origin::show_image(window);
     }
@@ -197,7 +212,10 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
         return tell(window, pane, by, Said::Final(NO_FOLDER));
     }
     match window.clipboard.request_image(pane, Instant::now()) {
-        Ok(()) => window.image.paste.asked = Some(by),
+        Ok(()) => {
+            window.image.paste.asked = Some(by);
+            window.image.paste.asked_again = false;
+        }
         Err(Refused::Busy) => tell(window, pane, by, Said::Retry(Refused::Busy.says())),
         Err(why) => tell(window, pane, by, Said::Final(why.says())),
     }
@@ -461,11 +479,7 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     // Loading: shown with its notice once decoded. Failed: nothing to keep.
     let image = &window.image;
     let kept = image.shown() && empty(image).is_none() && image.message().is_none();
-    // Over a picture whose «on its way» is showing, a key's answer follows what that notice
-    // covered and what was said after it, rather than dropping them.
-    let keep_said = by == By::Key && kept && busy_said(image.notice.as_deref());
-    if window.image.has_marks() || keep_said {
-        unbusy(&mut window.image);
+    if window.image.has_marks() {
         let notice = &mut window.image.notice;
         if !notice.as_deref().is_some_and(|n| n.ends_with(&alone)) {
             super::send::join(notice, alone);
@@ -479,40 +493,12 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     origin::pin_empty_image(window, pane, text);
 }
 
-/// The end of a paste for a console that closed: said in its own viewer; another console's viewer
-/// only loses a «paste on its way» said there because of it, which is no longer true.
+/// The end of a paste for a console that closed: said in its own viewer, and nowhere else.
 fn gone(viewer: &mut super::Viewer, pane: usize) {
-    unbusy(viewer);
     if viewer.origin().is_some_and(|o| o.pane == pane) {
         return closed(viewer);
     }
     eprintln!("A paste ended for a console that has closed");
-}
-
-/// Whether the notice beside a picture opens with «a paste is already on its way».
-fn busy_said(notice: Option<&str>) -> bool {
-    notice.is_some_and(|n| n.starts_with(BUSY))
-}
-
-/// Takes back «a paste is already on its way» once that paste has ended: the viewer says again
-/// what it said before, and whatever was said after it stays.
-fn unbusy(viewer: &mut super::Viewer) {
-    let busy = format!("{BUSY} {HINT}");
-    let covered = viewer.paste.covered.take();
-    if let Some(super::Load::Empty(text)) = viewer.document.as_mut().map(|d| &mut d.load) {
-        if *text == busy {
-            *text = covered.unwrap_or_else(|| HINT.to_owned());
-        }
-        return;
-    }
-    let Some(after) = viewer.notice.as_deref().and_then(|n| n.strip_prefix(BUSY)) else {
-        return;
-    };
-    let after = after.trim_start().to_owned();
-    viewer.notice = covered;
-    if !after.is_empty() {
-        super::send::join(&mut viewer.notice, after);
-    }
 }
 
 #[cfg(test)]

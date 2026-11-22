@@ -265,14 +265,16 @@ impl Viewer {
         }
         paste::take_chord(self, ui, keys);
         let Some(size) = self.size() else {
-            return unloaded(ui, self.message(), paste::empty(self), theme);
+            let empty = paste::empty(self).map(|text| paste::shown_empty(&self.paste, text));
+            return unloaded(ui, self.message(), empty.as_deref(), theme);
         };
         // Taken up only by a frame that lays the column out, where the notice is painted.
         if let Some(said) = self.send.unshown.take() {
             send::join(&mut self.notice, said);
         }
         let panning = &mut self.panning;
-        let notice = self.notice.as_deref();
+        let notice = paste::shown_notice(&self.paste, self.notice.as_deref());
+        let notice = notice.as_deref();
         let sending = &mut self.send;
         let Some(Opened {
             id,
@@ -5269,8 +5271,8 @@ mod tests {
         assert_eq!(harness.requested_image(), Some(name));
     }
 
-    /// A «paste on its way» said in a viewer is taken back when that paste ends because its console
-    /// closed: the viewer says again what it said before, a final text included.
+    /// A «paste on its way» painted in a viewer goes when that paste ends because its console
+    /// closed, and the viewer's own text, a final one included, was never written over.
     #[test]
     fn a_paste_on_its_way_is_taken_back_when_its_console_closes() {
         let (mut window, ctx, harness, name, _folder) = window_to_paste();
@@ -5283,12 +5285,17 @@ mod tests {
         assert_eq!(harness.requested_image(), Some(name));
         paste::ask(&mut window, bare, paste::By::Button);
         let busy = format!("A paste is already on its way. {}", paste::HINT);
-        assert_eq!(paste::empty(&window.image), Some(busy.as_str()));
+        painted(&mut window, &ctx, vec![]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(text_rect(&shapes, |t| t == busy).is_some());
+        assert_eq!(paste::empty(&window.image), Some(no_folder));
         window.close_a_pane_called(name, &ctx).unwrap();
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
+        let shapes = painted(&mut window, &ctx, vec![]);
         assert_eq!(window.image.origin().map(|o| o.pane), Some(bare));
-        assert_eq!(paste::empty(&window.image), Some(no_folder));
+        assert!(text_rect(&shapes, |t| t == no_folder).is_some());
+        assert!(text_rect(&shapes, |t| t.contains("on its way")).is_none());
     }
 
     /// A console that closes before its answer, over its own image with unsent marks, is said
@@ -5321,16 +5328,14 @@ mod tests {
         assert_eq!(harness.requested_image(), Some(name));
         paste::ask(&mut window, name, paste::By::Button);
         assert!(!window.image.loaded());
-        assert_eq!(
-            window.image.notice.as_deref(),
-            Some("A paste is already on its way.")
-        );
+        let shown = paste::shown_notice(&window.image.paste, window.image.notice.as_deref());
+        assert_eq!(shown.as_deref(), Some("A paste is already on its way."));
     }
 
-    /// A «paste on its way» said beside a picture is taken back when that paste ends because its
-    /// console closed: the notice it covered is said again.
+    /// A «paste on its way» beside a picture is painted ahead of the notice, never written into it,
+    /// and goes when that paste ends because its console closed.
     #[test]
-    fn a_paste_on_its_way_beside_a_picture_gives_back_the_notice_it_covered() {
+    fn a_paste_on_its_way_is_painted_ahead_of_the_notice_and_leaves_it() {
         let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
         let other = window.active().panes()[0].name;
         window
@@ -5342,10 +5347,11 @@ mod tests {
         assert_eq!(harness.requested_image(), Some(other));
         window.image.say("Earlier.");
         paste::ask(&mut window, other, paste::By::Button);
-        assert_eq!(
-            window.image.notice.as_deref(),
-            Some("A paste is already on its way.")
-        );
+        painted(&mut window, &ctx, vec![]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let busy = "A paste is already on its way. Earlier.";
+        assert!(text_rect(&shapes, |t| t == busy).is_some());
+        assert_eq!(window.image.notice.as_deref(), Some("Earlier."));
         window.close_a_pane_called(other, &ctx).unwrap();
         harness.reply_image(other, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
@@ -5373,8 +5379,8 @@ mod tests {
         );
     }
 
-    /// Over marks, a paste that ends with its console open gives back what its «on its way»
-    /// covered and says what it found after it.
+    /// Over marks, a paste that ends with its console open says what it found after the notice
+    /// already there, and «on its way» is no longer painted.
     #[test]
     fn an_answer_over_marks_takes_back_the_paste_on_its_way() {
         let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
@@ -5386,92 +5392,33 @@ mod tests {
         marks_mut(&mut window).general = "keep".into();
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
-        assert_eq!(
-            window.image.notice.as_deref(),
-            Some("Earlier. The clipboard holds no image.")
-        );
-    }
-
-    /// Asked again while «on its way» shows with something said after it, the notice it covered
-    /// is kept, and both come back when the paste ends.
-    #[test]
-    fn a_third_paste_on_its_way_keeps_what_the_first_one_covered() {
-        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
-        let other = window.active().panes()[0].name;
-        window
-            .all_panes_mut()
-            .find(|p| p.name == other)
-            .unwrap()
-            .panel = Some(crate::PanelDir::create().unwrap());
-        paste::ask(&mut window, other, paste::By::Button);
-        assert_eq!(harness.requested_image(), Some(other));
-        window.image.say("Earlier.");
-        paste::ask(&mut window, other, paste::By::Button);
-        let said = "A paste is already on its way. Unread.";
-        window.image.notice = Some(said.into());
-        paste::ask(&mut window, other, paste::By::Button);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let said = "Earlier. The clipboard holds no image.";
         assert_eq!(window.image.notice.as_deref(), Some(said));
-        window.close_a_pane_called(other, &ctx).unwrap();
-        harness.reply_image(other, crate::clipboard::Pasted::Absent);
-        painted(&mut window, &ctx, vec![]);
-        assert_eq!(window.image.notice.as_deref(), Some("Earlier. Unread."));
+        assert!(text_rect(&shapes, |t| t == said).is_some());
     }
 
-    /// A key's answer over a picture whose «on its way» shows follows what that notice covered
-    /// and what was said after it.
+    /// «On its way» is painted only while the paste asked over is: not once it has answered, and
+    /// not for the next paste, which nobody asked over.
     #[test]
-    fn a_keys_answer_keeps_what_on_its_way_covered() {
-        let (mut window, ctx, harness, _path, _folder) = image_and_clipboard();
-        let name = window.image.origin().unwrap().pane;
-        paste::ask(&mut window, name, paste::By::Key);
+    fn on_its_way_is_painted_only_while_that_paste_is() {
+        let (mut window, ctx, harness, name, _folder) = window_to_paste();
+        paste::ask(&mut window, name, paste::By::Button);
         assert_eq!(harness.requested_image(), Some(name));
-        window.image.say("Earlier.");
-        paste::ask(&mut window, name, paste::By::Key);
-        window.image.notice = Some("A paste is already on its way. Unread.".into());
+        paste::ask(&mut window, name, paste::By::Button);
+        let busy = format!("A paste is already on its way. {}", paste::HINT);
+        let shown = |window: &crate::Window| {
+            let text = paste::empty(&window.image).unwrap_or_default();
+            paste::shown_empty(&window.image.paste, text).into_owned()
+        };
         harness.reply_image(name, crate::clipboard::Pasted::Absent);
         painted(&mut window, &ctx, vec![]);
-        assert_eq!(
-            window.image.notice.as_deref(),
-            Some("Earlier. Unread. The clipboard holds no image.")
-        );
-    }
-
-    /// The cancelled copy's worker ending corrects «still finishing» where a paste on its way
-    /// keeps it covered too, so it does not come back once that paste ends.
-    #[cfg(unix)]
-    #[test]
-    fn a_finished_worker_corrects_the_notice_a_paste_keeps_covered() {
-        let received = term_core::received::Received::new("annotated-covered");
-        let folder = Folder::new();
-        let path = folder.0.join("shot.png");
-        write_png(&path, 640, 400);
-        let (mut window, ctx, _dir) = window_to_send(&path, &received);
-        click_send(&mut window, &ctx);
-        painted(&mut window, &ctx, vec![]);
-        let (copy, sender) = window
-            .image
-            .send
-            .stall()
-            .expect("the copy is being written");
-        let cancel = place_of(&mut window, &ctx, "Cancel");
-        press(&mut window, &ctx, cancel);
-        let parked = window.image.notice.take();
-        assert!(
-            parked
-                .as_deref()
-                .is_some_and(|n| n.contains("Still finishing"))
-        );
-        *window.image.paste.covered_mut() = parked;
-        window.image.notice = Some("A paste is already on its way.".into());
-        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
-        sender.send(Ok(copy.clone())).unwrap();
-        painted(&mut window, &ctx, vec![]);
-        assert!(!window.image.send.parked());
-        let covered = window.image.paste.covered_mut().clone().unwrap_or_default();
-        assert!(
-            covered.contains("Its copy is gone") && !covered.contains("Still finishing"),
-            "{covered}"
-        );
+        assert_eq!(shown(&window), paste::HINT);
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(harness.requested_image(), Some(name));
+        assert_eq!(shown(&window), paste::HINT);
+        paste::ask(&mut window, name, paste::By::Button);
+        assert_eq!(shown(&window), busy);
     }
 
     /// A read that failed says arboard's cause inside the drawer's sentence, then the hint.

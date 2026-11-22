@@ -411,17 +411,14 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
     window.image.send.unshown = Some(said);
 }
 
-/// Replaces a notice that says Send is still finishing a copy, now that it is not — the one shown,
-/// and the one a paste on its way keeps covered to give back later.
+/// Replaces a notice that says Send is still finishing a copy, now that it is not.
 fn no_longer_finishing(window: &mut crate::Window, now: &str) {
-    let image = &mut window.image;
-    for notice in [&mut image.notice, image.paste.covered_mut()] {
-        if notice
-            .as_deref()
-            .is_some_and(|n| n.contains(STILL_FINISHING))
-        {
-            *notice = Some(now.to_owned());
-        }
+    let notice = &mut window.image.notice;
+    if notice
+        .as_deref()
+        .is_some_and(|n| n.contains(STILL_FINISHING))
+    {
+        *notice = Some(now.to_owned());
     }
 }
 

@@ -11815,12 +11815,14 @@ takes a screenshot from:
   rather than the picture. A paste asked while another is on its way is said where the drawer
   paints it — the empty viewer's text, or beside a picture, shown or still loading — never by
   opening another console's empty viewer; over a failed image or none, on standard error, since
-  the paste on its way opens the viewer unless its console closes first. When that paste ends,
-  the «on its way» is taken back: the viewer says again what it said before — the empty viewer's
-  text, or the notice beside a picture, with whatever was said after the «on its way» — and,
-  over marks or after a key, follows it with what the paste found; an answer that opens the viewer
-  anew says only what it found, and a console that closed says so. A notice that stopped being
-  true while covered — Send «still finishing» a copy whose worker has ended — is corrected there too.
+  the paste on its way opens the viewer unless its console closes first. The «on its way» is
+  **painted, never written**: ahead of the notice beside a picture, and in place of the empty
+  viewer's text with how to paste once it ends, for as long as that paste is on its way. What the
+  drawer keeps underneath is not touched, so when the paste ends it is simply there again, and
+  what the paste found is said as any answer is. Discarded after three review rounds: writing it
+  into the notice and keeping what it covered to give back later. The notice is written by Send,
+  the marks' refusal and every answer too, and the copy kept aside went stale with each of them —
+  lost, brought back after it stopped being true, or piled up, a new way per round.
 - **Every answer is shown, and takes the keys** — the drawer's document tab, as opening a clicked
   image does — however late it comes (decided with the owner). An answer is normally there within
   milliseconds; late means a stuck clipboard owner, at most the 10 s deadline, and then what the
