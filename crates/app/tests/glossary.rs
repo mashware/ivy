@@ -1592,6 +1592,8 @@ const NOT_OURS: &[&str] = &[
     "split_open",
     "split_read",
     "split_close",
+    // The image verb (D120), a name on the same wire.
+    "image_open",
     // **And the read verb, which is a name on the wire and nowhere else.** Its two siblings are
     // functions of the channel's crate —`panel_set` and `panel_patch` both have one, because each
     // has an envelope to read— and this one takes no arguments at all, so there is nothing for a

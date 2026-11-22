@@ -15,7 +15,8 @@ const MARKDOWN_LIMIT: usize = 1024 * 1024;
 const CODE_LIMIT: usize = 1024 * 1024;
 /// How far into a file a NUL byte is looked for before it is called binary.
 const BINARY_SNIFF: usize = 8 * 1024;
-pub(super) const IMAGE_LIMIT: usize = 32 * 1024 * 1024;
+/// The bridge refuses the same size before an agent's open reaches the window (D120).
+pub(super) const IMAGE_LIMIT: usize = panel_control::image::MAX_BYTES as usize;
 pub(super) const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 64 * 1024;

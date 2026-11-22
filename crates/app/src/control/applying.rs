@@ -147,7 +147,7 @@ impl PaneControl {
                     signals.closed(delivery.connection, std::time::Instant::now());
                     self.apply_closed(state, delivery);
                 }
-                // **The three `split_*` verbs are the window's, and a pane has no tree.** They are
+                // **The `split_*` verbs and `image_open` are the window's, and a pane has no tree.** They are
                 // held here until the window's drain takes them, which is where the handles, the
                 // focus and the revocation live — and the window is woken for it, because the drain
                 // of this very pass has already run: without that, a request arriving while the
@@ -160,6 +160,7 @@ impl PaneControl {
                 deferred @ (What::Open { .. }
                 | What::Read { .. }
                 | What::Close { .. }
+                | What::ImageOpen { .. }
                 | What::PlanSet { .. }
                 | What::PlanGet
                 | What::PlanRetire) => {

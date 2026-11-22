@@ -6918,6 +6918,45 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
+    /// **An agent's image goes to the console whose endpoint asked, and to no other** (D120): the
+    /// window's drain answers with the sentence the agent reads, the console that asked holds the
+    /// image, and the one beside it still has none.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        let asking = window.active().panes()[1].name;
+        let beside = window.active().panes()[0].name;
+        attach_a_channel(&mut window, asking);
+        let path = std::env::temp_dir().join("shot.png");
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            asking,
+            7,
+            panel_control::What::ImageOpen { path: path.clone() },
+        );
+        assert!(
+            matches!(&answer, panel_control::Answer::Text(said) if said.starts_with("opened")),
+            "{answer:?}"
+        );
+        let active = window.active;
+        window.tabs[active].focus = asking;
+        assert_eq!(crate::viewer::shown_image(&window), Some((asking, path)));
+        window.tabs[active].focus = beside;
+        assert_eq!(
+            crate::viewer::shown_image(&window),
+            None,
+            "it reached another console"
+        );
+    }
+
+    crate::windows_unix_omission!(
+        an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
     /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
     /// close would pass the refusal tests and close nothing.

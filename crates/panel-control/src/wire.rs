@@ -192,6 +192,12 @@ pub enum Request {
     SplitRead { pane: String, scrollback: bool },
     /// Close a pane this connection opened.
     SplitClose { pane: String },
+    /// Show an image in the drawer of this pane's own console (D120).
+    ///
+    /// **It names no pane**: the endpoint decided which console, so a `pane` sent beside it reaches
+    /// nothing. The path is absolute and local; whether it is a readable PNG or JPEG is the
+    /// window's to find out, by its bytes.
+    ImageOpen { path: std::path::PathBuf },
     /// A tool this build does not serve, carried by its name so the refusal can say which.
     NotServed(String),
 }
@@ -328,6 +334,8 @@ struct Envelope<'a> {
     scrollback: Option<&'a RawValue>,
     #[serde(default, borrow)]
     ops: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    path: Option<&'a RawValue>,
 }
 
 /// Turns one line into a request.
@@ -374,6 +382,7 @@ fn interpret(line: &[u8]) -> Incoming {
         "split_open" => split_open(&envelope),
         "split_read" => split_read(&envelope),
         "split_close" => split_close(&envelope),
+        "image_open" => image_open(&envelope),
         other => Incoming::Request(Request::NotServed(other.to_owned())),
     }
 }
@@ -590,6 +599,25 @@ fn split_close(envelope: &Envelope<'_>) -> Incoming {
     };
 
     Incoming::Request(Request::SplitClose { pane })
+}
+
+/// `image_open`: an absolute path on this machine, and nothing else. No extension is asked for and
+/// no length beyond the line's own bound: the bytes decide the format (D120).
+fn image_open(envelope: &Envelope<'_>) -> Incoming {
+    let Some(path) = envelope.path else {
+        return Incoming::Malformed("an image_open names no \"path\"".to_owned());
+    };
+    let Ok(path) = serde_json::from_str::<String>(path.get()) else {
+        return Incoming::Malformed("an image_open's \"path\" is not text".to_owned());
+    };
+    let path = std::path::PathBuf::from(path);
+    if !path.is_absolute() {
+        return Incoming::Malformed("an image_open's \"path\" is not absolute".to_owned());
+    }
+    if !crate::image::is_local(&path) {
+        return Incoming::Malformed("an image_open's \"path\" is not on this machine".to_owned());
+    }
+    Incoming::Request(Request::ImageOpen { path })
 }
 
 /// What goes back over the channel.
@@ -897,6 +925,78 @@ mod tests {
                 pane: "h".to_owned(),
             })
         );
+    }
+
+    /// An `image_open` line as a producer writes it, with `extra` fields after the path.
+    fn image_open_line(path: &std::path::Path, extra: &str) -> String {
+        let path = serde_json::to_string(&path.to_string_lossy()).unwrap();
+        format!("{{\"tool\":\"image_open\",\"path\":{path}{extra}}}\n")
+    }
+
+    /// An absolute path arrives as it was written, with no extension asked for: the bytes decide
+    /// the format, at the window.
+    #[test]
+    fn an_image_open_carries_its_absolute_path_whatever_its_name() {
+        for name in ["shot.png", "shot", "notes.txt"] {
+            let path = std::env::temp_dir().join(name);
+            assert_eq!(
+                one(&image_open_line(&path, "")),
+                Incoming::Request(Request::ImageOpen { path })
+            );
+        }
+    }
+
+    /// **A `pane` sent beside an `image_open` reaches nothing**: the endpoint chose the console,
+    /// and the request is the same one as without it (D44).
+    #[test]
+    fn an_image_open_carrying_a_pane_field_does_not_carry_it_anywhere() {
+        let path = std::env::temp_dir().join("shot.png");
+        let with = one(&image_open_line(&path, ",\"pane\":\"h-elsewhere\""));
+        assert_eq!(with, one(&image_open_line(&path, "")));
+        assert!(matches!(with, Incoming::Request(Request::ImageOpen { .. })));
+    }
+
+    /// Each refusal says what is wrong with the line, as a malformed one the connection outlives.
+    #[test]
+    fn an_image_open_without_an_absolute_path_is_malformed_and_says_why() {
+        for (line, why) in [
+            (
+                "{\"tool\":\"image_open\"}\n",
+                "an image_open names no \"path\"",
+            ),
+            (
+                "{\"tool\":\"image_open\",\"path\":7}\n",
+                "an image_open's \"path\" is not text",
+            ),
+            (
+                "{\"tool\":\"image_open\",\"path\":\"shot.png\"}\n",
+                "an image_open's \"path\" is not absolute",
+            ),
+            (
+                "{\"tool\":\"image_open\",\"path\":\"\"}\n",
+                "an image_open's \"path\" is not absolute",
+            ),
+        ] {
+            assert_eq!(one(line), Incoming::Malformed(why.to_owned()), "{line}");
+        }
+    }
+
+    /// On Windows an absolute path can name another host or a device; those are refused before
+    /// the window would read them.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_open_on_another_machine_is_malformed() {
+        for remote in [
+            r"\\host\share\a.png",
+            r"\\?\UNC\host\share\a.png",
+            r"\\.\PhysicalDrive0",
+        ] {
+            assert_eq!(
+                one(&image_open_line(std::path::Path::new(remote), "")),
+                Incoming::Malformed("an image_open's \"path\" is not on this machine".to_owned()),
+                "{remote}"
+            );
+        }
     }
 
     /// **`split_open` carries no `env`, and a value sent under that name reaches nothing.** The

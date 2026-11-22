@@ -237,6 +237,8 @@ pub enum What {
     Read { pane: String, scrollback: bool },
     /// Close a pane this connection opened.
     Close { pane: String },
+    /// Show an image in the drawer of the caller's own console (D120); the endpoint decided which.
+    ImageOpen { path: std::path::PathBuf },
     /// The connection is over. Whatever it held is no longer held.
     ///
     /// **It carries no answer anybody waits for**: the thread that sends it is on its way out, and a
@@ -1300,6 +1302,17 @@ fn answer(
             ask_the_window(
                 Wants::Taken,
                 What::Close { pane },
+                connection,
+                origin,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
+        Incoming::Request(Request::ImageOpen { path }) => (
+            ask_the_window(
+                Wants::Text,
+                What::ImageOpen { path },
                 connection,
                 origin,
                 to_the_window,

@@ -357,6 +357,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/src/wire.rs"),
     ),
     (
+        "panel-control/src/image.rs",
+        include_str!("../../panel-control/src/image.rs"),
+    ),
+    (
         "app/src/ai_sessions/mod.rs",
         include_str!("../src/ai_sessions/mod.rs"),
     ),

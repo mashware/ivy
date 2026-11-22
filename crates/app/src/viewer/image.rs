@@ -6146,7 +6146,7 @@ mod tests {
                 typing,
                 &path,
             );
-            assert_eq!(answer, Ok(crate::viewer::SHOWN_TO_THE_PERSON));
+            assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
             assert_eq!(typed(&window, typing), b"a");
             assert_eq!(active(&window), Some(Tool::Image));
             painted(&mut window, &ctx, vec![egui::Event::Text("b".into())]);
@@ -6184,7 +6184,7 @@ mod tests {
         let before = grids(&window);
         for pane in [beside, behind] {
             let (answer, _) = agent_pass(&mut window, &ctx, vec![], pane, &path);
-            assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+            assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
             assert_eq!(active(&window), None, "the drawer opened");
             assert_eq!((window.active, window.active().focus), (0, focused));
         }
@@ -6193,7 +6193,7 @@ mod tests {
         crate::viewer::open_diff_for_pane(&mut window, focused);
         painted(&mut window, &ctx, vec![]);
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], beside, &path);
-        assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
         assert_eq!(
             active(&window),
             Some(Tool::Git),
@@ -6243,7 +6243,7 @@ mod tests {
             let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
             assert_eq!(
                 answer,
-                Ok(crate::viewer::MARKED_FOR_THE_PERSON),
+                Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON),
                 "{surface}"
             );
             assert_eq!(
@@ -6274,7 +6274,10 @@ mod tests {
         marks_mut(&mut window).general = "unsent".into();
         let before = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], marked, &other);
-        assert_eq!(answer, Err(crate::viewer::MARKS_NOT_SENT.to_owned()));
+        assert_eq!(
+            answer,
+            Err(crate::viewer::origin::MARKS_NOT_SENT.to_owned())
+        );
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(same_place(image_rect(&shapes).unwrap(), before));
         assert!(texts(&shapes, area()).iter().any(|t| t.contains("unsent")));
@@ -6299,7 +6302,7 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         let focused = window.active().focus;
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
-        assert_eq!(answer, Ok(crate::viewer::SHOWN_TO_THE_PERSON));
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
         wait_for_text(&mut window, &ctx, "This file is not a PNG or JPEG image");
     }
 
@@ -6393,7 +6396,7 @@ mod tests {
         };
         assert_eq!(marks(&mut window), (vec![], vec![]));
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, &path);
-        assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
         let marked = (vec!["Terminal 1".to_owned()], vec![other]);
         assert_eq!(marks(&mut window), marked);
         // The person moves to that console; the drawer stays closed, then shows Changes.
@@ -6476,7 +6479,7 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         let behind = window.tabs[1].panes()[0].name;
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], behind, &path);
-        assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
         let shapes = painted(&mut window, &ctx, vec![]);
         assert_eq!(
             new_image_marks(&window, &shapes),
@@ -6497,7 +6500,7 @@ mod tests {
         let other = window.tabs[0].panes()[1].name;
         // Refused the moment it is opened, so its refusal is ready for the first frame.
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, Path::new("relative.png"));
-        assert_eq!(answer, Ok(crate::viewer::MARKED_FOR_THE_PERSON));
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
         window.tabs[0].focus = other;
         crate::viewer::open_diff_for_pane(&mut window, other);
         painted(&mut window, &ctx, vec![]);
@@ -6549,7 +6552,7 @@ mod tests {
             .image
             .open(&mut alone.slot, source(), PathBuf::from("relative.png"));
         let ctx = egui::Context::default();
-        let mut frame = |alone: &mut Alone| {
+        let frame = |alone: &mut Alone| {
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(area()),

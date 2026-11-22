@@ -236,6 +236,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "control::tests::an_image_open_waits_for_the_window_and_wakes_it",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "control::tests::finishing_the_report_waits_for_admitted_callbacks_and_closes_admission",
     "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
   },
@@ -1224,6 +1229,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::only_the_primary_button_answers_the_question",
     "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
   },
@@ -1773,6 +1783,11 @@
   {
     "binary": "panel-control/panel_control:lib",
     "name": "client::tests::the_split_verbs_travel_and_their_payloads_come_back",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::an_image_open_travels_with_its_path_and_its_text_comes_back",
     "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
   },
   {
