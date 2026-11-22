@@ -75,6 +75,30 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "panel-control/src/endpoint/windows/negotiation.rs",
+        include_str!("../../panel-control/src/endpoint/windows/negotiation.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/negotiation/tests.rs",
+        include_str!("../../panel-control/src/endpoint/windows/negotiation/tests.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/peer_tests.rs",
+        include_str!("../../panel-control/src/endpoint/windows/peer_tests.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/process.rs",
+        include_str!("../../panel-control/src/endpoint/windows/process.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/rendezvous.rs",
+        include_str!("../../panel-control/src/endpoint/windows/rendezvous.rs"),
+    ),
+    (
+        "panel-control/src/listener/windows_peer_tests.rs",
+        include_str!("../../panel-control/src/listener/windows_peer_tests.rs"),
+    ),
+    (
         "panel-control/src/endpoint/windows.rs",
         include_str!("../../panel-control/src/endpoint/windows.rs"),
     ),

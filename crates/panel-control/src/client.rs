@@ -144,7 +144,12 @@ impl Producer {
     pub fn of_server(dir: &Path, id: &str, expected_pid: u32) -> io::Result<Self> {
         endpoint::private_to_this_user(dir)?;
         Ok(Self {
-            stream: endpoint::connect_authenticated(dir, id, expected_pid)?,
+            stream: endpoint::connect_verified_authenticated(
+                dir,
+                id,
+                expected_pid,
+                std::time::Instant::now() + std::time::Duration::from_secs(2),
+            )?,
         })
     }
 

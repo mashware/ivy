@@ -107,6 +107,8 @@ thread_local! {
 #[derive(Default)]
 #[allow(dead_code)] // Test-only fault injection is absent from production call sites.
 struct TestHooks {
+    #[cfg(test)]
+    inspector: Option<PublicationInspector>,
     panic_acceptor: AtomicBool,
     panic_worker: AtomicBool,
     fail_worker_spawn: AtomicBool,
@@ -483,7 +485,18 @@ impl Channel {
             reader: None,
             session: None,
             publisher: None,
-            inspector: None,
+            inspector: {
+                #[cfg(test)]
+                {
+                    test_hooks
+                        .as_ref()
+                        .and_then(|hooks| hooks.inspector.clone())
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
             connection_workers: Some(Arc::clone(&workers)),
             releases: Some(windows.release_registry()),
             document_snapshot: Some(document),
@@ -723,6 +736,7 @@ fn serve(
         return;
     }
 
+    #[cfg(not(windows))]
     let peer = (services.session.is_some() || services.publisher.is_some())
         .then_some(())
         .map(|_| Peer::capture(&stream).map_err(|_| "verified socket peer unavailable".to_owned()));
@@ -770,7 +784,20 @@ fn serve(
                             panic!("injected worker panic");
                         }
                     }
-                    // Capture and classify before this worker parses any request bytes.
+                    // Upgrade only inside this counted worker; the acceptor stays available.
+                    #[cfg(windows)]
+                    let stream = match stream.negotiate_peer() {
+                        Ok(stream) => stream,
+                        Err(_) => return,
+                    };
+                    #[cfg(windows)]
+                    let peer = (services.session.is_some() || services.publisher.is_some())
+                        .then_some(())
+                        .map(|_| {
+                            Peer::capture(&stream)
+                                .map_err(|_| "verified socket peer unavailable".to_owned())
+                        });
+                    // Capture and classify before interpreting any control operation.
                     let origin =
                         services
                             .inspector
@@ -1621,11 +1648,6 @@ mod tests {
         assert!(matches!(closed.what, What::Closed));
     }
 
-    crate::windows_unix_omission!(
-        diagnostic_peer_is_the_connected_process,
-        "unix-only: requires Unix socket peer credentials"
-    );
-
     #[cfg(unix)]
     #[test]
 
@@ -1636,11 +1658,6 @@ mod tests {
         assert_eq!(peer.pid(), std::process::id());
         assert!(peer.is_alive());
     }
-
-    crate::windows_unix_omission!(
-        inspector_runs_once_and_its_observation_reaches_each_delivery,
-        "unix-only: requires Unix socket peer credentials"
-    );
 
     #[cfg(unix)]
     #[test]
@@ -2645,6 +2662,11 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+#[path = "listener/windows_peer_tests.rs"]
+mod windows_peer_tests;
 
 #[cfg(test)]
 #[cfg(windows)]
