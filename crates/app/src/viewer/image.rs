@@ -83,7 +83,6 @@ struct Links(IsLink);
 
 /// Who named the path an image is opened from: an agent's open is walked for links before the
 /// worker reads it, and a person's own is not (D120).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Opener {
     Agent,
     Person,
@@ -99,11 +98,10 @@ struct Opened {
     id: u64,
     origin: Source,
     path: PathBuf,
-    /// Who named the path, which every decode of it is held to: see [`Opener`].
-    opener: Opener,
-    /// The reader an agent's open is walked with: on Windows it refuses a path through a link, and
-    /// elsewhere it refuses none (D120).
-    links: IsLink,
+    /// The reader every decode of the path is walked with, for an agent's open, and `None` for a
+    /// person's, which is not walked: one field, so the two cannot disagree (see [`Opener`]). On
+    /// Windows the reader refuses a path through a link, and elsewhere it refuses none (D120).
+    walk: Option<IsLink>,
     load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
@@ -144,7 +142,11 @@ impl Viewer {
             self.panning = None;
         }
         self.opened += 1;
-        slot.open(self.opened, origin, path, opener, self.links.0);
+        let walk = match opener {
+            Opener::Agent => Some(self.links.0),
+            Opener::Person => None,
+        };
+        slot.open(self.opened, origin, path, walk);
     }
 
     /// Whether a Send is between its click and its Enter.
@@ -161,8 +163,9 @@ impl Viewer {
 
 impl Slot {
     /// Replaces the image with `path`, opened as `id`. A relative path is one whose console's
-    /// directory is unknown: it is refused and says so.
-    fn open(&mut self, id: u64, origin: Source, path: PathBuf, opener: Opener, links: IsLink) {
+    /// directory is unknown: it is refused and says so. `walk` is what [`Opened`] keeps of who
+    /// opened it.
+    fn open(&mut self, id: u64, origin: Source, path: PathBuf, walk: Option<IsLink>) {
         self.clear();
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
@@ -173,8 +176,7 @@ impl Slot {
             id,
             origin,
             path,
-            opener,
-            links,
+            walk,
             load,
             scale: None,
             offset: egui::Vec2::ZERO,
@@ -326,11 +328,7 @@ impl Slot {
                 Some((busy, _)) => Load::Failed(format!("Still reading {}…", busy.display())),
                 None => {
                     let side = ctx.input(|i| i.max_texture_side);
-                    let links = match document.opener {
-                        Opener::Agent => Some(document.links),
-                        Opener::Person => None,
-                    };
-                    match Job::image(document.path.clone(), side, links, ctx.clone()) {
+                    match Job::image(document.path.clone(), side, document.walk, ctx.clone()) {
                         Ok(job) => Load::Decoding(job),
                         Err(why) => Load::Failed(why),
                     }
@@ -701,13 +699,7 @@ mod tests {
         write_png(&path, 40, 20);
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(
-            1,
-            source(),
-            path.clone(),
-            Opener::Person,
-            Links::default().0,
-        );
+        viewer.open(1, source(), path.clone(), None);
         let started = Instant::now();
         while !viewer.loaded() {
             viewer.poll(&ctx);
@@ -1361,13 +1353,7 @@ mod tests {
     fn a_relative_path_says_why_and_reads_nothing() {
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(
-            1,
-            source(),
-            PathBuf::from("shot.png"),
-            Opener::Person,
-            Links::default().0,
-        );
+        viewer.open(1, source(), PathBuf::from("shot.png"), None);
         viewer.poll(&ctx);
         assert!(!viewer.loaded());
         assert!(matches!(
@@ -4887,13 +4873,7 @@ mod tests {
             label: "bash".into(),
             cwd: None,
         };
-        slot.open(
-            1,
-            source,
-            PathBuf::from("/a.png"),
-            Opener::Person,
-            Links::default().0,
-        );
+        slot.open(1, source, PathBuf::from("/a.png"), None);
         slot.sent();
         assert_eq!(slot.notice.as_deref(), Some("Sent to bash."));
         slot.add("Send or clear the marks.");
