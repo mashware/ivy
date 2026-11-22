@@ -882,3 +882,63 @@ when HOME is absolute. This covers desktop launches whose shell adds that direct
 An executable selected from PATH keeps precedence; unsupported scripts still refuse rather than
 falling through to another installation. The native candidate is canonicalized and all existing
 ancestry, foreground, lifetime and same-invocation checks still apply. No launch PATH is rewritten.
+
+## Windows verified-peer connection upgrade
+
+Windows clients may opt into a verified connection before sending ordinary control operations.
+This is a transport extension; it does not add an agent-facing MCP tool. Raw existing producers
+may omit the upgrade and continue using the ordinary JSON operations with Unknown provenance.
+They do not acquire session or attested-hook authorization. The reasoning is recorded in D117.
+
+The first newline-delimited request on the bootstrap pipe is:
+
+```json
+{"tool":"peer_hello","v":1}
+```
+
+After retaining a candidate process handle, the server creates a fresh user-only, local-only,
+one-shot pipe and replies:
+
+```json
+{"ok":true,"peer":{"v":1,"mode":"reconnect","name":"ivy-peer-0123456789abcdef0123456789abcdef"}}
+```
+
+The name must match `ivy-peer-[0-9a-f]{32}` exactly. A client constructs the local
+`\\.\pipe\` prefix itself and verifies this server against the same independently inherited
+`PANEL_SERVER_PID` used for the bootstrap. It does not open a path or remote host supplied in a
+reply. The server retains the candidate handle continuously, accepts one connector and verifies
+its kernel PID and liveness before replying on that new stream:
+
+```json
+{"ok":true,"peer":{"v":1,"mode":"verified"}}
+```
+
+Only this new stream carries verified control requests. The bootstrap and any bytes queued there
+are discarded; a valid bootstrap request is never replayed under the new stream's authority.
+The stream's clones retain the same process witness.
+
+If a candidate witness cannot be obtained, the server can explicitly retain an unverified stream:
+
+```json
+{"ok":true,"peer":{"v":1,"mode":"unverified"}}
+```
+
+That mode carries no process witness and preserves Unknown provenance. It is not an automatic
+fallback from a failed or malformed handshake, a wrong second connector, timeout or failed server
+check. Such failures close the attempted upgrade. Existing errors use the usual failure envelope:
+
+```json
+{"ok":false,"error":"..."}
+```
+
+An upgrade is allowed only as the first request. Each negotiation frame is at most 256 encoded
+bytes, including its newline. Ordinary legacy requests retain their existing `MAX_REQUEST` bound.
+One counted worker owns at most one rendezvous, which uses `FILE_FLAG_FIRST_PIPE_INSTANCE` and
+never reuses a name or pipe instance.
+
+A verified client uses one absolute two-second connection deadline. Session-helper calls establish
+their total two-second deadline before connecting and carry it through the upgrade and request
+exchange. The server's upgrade deadline starts when the complete first `peer_hello` is recognized;
+silent or partial pre-hello clients retain ordinary legacy idle behavior and remain subject to the
+existing connection cap and channel shutdown cancellation. Negotiation never blocks the acceptor
+or interface frame; every wait observes shutdown and drains pending overlapped completion.
