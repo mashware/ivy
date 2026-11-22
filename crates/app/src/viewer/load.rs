@@ -925,6 +925,23 @@ mod tests {
         }
     }
 
+    /// **An agent's image is walked before it is opened** (D120): on Windows the open through a
+    /// link is what reaches the host. The file here does not exist, so a worker that opened first
+    /// would say «Cannot open …» instead of the link sentence; this platform refuses no link, so
+    /// the reader handed in calls every entry one.
+    #[test]
+    fn an_agents_image_is_walked_before_the_worker_opens_it() {
+        let temp = Temp::new();
+        let missing = temp.0.join("missing.png");
+        assert_eq!(
+            decode_image(&missing, 4096, Some(|_| Ok(true))).err().unwrap(),
+            format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                missing.display()
+            )
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_fifo_named_like_an_image_is_refused_without_blocking() {
