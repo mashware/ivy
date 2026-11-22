@@ -58,9 +58,9 @@ enum Phase {
     /// Clicked; the copy starts on the next frame's input pass.
     Asked(Request),
     Writing(Request, Job<PathBuf>),
-    /// The Enter owed for a line written in the frame named here, to the console named last; it
-    /// is pressed in a later one.
-    Enter(Enter, u64, String),
+    /// The Enter owed for a line written in the frame named here by the Send last; it is pressed
+    /// in a later one.
+    Enter(Enter, u64, Request),
 }
 
 #[derive(Default)]
@@ -112,7 +112,8 @@ impl Sending {
         match &self.phase {
             Phase::Asked(r) | Phase::Writing(r, _) if r.document == document => Button::Sending,
             Phase::Asked(r) | Phase::Writing(r, _) => Button::Waiting(&r.console),
-            Phase::Enter(_, _, console) => Button::Waiting(console),
+            Phase::Enter(_, _, r) if r.document == document => Button::Entering,
+            Phase::Enter(_, _, r) => Button::Waiting(&r.console),
             Phase::Idle => match &self.parked {
                 Some(parked) => Button::Finishing(&parked.request.console),
                 None => Button::Free,
@@ -184,6 +185,9 @@ pub(super) enum Button<'a> {
     /// typed: for the whole write rather than after a delay, because a slow disk is not a stuck
     /// one and no constant tells them apart; the person does.
     Sending,
+    /// This image's Send typed its line and owes the Enter: past Cancel, which takes back only a
+    /// line not typed yet.
+    Entering,
     /// The Send of the console named here is on its way: one runs at a time.
     Waiting(&'a str),
     /// The cancelled Send of the console named here still has its worker writing a copy, which
@@ -372,11 +376,10 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
     }
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
-        Phase::Enter(enter, at, console) if frame > at => {
-            let pane = enter.0;
+        Phase::Enter(enter, at, request) if frame > at => {
             if let Err(refusal) = delivery::press(window, enter) {
                 let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
-                say(window, (pane, &console), said);
+                say(window, (request.pane, &request.console), said);
             }
             Phase::Idle
         }
@@ -562,7 +565,7 @@ fn deliver(
             }
             ctx.request_repaint();
             enter.map_or(Phase::Idle, |enter| {
-                Phase::Enter(enter, ctx.cumulative_frame_nr(), request.console)
+                Phase::Enter(enter, ctx.cumulative_frame_nr(), request)
             })
         }
         Err(why) => {
@@ -645,9 +648,21 @@ mod tests {
         sending.answer(Some(Asked::Cancel(1)), &mut notice);
         assert!(!sending.busy());
         assert_eq!(notice.as_deref(), Some(CANCELLED));
-        // The Enter owed after a line is typed still holds every other image's Send.
-        sending.phase = Phase::Enter(Enter(7), 0, "A".into());
+        // The Enter owed after a line is typed still holds every other image's Send, and its own
+        // image's is past Cancel without waiting for itself.
+        sending.phase = Phase::Enter(
+            Enter(7),
+            0,
+            Request {
+                document: 1,
+                pane: 7,
+                console: "A".into(),
+                path: PathBuf::from("/a/annotated-1.png"),
+                line: "x".into(),
+            },
+        );
         assert_eq!(sending.button(2), Button::Waiting("A"));
+        assert_eq!(sending.button(1), Button::Entering);
     }
 
     /// A console with no name of its own already goes by its number, which is not said twice.

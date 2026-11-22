@@ -208,7 +208,7 @@ impl Fixed {
 fn send_label(console: &str, button: Button) -> String {
     match button {
         Button::Free => format!("Send to {console} and press Enter"),
-        Button::Sending => "Sending…".to_owned(),
+        Button::Sending | Button::Entering => "Sending…".to_owned(),
         Button::Waiting(sending) => format!("Waiting for the Send to {sending}…"),
         Button::Finishing(cancelled) => format!("Still finishing the copy for {cancelled}…"),
     }
@@ -314,6 +314,9 @@ pub(super) struct Panel<'a> {
     /// The opening of the image the notes belong to.
     pub(super) document: u64,
     pub(super) origin: &'a crate::viewer::Source,
+    /// What the Send button stands for, the value its label in `fixed` was laid out from: the
+    /// button answers and offers Cancel from that same value.
+    pub(super) button: Button<'a>,
     pub(super) sending: &'a Sending,
 }
 
@@ -334,6 +337,7 @@ pub(super) fn notes(
         refused,
         document,
         origin,
+        button,
         sending,
     } = panel;
     let inner = layout.column.shrink2(MARGIN);
@@ -387,7 +391,6 @@ pub(super) fn notes(
     // The fields carry ids of their own: a button or a notice that comes and goes ahead of them
     // would otherwise renumber egui's automatic ids and take the keyboard from a note mid-word.
     // Read from the value the label was: a button greyed out says why.
-    let button = sending.button(document);
     let ready = matches!(sending.target, Some(Ok(_))) && button == Button::Free;
     let foot = fixed.send.as_ref().filter(|_| !squeezed);
     let (clicked, cancelled) = foot.map_or((false, false), |label| {

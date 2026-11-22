@@ -368,7 +368,8 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send = something_to_send.then(|| (origin.label.as_str(), sending.button(*id)));
+        let button = sending.button(*id);
+        let send = something_to_send.then(|| (origin.label.as_str(), button));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
@@ -382,6 +383,7 @@ impl Viewer {
             refused,
             document: *id,
             origin,
+            button,
             sending,
         };
         sending.answer(tools::notes(ui, &layout, marks, panel), &mut slot.notice);
@@ -4378,6 +4380,47 @@ mod tests {
         assert_eq!(
             received.wait_for(submitted.len(), Duration::from_secs(5)),
             submitted
+        );
+        let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A console that closes between its typed line and the Enter owed to it has no image left to
+    /// say it under: standard error is told, under its name, that the Enter was not pressed.
+    #[cfg(unix)]
+    #[test]
+    fn a_console_closed_before_its_enter_is_told_on_standard_error() {
+        let received = term_core::received::Received::new("annotated-enter-closed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let name = slot(&window).origin().unwrap().pane;
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes()
+        );
+        send::TOLD.with(|told| told.borrow_mut().clear());
+        window.close_a_pane_called(name, &ctx).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.sending(), "the owed Enter stayed");
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [format!(
+                "Send to Console {}: The line was typed, but Enter was not pressed: The origin \
+                 console has closed.",
+                name + 1
+            )]
         );
         let _ = std::fs::remove_file(&copy);
     }
