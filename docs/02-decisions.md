@@ -11817,7 +11817,10 @@ takes a screenshot from:
   opening another console's empty viewer; over a failed image or none, on standard error, since
   the paste on its way opens the viewer unless its console closes first. When that paste ends,
   the «on its way» is taken back: the viewer says again what it said before — the empty viewer's
-  text, or the notice beside a picture — or what the paste found, or that its console closed.
+  text, or the notice beside a picture, with whatever was said after the «on its way» — and,
+  over marks or after a key, follows it with what the paste found; an answer that opens the viewer
+  anew says only what it found, and a console that closed says so. A notice that stopped being
+  true while covered — Send «still finishing» a copy whose worker has ended — is corrected there too.
 - **Every answer is shown, and takes the keys** — the drawer's document tab, as opening a clicked
   image does — however late it comes (decided with the owner). An answer is normally there within
   milliseconds; late means a stuck clipboard owner, at most the 10 s deadline, and then what the

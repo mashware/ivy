@@ -45,7 +45,8 @@ pub(crate) struct Pasting {
     asked: Option<By>,
     writing: Option<Writing>,
     /// What the viewer said — the empty viewer's text, or the notice beside a picture — before «a
-    /// paste is already on its way» covered it; said again when that paste ends.
+    /// paste is already on its way» covered it. `unbusy` gives it back; an answer that opens the
+    /// viewer anew, or a console that closes over its own unmarked picture, replaces it instead.
     covered: Option<String>,
 }
 
@@ -64,6 +65,12 @@ impl Pasting {
 
     pub(crate) fn pending(&self) -> bool {
         self.key || self.writing.is_some()
+    }
+
+    /// The notice kept under «a paste is already on its way», for whoever corrects a notice that
+    /// stopped being true while it was covered.
+    pub(super) fn covered_mut(&mut self) -> &mut Option<String> {
+        &mut self.covered
     }
 }
 
@@ -177,7 +184,8 @@ pub(crate) fn ask(window: &mut crate::Window, pane: usize, by: By) {
             // on its way opens the viewer unless its console closes first.
             Some(super::Load::Failed(_)) | None => return eprintln!("{BUSY}"),
             // A picture, shown or still loading (painted once decoded).
-            Some(_) if window.image.notice.as_deref() == Some(BUSY) => {}
+            // Already said, perhaps with something joined after it: what it covered stays kept.
+            Some(_) if busy_said(window.image.notice.as_deref()) => {}
             Some(_) => window.image.paste.covered = window.image.notice.replace(BUSY.to_owned()),
         }
         return origin::show_image(window);
@@ -453,7 +461,10 @@ fn tell(window: &mut crate::Window, pane: usize, by: By, said: Said) {
     // Loading: shown with its notice once decoded. Failed: nothing to keep.
     let image = &window.image;
     let kept = image.shown() && empty(image).is_none() && image.message().is_none();
-    if window.image.has_marks() {
+    // Over a picture whose «on its way» is showing, a key's answer follows what that notice
+    // covered and what was said after it, rather than dropping them.
+    let keep_said = by == By::Key && kept && busy_said(image.notice.as_deref());
+    if window.image.has_marks() || keep_said {
         unbusy(&mut window.image);
         let notice = &mut window.image.notice;
         if !notice.as_deref().is_some_and(|n| n.ends_with(&alone)) {
@@ -476,6 +487,11 @@ fn gone(viewer: &mut super::Viewer, pane: usize) {
         return closed(viewer);
     }
     eprintln!("A paste ended for a console that has closed");
+}
+
+/// Whether the notice beside a picture opens with «a paste is already on its way».
+fn busy_said(notice: Option<&str>) -> bool {
+    notice.is_some_and(|n| n.starts_with(BUSY))
 }
 
 /// Takes back «a paste is already on its way» once that paste has ended: the viewer says again

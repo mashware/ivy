@@ -398,28 +398,31 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             let ready = window.image.has_marks()
                 && destination(window, &consoles(window))
                     .is_some_and(|(pane, _)| copy_path(window, pane).is_ok());
-            let notice = &mut window.image.notice;
-            if notice
-                .as_deref()
-                .is_some_and(|n| n.contains(STILL_FINISHING))
-            {
-                let ready = if ready { "; Send is ready" } else { "" };
-                *notice = Some(format!("{CANCELLED} Its copy is gone{ready}."));
-            }
+            let ready = if ready { "; Send is ready" } else { "" };
+            let gone = format!("{CANCELLED} Its copy is gone{ready}.");
+            no_longer_finishing(window, &gone);
             return;
         }
     };
     // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
     eprintln!("{said}");
     // The worker it waited for has ended: a notice saying so is no longer true, and is not kept.
-    let notice = &mut window.image.notice;
-    if notice
-        .as_deref()
-        .is_some_and(|n| n.contains(STILL_FINISHING))
-    {
-        *notice = Some(CANCELLED.into());
-    }
+    no_longer_finishing(window, CANCELLED);
     window.image.send.unshown = Some(said);
+}
+
+/// Replaces a notice that says Send is still finishing a copy, now that it is not — the one shown,
+/// and the one a paste on its way keeps covered to give back later.
+fn no_longer_finishing(window: &mut crate::Window, now: &str) {
+    let image = &mut window.image;
+    for notice in [&mut image.notice, image.paste.covered_mut()] {
+        if notice
+            .as_deref()
+            .is_some_and(|n| n.contains(STILL_FINISHING))
+        {
+            *notice = Some(now.to_owned());
+        }
+    }
 }
 
 /// Puts `said` after the drawer's `notice` rather than in its place: that one may be a refusal or
