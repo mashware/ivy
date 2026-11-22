@@ -11689,6 +11689,9 @@ which protects nothing the opening in the id does not; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.
 
+**Amended by D120 (#199):** the copies field also holds screenshots pasted from the clipboard, and
+they are removed with the console the same way.
+
 ## D114 — The window keeps its own standard error in a log file, and records a panic there itself
 
 **Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
@@ -11982,7 +11985,7 @@ than assume one parser represents every Windows program.
 
 ## D120 — A screenshot on the clipboard is pasted into a console's own folder and its own image
 
-**23 November 2026 — #199.** The system's own screenshot tools already copy to the clipboard —
+**22 November 2026 — #199.** The system's own screenshot tools already copy to the clipboard —
 Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so that is where Ivy
 takes a screenshot from, into the image a console holds since #198 (D72's amendment):
 

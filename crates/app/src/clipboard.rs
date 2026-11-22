@@ -273,7 +273,7 @@ fn pasted(read: Result<arboard::ImageData<'_>, arboard::Error>) -> Pasted {
     }
 }
 
-/// An image read that ran out of time is said once; a text one only on standard error, as before.
+/// An image read that ran out of time is said once; a text one only on standard error.
 fn expired(pending: &Pending) -> Option<Delivered> {
     (pending.wanted == Wanted::Image).then_some(Delivered::Image(pending.pane, Pasted::Expired))
 }
@@ -864,7 +864,8 @@ mod tests {
     }
 
     /// A read already said expired is not answered again when its worker then stops: the paste
-    /// that waited on it has ended, and a second answer would open a viewer nobody asked for.
+    /// that waited on it has ended, and a second answer would focus that console and show its
+    /// Image tab after nobody was waiting.
     #[test]
     fn an_expired_read_is_not_answered_again_when_the_worker_stops() {
         let (mut service, requests, replies) = connected();

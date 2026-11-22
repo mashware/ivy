@@ -266,8 +266,7 @@ fn too_large(limit: u64) -> String {
 }
 
 /// Writes `png` into `folder` under the first `pasted-<n>.png` nothing there takes, a dangling
-/// link included: `create_new` refuses them all, and a name taken between the look and the create
-/// moves on to the next. On Unix readable by its owner only, as Send's copies are (D113).
+/// link included: `create_new` refuses them all, so a name taken by anyone moves on to the next. On Unix readable by its owner only, as Send's copies are (D113).
 fn write_new(folder: &Path, png: &[u8]) -> Result<PathBuf, String> {
     for n in 1.. {
         let path = folder.join(format!("pasted-{n}.png"));

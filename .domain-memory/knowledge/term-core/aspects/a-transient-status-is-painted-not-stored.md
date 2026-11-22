@@ -14,6 +14,7 @@ last_verified: '2026-11-22T21:05:10.008Z'
 file_paths:
   - crates/app/src/viewer/image/paste.rs
   - crates/app/src/viewer/image.rs
+  - crates/app/src/viewer/view.rs
 symbols:
   - shown
   - Pasting
@@ -49,8 +50,8 @@ code than it added (+99 −167); the rebuild over one image per console (#198) k
 stored in a slot other writers share. A sign it is needed: a «covered» or «previous» copy of a
 field appears.
 
-**Test disguise:** assert on painted text (`text_rect`), not on `notice`, which by construction
-never holds the status.
+**Test disguise:** assert on painted text (`texts` over the drawer's rect), not on `notice`, which
+by construction never holds the status.
 
 Evidence: mutations in #199; `a_paste_asked_again_is_painted_only_in_its_consoles_tab_while_on_its_way`.
 
