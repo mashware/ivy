@@ -319,14 +319,15 @@ pub(crate) fn open_for_an_agent(
 }
 
 /// Whether the console `pane` is the focused one of the tab on show, with nothing over the drawer
-/// that would hide it.
+/// that would hide it. The title bar's modals are asked through `chrome::is_modal`, the same rule
+/// that dims the consoles, so its menu counts as well as its dialogs.
 fn in_front(window: &Window, pane: usize, ctx: &eframe::egui::Context) -> bool {
     let tab = window.active();
     tab.focus == pane
         && tab.panes().iter().any(|p| p.name == pane)
         && !window.settings_editor.is_open()
         && !window.pane_view.is_modal()
-        && !window.chrome.guide_blocked(ctx)
+        && !crate::chrome::is_modal(window, ctx)
 }
 
 /// Whether the drawer may be switched to the Image tab: switching takes away what the Board or a

@@ -6210,30 +6210,50 @@ mod tests {
 
     /// In the console the person is working in, an agent's image still moves nothing while
     /// something else holds the screen or the keys: the Board, a maximized drawer, the drawer
-    /// holding the keys, or Files holding them.
+    /// holding the keys, Files holding them, the Settings editor, a console's own menu, the title
+    /// bar's menu or its connection guide.
     #[test]
     fn an_agents_image_never_covers_what_the_person_is_reading_or_typing_into() {
         use crate::sidebar::{Tool, active};
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
         write_png(&path, 64, 32);
-        type Surface = fn(&mut crate::Window, usize);
-        let surfaces: [(&str, Surface); 4] = [
-            ("the Board", |window, _| {
+        type Surface = fn(&mut crate::Window, &egui::Context, usize);
+        let surfaces: [(&str, Surface); 8] = [
+            ("the Board", |window, _, _| {
                 crate::sidebar::select(window, Tool::Board)
             }),
-            ("a maximized drawer", |window, pane| {
+            ("a maximized drawer", |window, _, pane| {
                 crate::viewer::open_diff_for_pane(window, pane);
                 crate::sidebar::toggle_maximize(window);
                 // Not holding the keys, so the maximized drawer alone is what is covered.
                 crate::viewer::blur(window);
             }),
-            ("the drawer holding the keys", |window, pane| {
+            ("the drawer holding the keys", |window, _, pane| {
                 crate::viewer::open_diff_for_pane(window, pane);
                 window.viewer.keyboard = true;
             }),
-            ("Files holding the keys", |window, _| {
+            ("Files holding the keys", |window, _, _| {
                 crate::sidebar::select(window, Tool::Files)
+            }),
+            ("the Settings editor", |window, _, _| {
+                window.settings_editor = crate::settings::editor::Editor::resolved(
+                    crate::settings::Entry::Measuring,
+                    Some("closed"),
+                );
+                window.settings_editor.open_from_chrome();
+            }),
+            ("a console's menu", |window, _, pane| {
+                let tab = window.active().name;
+                window
+                    .pane_view
+                    .open_menu(tab, pane, false, egui::pos2(200.0, 150.0));
+            }),
+            ("the title bar's menu", |window, ctx, _| {
+                crate::chrome::open_for_tests(window, ctx, false)
+            }),
+            ("the connection guide", |window, ctx, _| {
+                crate::chrome::open_for_tests(window, ctx, true)
             }),
         ];
         for (surface, open) in surfaces {
@@ -6241,7 +6261,7 @@ mod tests {
             let ctx = crate::ui::icons::installed_for_tests(1.0);
             painted(&mut window, &ctx, vec![]);
             let focused = window.active().focus;
-            open(&mut window, focused);
+            open(&mut window, &ctx, focused);
             let shown = (
                 active(&window),
                 window.sidebar.maximized,
