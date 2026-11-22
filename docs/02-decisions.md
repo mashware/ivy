@@ -3207,16 +3207,80 @@ it from the first emoji.
 
 ### What is left out, said with its reason
 
-**The color outlines —`COLR`— are not painted.** Doing it requires rasterizing outlines by hand,
-which is the rasterizer of our own that this milestone discarded **on purpose** because it
-invalidates the whole measurement history. On Linux it does not show, because the system's emoji
-fonts are bitmap ones; **on Windows it does**, because `Segoe UI Emoji` is `COLR`. It is declared as
-what **F2.7** is missing, not as something that works here.
+**The color outlines —`COLR`— were left out here, and #176 brought them in** (next section). The
+reason given was that painting them required a rasterizer of our own, which this milestone discarded
+because it invalidates the whole measurement history.
 
 **The skin-tone modifiers do not either.** They are **wide** characters, so the terminal engine
 gives them a cell of their own instead of attaching them to the base emoji's, and the presentation
 rule cannot look at the next cell: it does not have it in its signature. The base comes out in color
 and the modifier comes out on its own.
+
+### Colour outlines, painted by a library (#176)
+
+**`Segoe UI Emoji`, the font Windows asks for emoji, is `COLR`**: layers of outlines with a palette,
+no bitmap. Discovery already reached it — fontique names it as the emoji family on Windows — and the
+bitmap-only rasterizer answered nothing, so on Windows every emoji came out monochrome or blank. Two
+of the colour tests failed there and were listed as known failures (#188); the others skipped
+themselves for want of a colour font, and now run.
+
+**Decision.** A face that has no colour bitmap for the glyph but has a `COLR` record for it is drawn
+with `vello_cpu` and its `text` feature, whose glyph painter (`glifo`) understands `COLR` versions 0
+and 1 — gradients, composites, clip boxes. The image goes into the same atlas, under the same key,
+timed by the same span, and the report says how many of its glyphs came from outlines, so a batch
+cannot publish one path's cost under the other's name. **The bitmap is asked first**: a face that
+has one for the glyph never reaches the outlines, and the emoji fonts Linux and macOS ship —
+`Noto Color Emoji`, `Apple Color Emoji` — are bitmap ones. A machine whose emoji font is drawn in
+outlines does change: its emoji go from monochrome to colour.
+
+**What turning `text` on reaches beyond that branch**: Cargo builds one `vello_cpu` for both crates,
+so epaint's letters are drawn by a `vello_cpu` that carries the glyph painter's cache and its hooks
+too, idle for them. That is why the control `C` is taken again with this build, not borrowed from an
+earlier one.
+
+**It is not the rasterizer this decision refused.** What was refused was code of our own drawing
+outlines, which would have taken over the letters and so every published frame. This draws only
+colour glyphs, on an atlas miss, with a library — the same `vello_cpu` epaint already rasterizes its
+letters with, unhinted, which a colour glyph never is. Not the same *path*: epaint builds `vello_cpu` without `text`, so turning it on adds
+`glifo` to the build. Saying «epaint already does this» would be false.
+
+**The rules it draws by.** A glyph with no `COLR` record is not drawn here even though the library
+would draw its outline — that would be a white silhouette winning over the next face, the defect
+**D24** fixed. A graph the library cannot walk is not drawn either: it drops the error and hands back
+a blank, which remembered as a success would stand where the emoji is for the whole session. The
+glyph is placed on its advance, never on its ink, so every emoji of a face shares one scale and one
+baseline. It is drawn directly at the size it will occupy instead of drawn large and shrunk.
+Vertically, the box runs between the face's line (ascent to descent) and its `OS/2` Windows extent,
+whichever reaches further, because a face promises to keep its ink inside that extent. **The line
+alone cut `Segoe UI Emoji`.** Its line is flatter than its emoji (its advance is 1.43 times its
+line), so Windows CI drew 😀 touching the top or the bottom of its box. In `Noto Color Emoji`'s
+`COLR` form the line and the extent are both 950 up and 250 down, so its box is the same either
+way. The figures below were measured before this change and still hold for that reason. A layer drawn «in the text colour» is drawn white: the
+atlas is not keyed by colour, and the Windows suite checks four of `Segoe UI Emoji`'s emoji — a
+face, a hand, a cloud and a keycap — for a layer drawn that way.
+
+**Discarded.** Walking the paint graph with `skrifa` onto `tiny-skia`: our own painter, and
+`tiny-skia` has no sweep gradient, which `COLR` version 1 needs. DirectWrite's
+`TranslateColorGlyphRun`: Windows-only code for a problem a cross-platform library solves (**D1**),
+and a `COLR` font on Linux or macOS would still be blank. Shipping a bitmap emoji font for Windows:
+about ten megabytes, another emoji set than the system's, and every `COLR` face still blank.
+
+**Measured** with batch `colr`, which points the machine's emoji family at a pinned
+`Noto Color Emoji` in its `COLR` version 1 form; its control is `C`. The figures are that font's —
+heavy in gradients — not `Segoe UI Emoji`'s, which no script here can run. Both measured on
+21 November 2026 on the same machine, one tab of two consoles, 43×38 each.
+
+- **Drawing the outlines is paid once, and it is a millisecond.** In both `colr` runs one frame drew
+  **14 glyphs, all 14 from colour outlines**, in **1.273 ms and 1.282 ms**: about 91 µs a glyph at the
+  cell's size. Bitmap emoji are not comparable from these runs, because batch `Q` was not run with them.
+- **A screen with no emoji pays nothing measurable.** Batch `C` was run five times on this branch and
+  five times on its base, alternating. The rest of the frame came out at **230–404 µs** here and
+  **186–429 µs** on the base. Enqueueing the left console's paint came out at **212–336 µs** here and
+  **189–338 µs** on the base. The ranges overlap, so the honest reading is no measurable change.
+  **The medians are not equal, though**: 275 µs here against 215 µs on the base for the rest of
+  the frame. No code that runs without an emoji was changed. The only candidate is the build itself,
+  because the `text` feature is now compiled into the `vello_cpu` that epaint uses for its letters.
+  That candidate was not isolated. A later batch that finds the same gap should start there.
 
 ### The status panel, by another route to the same glyphs (#178)
 
@@ -6261,10 +6325,18 @@ publishes for input.
   dependency; a skeptic refuted it by reading that the bridge *moves* the receiver into its own
   thread, which parks in a receive and cannot let go until the reader's sender closes; and a second
   reviewer refuted the refutation by finding **the bridge's other exit**. It breaks out of its
-  pick-up loop when its own stop flag is up — the flag its destructor sets — and that path is
-  reachable **only while the queue is at its ceiling**, which is precisely the jam that also parks
-  the reader inside a delivery. A test in that module already demonstrates the receiver being
-  dropped with the console alive.
+  pick-up loop when its own stop flag is up — the flag its destructor sets. At the time this was
+  recorded that path was reachable **only while the queue was at its ceiling**, precisely the jam
+  that also parks the reader inside a delivery. A test in that module demonstrated the receiver
+  being dropped with the console alive.
+
+  **Amended by native Windows testing in November 2026 (#187).** A dropped bridge now checks that
+  same flag before enqueuing every chunk, not only while waiting for capacity. Otherwise it keeps
+  the receiver until a full megabyte accumulates: a streaming Unix writer hides this, while
+  ConPTY renders changes in its buffer and need not deliver the child's original byte volume.
+  The regression keeps the queue below its ceiling, drops the bridge and supplies one more byte;
+  the thread must release its receiver and captured wake callback. It still needs that next chunk
+  to leave a blocking channel receive; no polling thread or new silence guarantee was added.
 
   So: a pane declares its console **before** the bridge, and Rust drops fields in declaration order,
   which is the only reason an ordinary close raises the flag first. **Reverse those two lines and
@@ -6280,6 +6352,21 @@ publishes for input.
   pane closed mid-dump is in.
 
 ---
+
+### Windows test witnesses — November 2026
+
+A raw consumer of a Windows console's output must answer the initial cursor-position request
+before expecting the child to write. The test consumer uses the same incremental `Screen` reply
+path as the application, with one parser retained across reads. A nonempty screen proves no child
+execution: ConPTY can draw before the program starts. A listener-loss witness therefore establishes
+child-produced output before disconnecting its receiver, leaves the child producing output, and
+requires `NobodyListening` exactly. Waiting longer, killing the child or accepting any abnormal
+ending would test a different event. D111's drain can continue after that ending is recorded.
+
+The error kind belongs to the platform too: raw error 5 is not `Uncategorized` on Windows. The
+synthetic failure witness must preserve both the original raw number and its platform's kind;
+a Unix mapping is not a portable oracle.
+
 
 ## D39 — A notice takes at most half its console, and it may not be drawn at all rather than drawn unreadable
 
@@ -11429,7 +11516,12 @@ image. Undo (its button, or Ctrl+Z — Cmd+Z on macOS — with no other modifier
 holds the keys and no text field has the keyboard), a delete per marker and Clear take them back;
 deleting a marker renumbers the ones after it with their notes. A drag shorter than four screen
 points leaves nothing: an image pixel means nothing on a 4 000-pixel screenshot fitted to 500
-points. **«Send to <console> and press Enter»** then:
+points. A marker's note field is named by its image's opening and a serial the marker gets when
+placed, never given again on that image — not after an undo or a Clear — because egui keeps a
+field's focus and undo history by its id: named by its place, deleting marker 1 handed marker 2
+the first one's history, and a Ctrl+Z there brought the deleted note back (#197). Another image
+starts its serials again, since the opening already tells its fields apart.
+**«Send to <console> and press Enter»** then:
 
 - **writes a copy into that console's `PANEL_DIR`**, the original's width × height with the marks
   drawn antialiased by tiny-skia and the markers' numbers from the bundled Geist outlines, named
@@ -11437,19 +11529,25 @@ points. **«Send to <console> and press Enter»** then:
   included. It is created with `create_new` on a worker, and on Unix with mode 0600 (elsewhere the
   platform's default permissions); the original file is never written.
 - **types one line into that console**: `Annotated screenshot: <copy> · 1: <note> · 2: <note> ·
-  Note: <general>`, empty parts left out, every control character turned into a space. That text
-  is painted under the image and its notes before the click, from the same function that composes
-  what is sent — inside the paste markers when the console asks for them — together with «It is
-  added to whatever is already typed at that console's prompt, and Enter runs it.» The paste is
-  composed for the paste mode the console has when it is sent, after the copy is closed. The notes
-  sit in a fixed column beside the image, so the image keeps its height however many markers there
-  are, and go under it only where the drawer is too narrow for both; the line takes a band of its
-  own under both, the full width, because a copy's path wraps into many lines in a column.
+  Note: <general>`, empty parts left out, every control character turned into a space. That text is
+  painted under the image and its notes before the click, from the same function that composes what
+  is sent — inside the paste markers when the console asks for them — together with «It is added to
+  whatever is already typed at that console's prompt, and Enter runs it.» The paste is composed for
+  the paste mode the console has when it is sent, after the copy is closed. The notes sit in a fixed
+  column beside the image, so the image keeps its height however many markers there are, and go
+  under it only where the drawer is too narrow for both; the line takes a band of its own under
+  both, the full width, because a copy's path wraps into many lines in a column. Neither paints
+  outside the drawer's body: on a drawer too short for the toolbar, a wrapped notice and the button,
+  the image gives up its height first, then the notice is cut to one line, shown whole on hover,
+  above a button that keeps its full height; where not even that line fits above the button, the
+  line takes the column's head and the button is cut under it — not laid out at all where less than
+  12 points of it would show, a strip nobody can read or aim at, the notice then adding «Enlarge the
+  drawer to send» on hover — and never laid over the toolbar: a refusal clipped away says nothing at
+  all, while a taller drawer gives the button back (#197).
 - **presses Enter in a write of its own, on a later frame.** People driving Claude Code from tmux
-  report that text and Enter sent together are read as part of the paste; a
-  separate write a frame later is what a person's Enter is, for an agent and a shell alike. A
-  frame egui runs twice still keeps the Enter for the next frame. The Git review's insertion keeps
-  writing no Enter.
+  report that text and Enter sent together are read as part of the paste; a separate write a frame
+  later is what a person's Enter is, for an agent and a shell alike. A frame egui runs twice still
+  keeps the Enter for the next frame. The Git review's insertion keeps writing no Enter.
 
 **Only the copy's path goes in the line, never the path the program printed.** The copy's name is
 the app's own (`[a-z0-9-]` and `.png` in a directory the app created); the original's is whatever a
@@ -11462,10 +11560,21 @@ before choosing to send, the D42 precedent.
 window's input pass, before the copy is started — the image replaced, the console gone, no
 `PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
 keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
-or an earlier one freed) — and a refused Send writes no file.
-**From the click to the Enter the marks and notes are frozen**: the copy is drawn from them a frame
-after the click, and a delivered Send clears them, so an edit made meanwhile would be wiped unsent;
-a Ctrl+Z in the very pass of the click is refused too, and so is a second Send. **While the copy is
+or an earlier one freed) — and a refused Send writes no file. **From the click to the Enter the
+marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
+Send clears them, so an edit made meanwhile would be wiped unsent; a Ctrl+Z in the very pass of the
+click is refused too, and so is a second Send. **Until the line is typed, a Cancel beside «Sending…»
+takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
+already writing is parked — a write cannot be interrupted — and polled from the window's input pass
+until it ends, when its copy is removed, and with it the folder of a console that closed meanwhile.
+While a worker is parked, Send is greyed out and reads «Still finishing the previous copy…» — on the
+button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
+before any other check, so two workers never race for one name; the decoder's abandoned read is the
+same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
+goes to standard error as well, and waits for the next drawer that lays the notes out, because the
+image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
+and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that
@@ -11484,8 +11593,8 @@ and leaves both. A file the console's program left there is not touched and keep
 copy written for a console that closed before it could be delivered is removed with the directory
 it left, and so is that directory when the write failed; `PanelDir` had told standard error the
 directory remains, so its removal is told there too. `tests/shape.rs` pins the field order. A
-worker that never returns keeps the drawer locked: accepted for now, because `PANEL_DIR` lives
-under `$XDG_RUNTIME_DIR`, a tmpfs, where one exists, and recorded as a follow-up.
+worker that never returns no longer locks the drawer: Cancel parks it, and only a new Send waits
+for it.
 
 Discarded: pins with normalised coordinates and no copy, because a model reads a circle drawn on
 the pixels reliably and «pin 2 at 0.43, 0.71» poorly; a hand-written line rasteriser and digit
@@ -11498,7 +11607,12 @@ later Send to that console; renaming the copy when a name is taken after the lin
 would send a line different from the one shown; teaching
 `PanelDir::remove` the app's file names, which puts app knowledge into the contract crate (the
 store's card «the contract removes what the contract puts there» argues for it, and is set aside
-here because the copies are the app's, not the contract's); escaping the notes for a shell; and
+here because the copies are the app's, not the contract's); escaping the notes for a shell;
+a deadline after which a stuck write is given up, and a Cancel offered only after some seconds,
+because a slow disk is not a stuck one and no constant tells them apart — the person does;
+re-keying or clearing egui's field state when a marker is deleted, which the serial makes needless
+and which would not cover an undo or a Clear; carrying the serial on from one image to the next,
+which protects nothing the opening in the id does not; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.
 

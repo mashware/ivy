@@ -7,7 +7,7 @@ use crate::ui::icons::{self, Icon};
 use eframe::egui;
 use std::sync::Arc;
 
-const TOOLBAR: f32 = 36.0;
+pub(super) const TOOLBAR: f32 = 36.0;
 const ROW: f32 = 28.0;
 /// The side of an icon button: the toolbar's tools, Undo and a note's delete.
 const ICON: f32 = 22.0;
@@ -27,6 +27,10 @@ const DISC: f32 = marks::DISC_FLOOR;
 const MARGIN: egui::Vec2 = egui::vec2(8.0, 6.0);
 /// The space under the notice, before the notes.
 const NOTICE_GAP: f32 = 4.0;
+/// The least of the Send button a drawer cut under the notice may show; less is not laid out.
+pub(super) const SLIVER: f32 = 12.0;
+/// What the notice adds on hover when the drawer is too short to show the Send button.
+pub(super) const ENLARGE: &str = "Enlarge the drawer to send";
 
 /// Where each part of the drawer's body goes while an image is marked.
 pub(super) struct Layout {
@@ -63,7 +67,8 @@ fn side_by_side(body: egui::Rect) -> bool {
 /// `rows` need, up to half of what is left, scrolling past that. Either way the column keeps
 /// `kept`, the height of what it shows outside its scrolling list (`Fixed::height`), before the
 /// line Send types and the image get theirs: a refusal clipped away, or a button reaching into the
-/// image where a press starts a stroke, would cost more than a shorter image.
+/// image where a press starts a stroke, would cost more than a shorter image. The column never
+/// grows past the body, so on a drawer too short even for `kept`, `Fixed` gives first (#197).
 pub(super) fn split(body: egui::Rect, rows: usize, kept: f32, something_to_send: bool) -> Layout {
     let top = (body.top() + TOOLBAR).min(body.bottom());
     let kept = kept + 2.0 * MARGIN.y;
@@ -115,7 +120,11 @@ pub(super) fn rows(marks: &Marks) -> usize {
 
 /// What the column keeps whole, outside the list that scrolls: the notice at its head and the
 /// Send button at its foot. Laid out before the drawer is split and painted as laid out, so the
-/// room `split` keeps for them is the room they take, however many lines they wrap into.
+/// room `split` keeps for them is the room they take. The notice wraps whole while the body under
+/// the toolbar, less the column's margins, holds it above the button; shorter, it is cut to one
+/// line with the whole of it on hover. Where not even that line fits above the button, the line
+/// comes first and the button gives up its top, or all of it where less than `SLIVER` would show:
+/// a refusal nobody can read was the defect, as was a button painted up over the toolbar (#197).
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
     send: Option<Arc<egui::Galley>>,
@@ -124,15 +133,15 @@ pub(super) struct Fixed {
 }
 
 impl Fixed {
-    /// `send` is the console Send names and whether a Send is on its way, once there is
-    /// something to send.
+    /// `send` is the console Send names, whether a Send is on its way and whether a cancelled
+    /// one's worker is still writing, once there is something to send.
     pub(super) fn new(
         ctx: &egui::Context,
         style: &egui::Style,
         body: egui::Rect,
         notice: Option<&str>,
         refused: egui::Color32,
-        send: Option<(&str, bool)>,
+        send: Option<(&str, bool, bool)>,
     ) -> Self {
         let column = if side_by_side(body) {
             COLUMN
@@ -141,28 +150,31 @@ impl Fixed {
         };
         let width = (column - 2.0 * MARGIN.x).max(0.0);
         let padding = style.spacing.button_padding;
-        let lay = |text: egui::WidgetText, width: f32, font: egui::FontSelection| {
-            let wrap = egui::text::TextWrapping::wrap_at_width(width.max(1.0));
+        let lay = |text: egui::WidgetText, wrap: egui::text::TextWrapping, font| {
             text.into_galley_impl(ctx, style, wrap, font, egui::Align::Min)
         };
-        let notice = notice.map(|notice| {
-            let text = egui::RichText::new(notice).color(refused);
-            lay(text.into(), width, egui::FontSelection::Default)
-        });
-        let send = send.map(|(console, busy)| {
+        let wrapped = |width: f32| egui::text::TextWrapping::wrap_at_width(width.max(1.0));
+        let said =
+            |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
+        let send = send.map(|(console, busy, parked)| {
             let font = egui::TextStyle::Button.into();
-            lay(
-                send_label(console, busy).into(),
-                width - 2.0 * padding.x,
-                font,
-            )
+            let label = send_label(console, busy, parked).into();
+            lay(label, wrapped(width - 2.0 * padding.x), font)
         });
-        Self {
-            notice,
+        let mut fixed = Self {
+            notice: notice.map(|n| lay(said(n), wrapped(width), egui::FontSelection::Default)),
             send,
             padding,
             spacing: style.spacing.item_spacing.y,
+        };
+        let room = body.height() - TOOLBAR - 2.0 * MARGIN.y;
+        if let Some(notice) = notice
+            && fixed.height() > room
+        {
+            let line = egui::text::TextWrapping::truncate_at_width(width.max(1.0));
+            fixed.notice = Some(lay(said(notice), line, egui::FontSelection::Default));
         }
+        fixed
     }
 
     /// The height the notice and the button take together, with the space each leaves after it.
@@ -177,17 +189,26 @@ impl Fixed {
         notice + send
     }
 
+    /// Whether the notice and the button together are taller than `room`, the column's height
+    /// inside its margins: then the notice's line is painted first, at the column's head.
+    fn notice_first(&self, room: f32) -> bool {
+        self.notice.is_some() && self.height() > room
+    }
+
     /// The button's text with its padding and its one-point border on both sides.
     fn button_height(&self, label: &egui::Galley) -> f32 {
         (label.size().y + 2.0 * (self.padding.y + 1.0)).max(ROW + 4.0)
     }
 }
 
-/// What the Send button says: the console it types into, or that a Send is on its way, which
-/// is why the notes cannot be changed until it is done.
-fn send_label(console: &str, busy: bool) -> String {
+/// What the Send button says: the console it types into, that a Send is on its way, which is
+/// why the notes cannot be changed until it is done, or, while it is greyed out for a cancelled
+/// Send's worker, why: on the button, because a notice can be replaced by any other.
+fn send_label(console: &str, busy: bool, parked: bool) -> String {
     if busy {
         "Sending…".to_owned()
+    } else if parked {
+        "Still finishing the previous copy…".to_owned()
     } else {
         format!("Send to {console} and press Enter")
     }
@@ -276,6 +297,13 @@ pub(super) fn toolbar(
     }
 }
 
+/// What a click in the column asked of Send.
+pub(super) enum Asked {
+    Send(Request),
+    /// Take back the Send whose line is not typed yet.
+    Cancel,
+}
+
 /// What the notes show besides the marks.
 pub(super) struct Panel<'a> {
     /// The notice and the button, as laid out before the split.
@@ -292,13 +320,14 @@ pub(super) struct Panel<'a> {
 /// The column: a notice when there is one, a note per marker after its disc with a button that
 /// deletes it, the general note, and at its foot the button that sends, which names the console.
 /// Then, under image and column, the line it types. Every field is a single line: what is written
-/// here goes into one line sent to a console. Answers what a click on Send asked for.
+/// here goes into one line sent to a console. Answers what a click on Send, or on the Cancel
+/// beside it while a Send is on its way, asked for.
 pub(super) fn notes(
     ui: &mut egui::Ui,
     layout: &Layout,
     marks: &mut Marks,
     panel: Panel,
-) -> Option<Request> {
+) -> Option<Asked> {
     let Panel {
         fixed,
         roles,
@@ -307,30 +336,92 @@ pub(super) fn notes(
         origin,
         sending,
     } = panel;
-    let mut ui = ui.new_child(
+    let inner = layout.column.shrink2(MARGIN);
+    let mut column = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(layout.column.shrink2(MARGIN))
+            .max_rect(inner)
             .layout(egui::Layout::bottom_up(egui::Align::Min)),
     );
-    // A Send on its way takes the notes as they were at its click.
-    if sending.busy() {
-        ui.disable();
+    // On a drawer too short for the button, its top is cut rather than laid over the toolbar.
+    column.set_clip_rect(layout.column.intersect(column.clip_rect()));
+    let first = fixed
+        .notice
+        .as_ref()
+        .filter(|_| fixed.notice_first(inner.height()));
+    // What is left of the button under the notice's line is too thin to read or aim at: it is not
+    // laid out, and the notice says why there is no Send.
+    let squeezed = first.is_some_and(|notice| {
+        fixed.send.is_some() && inner.height() - notice.size().y - NOTICE_GAP < SLIVER
+    });
+    if let Some(notice) = first {
+        // Too short for the line above the button: the line takes the column's head, and the
+        // button is cut under it.
+        let band = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), notice.size().y));
+        let mut head = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("image-notice-first")
+                .max_rect(band),
+        );
+        head.set_clip_rect(band.intersect(column.clip_rect()));
+        let label = egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(!squeezed);
+        let said = head.add(label);
+        if squeezed {
+            said.on_hover_ui(|ui| {
+                if notice.elided {
+                    // The label's own tooltip, as egui builds it: the text without its cut.
+                    ui.label(egui::text::LayoutJob {
+                        sections: notice.job.sections.clone(),
+                        text: notice.job.text.clone(),
+                        ..Default::default()
+                    });
+                }
+                ui.label(ENLARGE);
+            });
+        }
+        let mut below = column.clip_rect();
+        below.min.y = below.min.y.max(band.bottom() + NOTICE_GAP);
+        column.set_clip_rect(below);
     }
     // The button is laid out first so it keeps the column's foot however many notes there are;
     // what it asks for is composed after the notes, from what they hold at the end of this pass.
     // The fields carry ids of their own: a button or a notice that comes and goes ahead of them
     // would otherwise renumber egui's automatic ids and take the keyboard from a note mid-word.
-    let ready = matches!(sending.target, Some(Ok(_))) && !sending.busy();
-    let clicked = fixed.send.as_ref().is_some_and(|label| {
+    // Not while a cancelled Send's worker may yet create the copy this one would name.
+    let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
+    let foot = fixed.send.as_ref().filter(|_| !squeezed);
+    let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);
-        send_button(&mut ui, ready, Arc::clone(label), height, &roles)
+        let label = Arc::clone(label);
+        if !sending.cancellable() {
+            return (
+                send_button(&mut column, ready, label, height, &roles),
+                false,
+            );
+        }
+        let size = egui::vec2(column.available_width(), height);
+        let row = egui::Layout::right_to_left(egui::Align::Center);
+        let cancel = egui::Button::new("Cancel").min_size(egui::vec2(0.0, height));
+        let inner = column.allocate_ui_with_layout(size, row, |ui| {
+            let cancelled = ui.push_id("image-send-cancel", |ui| ui.add(cancel)).inner;
+            send_button(ui, false, label, height, &roles);
+            cancelled.clicked()
+        });
+        (false, inner.inner)
     });
-    let rest = ui.available_size();
-    ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+    let rest = column.available_size();
+    column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+        // Nothing here is painted over the button under it.
+        ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
         // Outside the list that scrolls: a refusal is read without scrolling up to it.
-        if let Some(notice) = &fixed.notice {
-            ui.add(egui::Label::new(Arc::clone(notice)));
+        if let Some(notice) = fixed.notice.as_ref().filter(|_| first.is_none()) {
+            // A notice cut to one line is elided, and egui's label then shows it whole on hover.
+            ui.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
             ui.add_space(NOTICE_GAP);
+        }
+        // A Send on its way takes the notes as they were at its click; only its Cancel answers.
+        // After the notice: a disabled label shows no tooltip, and the cut one needs its own.
+        if sending.busy() {
+            ui.disable();
         }
         egui::ScrollArea::vertical()
             .id_salt("image-notes")
@@ -338,7 +429,7 @@ pub(super) fn notes(
             .show(ui, |ui| list(ui, marks, document, &roles));
     });
     if marks.is_empty() {
-        return None;
+        return cancelled.then_some(Asked::Cancel);
     }
     let line = match &sending.target {
         Some(Ok(path)) => Ok((compose(path, marks), path)),
@@ -346,15 +437,18 @@ pub(super) fn notes(
         None => Err("Nothing can be sent from here.".to_owned()),
     };
     if let Some(rect) = layout.footer {
-        footer(&mut ui, rect, &line, refused, &roles);
+        footer(ui, rect, &line, sending.busy(), (refused, &roles));
+    }
+    if cancelled {
+        return Some(Asked::Cancel);
     }
     let (line, path) = line.ok().filter(|_| clicked)?;
-    Some(Request {
+    Some(Asked::Send(Request {
         document,
         pane: origin.pane,
         path: path.clone(),
         line,
-    })
+    }))
 }
 
 /// The primary action: filled with the accent, the column's width, its `label` laid out wrapped
@@ -392,7 +486,7 @@ fn send_button(
 fn list(ui: &mut egui::Ui, marks: &mut Marks, document: u64, roles: &Roles) {
     let numbered: Vec<_> = marks.numbered().collect();
     let mut deleted = None;
-    for (number, index) in numbered {
+    for (number, index, serial) in numbered {
         ui.horizontal(|ui| {
             let (disc, _) =
                 ui.allocate_exact_size(egui::vec2(2.0 * DISC + 2.0, ICON), egui::Sense::hover());
@@ -402,7 +496,7 @@ fn list(ui: &mut egui::Ui, marks: &mut Marks, document: u64, roles: &Roles) {
                 ui.add_sized(
                     [field.max(40.0), ICON],
                     egui::TextEdit::singleline(note)
-                        .id(egui::Id::new(("image-note", document, index)))
+                        .id(egui::Id::new(("image-note", document, serial)))
                         .hint_text("What this marker shows"),
                 );
             }
@@ -425,19 +519,26 @@ fn list(ui: &mut egui::Ui, marks: &mut Marks, document: u64, roles: &Roles) {
     );
 }
 
-/// Under image and column, the line Send types, muted and wrapped, or why nothing can be sent.
+/// Under image and column, the line Send types, muted and wrapped, or why nothing can be sent;
+/// greyed out with the notes while a Send is `busy`.
 fn footer(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     line: &Result<(String, &std::path::PathBuf), String>,
-    refused: egui::Color32,
-    roles: &Roles,
+    busy: bool,
+    (refused, roles): (egui::Color32, &Roles),
 ) {
     let mut ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(egui::vec2(8.0, 4.0)))
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    if busy {
+        ui.disable();
+    }
+    // A scroll area is never laid out shorter than its own minimum, which a short drawer's band
+    // is: without this clip its text ran past the drawer's bottom.
+    ui.set_clip_rect(rect.intersect(ui.clip_rect()));
     egui::ScrollArea::vertical()
         .id_salt("image-send-line")
         .auto_shrink(false)
@@ -519,6 +620,22 @@ mod tests {
         assert_eq!(narrow.column.height(), 2.0 * ROW + 2.0 * MARGIN.y);
         assert_eq!(narrow.view.bottom(), narrow.column.top());
         assert_eq!(narrow.view.top(), narrow.bar.bottom());
+    }
+
+    /// Under the image, what the column keeps outside its list comes on top of its rows and its
+    /// margins while all of it stays under half of what is left.
+    #[test]
+    fn under_the_image_the_column_takes_what_it_keeps_and_its_rows() {
+        let kept = 40.0;
+        let narrow = split(body(COLUMN + NARROWEST - 1.0), 2, kept, true);
+        let rest = narrow.footer.unwrap().top() - narrow.bar.bottom();
+        let wanted = kept + 2.0 * MARGIN.y + 2.0 * ROW;
+        assert!(
+            wanted < rest * 0.5,
+            "{wanted} is not under the cap of {rest}"
+        );
+        assert_eq!(narrow.column.height(), wanted);
+        assert_eq!(narrow.view.bottom(), narrow.column.top());
     }
 
     /// What the column keeps outside its list is kept whole before the image and the line Send

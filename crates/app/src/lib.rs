@@ -1599,11 +1599,7 @@ impl eframe::App for Window {
             // own.
             if pane_outcome.color.rasterized + pane_outcome.color.failed > 0 {
                 self.timed_separately += pane_outcome.color.spent;
-                self.color.record(
-                    pane_outcome.color.spent,
-                    pane_outcome.color.rasterized,
-                    pane_outcome.color.failed,
-                );
+                self.color.record(&pane_outcome.color);
             }
             // **Noting and subtracting are the same decision, so they are taken together** — the
             // rule the tab bar's own accumulation states: without subtracting, the strip is
@@ -3568,6 +3564,8 @@ mod tests {
         "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
     );
 
+    const LISTENER_CHILD_READY: &str = "ivy-child-ready";
+
     /// Makes that console's reading end in a way that is **not** an ordinary ending, and waits for
     /// the reason to be recorded.
     ///
@@ -3577,6 +3575,24 @@ mod tests {
     /// the reading with no listener while the program inside is alive and writing, which is exactly
     /// what the sentence on the glass claims.
     fn make_it_go_quiet(pane: &mut Pane) {
+        // ConPTY can write its cursor query before the child runs. Keep the real bridge and
+        // Screen alive so Pane::pump answers that query, including one split across reads.
+        // Every writer used here computes this marker rather than echoing its full spelling;
+        // seeing it proves child execution, not merely host output or command echo.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !pane.screen.to_text().contains(LISTENER_CHILD_READY) {
+            assert!(
+                Instant::now() < deadline,
+                "the child never produced its readiness marker; screen: {:?}",
+                pane.screen.to_text()
+            );
+            pane.pump(Default::default());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(pane.pty.ending(), None, "the writer must still be alive");
+
+        // The child keeps producing after disconnection. Only the ending stamp is awaited:
+        // Windows may still be draining the live child's output after recording delivery loss.
         let (orphan, nowhere) = std::sync::mpsc::channel();
         pane.pty_output = PtyOutput::new(nowhere, || {});
         drop(orphan);
@@ -3588,10 +3604,10 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_ne!(
+        assert_eq!(
             pane.pty.ending(),
-            Some(term_core::Ending::EndedWell),
-            "this console ended well, so there would be nothing to say about it"
+            Some(term_core::Ending::NobodyListening),
+            "the live child's delivery must fail because its listener was removed"
         );
     }
 
@@ -3743,7 +3759,13 @@ mod tests {
         // covers nothing leaves the shape queued and invisible.
         let text = shapes
             .iter()
-            .find(|clipped| matches!(clipped.shape, egui::Shape::Text(_)))
+            .find(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => text
+                    .galley
+                    .text()
+                    .starts_with(painter::notices::STOPPED_RECEIVING),
+                _ => false,
+            })
             .expect("the sentence is drawn");
         assert!(
             text.clip_rect.max.y <= box_of_it.max.y + 1.0
@@ -3812,7 +3834,7 @@ mod tests {
             // in `tests/scripts.rs` reads a plain double-quoted literal; a continuation left this
             // command outside every rule it enforces, and the guard that says so had been red on
             // the main branch before anybody read it.
-            "stty -echo -icanon && printf '\\033[?1000h\\033[?1002h\\033[?1006h' && echo ready && yes",
+            "stty -echo -icanon && printf '\\033[?1000h\\033[?1002h\\033[?1006h' && echo ready && yes \"$(printf '%s%s' ivy-child -ready)\"",
             "sleep 30",
         );
         // **The mode itself is what is waited for, not a word on screen**: the program floods, so
@@ -4287,7 +4309,7 @@ mod tests {
         // its listener is gone (its own doc comment: "while the program inside is alive and
         // writing"). `sleep` alone never writes again after the marker and this premise stalls.
         let mut window = window_with(
-            "stty raw -echo && printf refused-marker && exec yes",
+            "stty raw -echo && printf refused-marker && exec yes \"$(printf '%s%s' ivy-child -ready)\"",
             "sleep 30",
         );
         {
@@ -7029,6 +7051,12 @@ mod tests {
     /// [`Pane::new_counting_reads`].
     fn pane_with(program: &str, name: usize) -> Pane {
         #[cfg(unix)]
+        let program = if program == "yes" {
+            "yes \"$(printf '%s%s' ivy-child -ready)\""
+        } else {
+            program
+        };
+        #[cfg(unix)]
         let (pty, output) = Pty::spawn("sh", &["-c", program], INITIAL_GRID)
             .expect("could not open the pseudoterminal");
         #[cfg(windows)]
@@ -7040,7 +7068,10 @@ mod tests {
                 );
                 format!("Start-Sleep -Seconds {seconds}")
             } else if program == "yes" {
-                "while ($true) { [Console]::WriteLine('y') }".to_owned()
+                // ConPTY renders screen changes rather than passing through each write. Repeating
+                // one identical line can leave its viewport unchanged after the bridge is dropped;
+                // the counter keeps the rendered output changing so delivery loss is observable.
+                "[long]$counter = 0; while ($true) { [Console]::WriteLine(('ivy-child' + '-ready ' + $counter)); $counter++ }".to_owned()
             } else if program == "true" {
                 "exit 0".to_owned()
             } else if let Some(text) = program.strip_prefix("printf ") {
@@ -8758,17 +8789,7 @@ mod tests {
         // which is an ending that is not «ended well» and reaches this predicate exactly as a
         // failure would.
         let mut pane = pane_with("yes", 0);
-        let (_orphan, nowhere) = std::sync::mpsc::channel();
-        pane.pty_output = PtyOutput::new(nowhere, || {});
-        drop(_orphan);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while pane.pty.ending().is_none() {
-            assert!(
-                Instant::now() < deadline,
-                "the reading never noticed its listener was gone"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        make_it_go_quiet(&mut pane);
 
         let queue_left = pane.pump(Default::default());
 
@@ -16722,11 +16743,7 @@ mod tests {
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
-                color.record(
-                    outcome.color.spent,
-                    outcome.color.rasterized,
-                    outcome.color.failed,
-                );
+                color.record(&outcome.color);
             }
         });
         output.drop_without_applying_deltas();
@@ -19721,8 +19738,7 @@ mod tests {
         // the program. Without that whole path, an agent formats its output for eighty columns
         // inside a pane of twenty, and none of the tests above would fall.
         //
-        // It is asked with `stty size` because there is no other way: the size lives in the kernel,
-        // on the slave's side, and cannot be read from this process.
+        // Ask the child for its terminal geometry, not the parent's screen or formatting width.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(100.0);
@@ -19752,7 +19768,16 @@ mod tests {
         }
 
         // The focus is on the newborn, so what is typed goes to its program.
-        enqueue(&ctx, vec![egui::Event::Text("stty size\n".to_owned())]);
+        #[cfg(unix)]
+        let size_command = "stty size";
+        #[cfg(windows)]
+        let size_command =
+            "[Console]::WriteLine(('{0} {1}' -f [Console]::WindowHeight, [Console]::WindowWidth))";
+        // A literal LF in Text can enter PowerShell's continuation editor. Submit through the
+        // same Enter encoding as a person, after delivering the command's text.
+        enqueue(&ctx, vec![egui::Event::Text(size_command.to_owned())]);
+        window.send_keys_to_the_focused(&ctx);
+        enqueue(&ctx, key_with(egui::Key::Enter, egui::Modifiers::NONE));
         window.send_keys_to_the_focused(&ctx);
 
         let at = window
@@ -19765,6 +19790,10 @@ mod tests {
             "the newborn kept the startup grid and the wait below would prove nothing"
         );
         let its_size = format!("{} {}", newborn.measured.rows, newborn.measured.cols);
+        assert!(
+            !size_command.contains(&its_size),
+            "the expected dimensions must come from execution, not the command's echo"
+        );
         wait_for_the_screen_to_say(newborn, &its_size);
     }
 

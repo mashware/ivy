@@ -54,11 +54,15 @@ the MIT License from [microsoft/terminal](https://github.com/microsoft/terminal)
 kept in [conpty-MIT.txt](resources/licenses/windows/conpty-MIT.txt) and installed as
 `licenses/conpty/LICENSE`.
 
-## Test font
+## Test fonts
 
 `crates/app/tests/fixtures/ligatures/JetBrainsMono-Regular.ttf` is distributed under the
 [SIL Open Font License 1.1](crates/app/tests/fixtures/ligatures/OFL.txt).
 Its origin is documented in [the fixture notes](crates/app/tests/fixtures/ligatures/README.md).
+
+`crates/app/tests/fixtures/colr/colr_1.ttf` is distributed under the
+[Apache License 2.0](crates/app/tests/fixtures/colr/colr_1_LICENSE).
+Its origin is documented in [the fixture notes](crates/app/tests/fixtures/colr/README.md).
 
 ## Cargo dependencies
 

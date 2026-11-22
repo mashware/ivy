@@ -1623,31 +1623,73 @@ mod tests {
 
     /// Collects a real PTY's output through the asserted text.
     ///
-    /// On Windows the ConPTY keeps the output pipe's write end while its master lives, so the
-    /// reader cannot observe EOF before `Pty` is dropped. These behavior tests need the live PTY for
-    /// their assertion; wait for the output they actually assert instead of waiting for EOF.
-    fn output_through(pty_output: &Receiver<Vec<u8>>, expected: &str) -> Vec<u8> {
-        #[cfg(windows)]
-        {
-            let deadline = Instant::now() + DEADLINE;
-            let mut output = Vec::new();
-            while !contains(&output, expected) {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                match pty_output.recv_timeout(remaining) {
-                    Ok(bytes) => output.extend_from_slice(&bytes),
-                    Err(error) => panic!(
-                        "the PTY did not produce {expected:?} before {DEADLINE:?}: {error}; output={:?}",
-                        String::from_utf8_lossy(&output)
-                    ),
+    /// Windows output is checked as soon as the asserted child text arrives; Unix additionally
+    /// drains to EOF as before. Both routes answer host queries so the child can actually start.
+    fn output_through(pty: &mut Pty, pty_output: &Receiver<Vec<u8>>, expected: &str) -> Vec<u8> {
+        collect_output(pty_output, expected, !cfg!(windows), DEADLINE, |reply| {
+            pty.write(reply)
+        })
+    }
+
+    /// Retains one parser across reads, including partial terminal queries, while keeping the
+    /// original bytes for the caller's assertions. Only real PTYs need replies; synthetic reader
+    /// tests continue to use `drain_until_closed` without interpreting their bytes.
+    fn collect_output(
+        pty_output: &Receiver<Vec<u8>>,
+        expected: &str,
+        until_closed: bool,
+        timeout: Duration,
+        mut write: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Vec<u8> {
+        let deadline = Instant::now() + timeout;
+        let mut screen = Screen::new(Size::default());
+        let mut output = Vec::new();
+        while until_closed || !contains(&output, expected) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "the PTY did not produce {expected:?} or close before {timeout:?}: output={:?}",
+                String::from_utf8_lossy(&output)
+            );
+            match pty_output.recv_timeout(remaining) {
+                Ok(bytes) => {
+                    screen
+                        .advance_with_replies(&bytes, &mut write)
+                        .expect("answer the program's terminal query");
+                    output.extend_from_slice(&bytes);
                 }
+                Err(RecvTimeoutError::Disconnected) if until_closed => return output,
+                Err(error) => panic!(
+                    "the PTY did not produce {expected:?} or close before {timeout:?}: {error}; output={:?}",
+                    String::from_utf8_lossy(&output)
+                ),
             }
-            output
         }
-        #[cfg(not(windows))]
-        {
-            let _ = expected;
-            drain_until_closed(pty_output)
+        output
+    }
+
+    #[test]
+    fn output_collector_answers_a_cursor_query_split_across_reads_before_the_child_can_write() {
+        let (tx, output) = channel();
+        for fragment in [b"\x1b".as_slice(), b"[", b"6", b"n"] {
+            tx.send(fragment.to_vec()).unwrap();
         }
+        let mut replies = Vec::new();
+        let collected = collect_output(
+            &output,
+            "child-ran",
+            false,
+            Duration::from_secs(1),
+            |reply| {
+                replies.extend_from_slice(reply);
+                assert_eq!(reply, b"\x1b[1;1R");
+                // Model a host that starts its child only after the terminal answers its query.
+                tx.send(b"child-ran".to_vec()).unwrap();
+                Ok(())
+            },
+        );
+        assert_eq!(replies, b"\x1b[1;1R");
+        assert_eq!(collected, b"\x1b[6nchild-ran");
     }
 
     fn contains(output: &[u8], text: &str) -> bool {
@@ -1679,17 +1721,10 @@ mod tests {
     /// output and that round trip drains the input buffer on its own: the diagnosis' first attempt
     /// put 128 000 bytes through without blocking. A test that wrote before `stty` had applied would
     /// go green on a build that still carries the bug.
-    fn wait_for_marker(pty_output: &Receiver<Vec<u8>>, marker: &str) {
-        let mut seen = Vec::new();
-        while !contains(&seen, marker) {
-            match pty_output.recv_timeout(DEADLINE) {
-                Ok(bytes) => seen.extend_from_slice(&bytes),
-                Err(_) => panic!(
-                    "the program never announced {marker:?} in {DEADLINE:?}: {:?}",
-                    String::from_utf8_lossy(&seen)
-                ),
-            }
-        }
+    fn wait_for_marker(pty: &mut Pty, pty_output: &Receiver<Vec<u8>>, marker: &str) {
+        collect_output(pty_output, marker, false, DEADLINE, |reply| {
+            pty.write(reply)
+        });
     }
 
     // Mind the `_pty` in the tests: it is not a leftover variable. As long as it lives, the child
@@ -1888,17 +1923,9 @@ mod tests {
     fn a_failure_carries_the_systems_own_number_where_the_kind_says_nothing() {
         let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
         let stop = AtomicBool::new(false);
-        // Errno 5 is a number the standard library has no name for: its kind comes out of the bucket
-        // whose entire printed form is the word «uncategorized», so a sentence built from the kind
-        // alone would say nothing at all. The number is what survives, and that is the whole
-        // argument for the second field.
-        //
-        // **It is a synthetic error on purpose, and it is NOT the real path** — a review had to
-        // correct the first version of this comment, which claimed it was. That errno is what a
-        // pseudoterminal answers when the other end is gone, and the library below maps exactly that
-        // one to end of file, so it reaches the ordinary arm and never this one. What reaches this
-        // one is whatever else a device answers with no name of its own; five is simply a number
-        // that reliably has none, which is what this test needs.
+        // This is a synthetic device error, not the PTY's real EOF path. The same raw number
+        // has different meanings on each OS: Unix EIO is uncategorized, Windows 5 is access denied.
+        let expected_kind = std::io::Error::from_raw_os_error(5).kind();
         let source = Scripted::of(vec![Err(std::io::Error::from_raw_os_error(5))]);
 
         let Ending::Failed { kind, os_error } = feed(source, &tx, &stop) else {
@@ -1906,8 +1933,8 @@ mod tests {
         };
 
         assert_eq!(os_error, Some(5));
-        // And the kind really is the useless one, which is why the number is carried at all: if this
-        // ever stops being true, the argument for the second field has changed.
+        assert_eq!(kind, expected_kind);
+        #[cfg(unix)]
         assert_eq!(format!("{kind:?}"), "Uncategorized");
     }
 
@@ -2118,12 +2145,12 @@ mod tests {
     #[test]
     fn a_console_that_is_still_reading_has_no_ending_to_report() {
         let (program, args) = shell_invocation(
-            "printf ready; sleep 30",
-            "Write-Output ready; Start-Sleep -Seconds 30",
+            "printf '%s%s' rea dy; sleep 30",
+            "Write-Output ('rea' + 'dy'); Start-Sleep -Seconds 30",
         );
-        let (pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
+        let (mut pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
-        wait_for_marker(&output, "ready");
+        wait_for_marker(&mut pty, &output, "ready");
 
         // «Nothing to report» and «ended for no reason» are different answers, and this is the one
         // that keeps the absence from meaning anything.
@@ -2153,10 +2180,10 @@ mod tests {
 
     #[test]
     fn what_the_program_writes_arrives_over_the_channel() {
-        let (program, args) = shell_invocation("printf good", "Write-Output good");
-        let (_pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
+        let (program, args) = shell_invocation("printf '%s%s' go od", "Write-Output ('go' + 'od')");
+        let (mut pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
-        let output = output_through(&channel, "good");
+        let output = output_through(&mut pty, &channel, "good");
 
         assert!(
             contains(&output, "good"),
@@ -2169,9 +2196,9 @@ mod tests {
         // Without this, a full-screen program believes it is in a dumb terminal and emits neither
         // color nor the sequences the grid needs to interpret.
         let (program, args) = shell_invocation("printf %s \"$TERM\"", "Write-Output $env:TERM");
-        let (_pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
+        let (mut pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
-        let output = output_through(&channel, "xterm-256color");
+        let output = output_through(&mut pty, &channel, "xterm-256color");
 
         assert!(
             contains(&output, "xterm-256color"),
@@ -2189,7 +2216,7 @@ mod tests {
             "printf %s \"$TEST_VARIABLE\"",
             "Write-Output $env:TEST_VARIABLE",
         );
-        let (_pty, channel) = Pty::spawn_with_env(
+        let (mut pty, channel) = Pty::spawn_with_env(
             program,
             &args,
             Size::default(),
@@ -2197,7 +2224,7 @@ mod tests {
         )
         .expect("launch sh");
 
-        let output = output_through(&channel, "3f2a9c14");
+        let output = output_through(&mut pty, &channel, "3f2a9c14");
 
         assert!(
             contains(&output, "3f2a9c14"),
@@ -2234,7 +2261,7 @@ mod tests {
                     .collect::<Vec<_>>(),
             )
         };
-        let (_pty, channel) = Pty::spawn_with_lang(
+        let (mut pty, channel) = Pty::spawn_with_lang(
             &program,
             &args,
             Size::default(),
@@ -2244,7 +2271,7 @@ mod tests {
         )
         .expect("launch sh");
 
-        let output = output_through(&channel, "[xx_DECIDED.UTF-8]");
+        let output = output_through(&mut pty, &channel, "[xx_DECIDED.UTF-8]");
 
         assert!(
             contains(&output, "[xx_DECIDED.UTF-8]"),
@@ -2279,7 +2306,7 @@ mod tests {
                     .collect::<Vec<_>>(),
             )
         };
-        let (_pty, channel) = Pty::spawn_with_lang(
+        let (mut pty, channel) = Pty::spawn_with_lang(
             &program,
             &args,
             Size::default(),
@@ -2289,7 +2316,7 @@ mod tests {
         )
         .expect("launch sh");
 
-        let output = output_through(&channel, "[yy_CALLER.UTF-8]");
+        let output = output_through(&mut pty, &channel, "[yy_CALLER.UTF-8]");
 
         assert!(
             contains(&output, "[yy_CALLER.UTF-8]"),
@@ -2308,11 +2335,11 @@ mod tests {
     fn without_passing_anything_the_variable_is_not_defined() {
         let (program, args) = shell_invocation(
             "printf %s \"${TEST_VARIABLE-unset}\"",
-            "if ($null -eq $env:TEST_VARIABLE) { Write-Output unset } else { Write-Output $env:TEST_VARIABLE }",
+            "if ($null -eq $env:TEST_VARIABLE) { Write-Output ('un' + 'set') } else { Write-Output $env:TEST_VARIABLE }",
         );
-        let (_pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch sh");
+        let (mut pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch sh");
 
-        let output = output_through(&channel, "unset");
+        let output = output_through(&mut pty, &channel, "unset");
 
         assert!(
             contains(&output, "unset"),
@@ -2331,13 +2358,13 @@ mod tests {
     fn with_none_by_value_the_variable_is_removed_even_though_the_crate_sets_it() {
         let (program, args) = shell_invocation(
             "printf %s \"${TERM-removed}\"",
-            "if ($null -eq $env:TERM) { Write-Output removed } else { Write-Output $env:TERM }",
+            "if ($null -eq $env:TERM) { Write-Output ('re' + 'moved') } else { Write-Output $env:TERM }",
         );
-        let (_pty, channel) =
+        let (mut pty, channel) =
             Pty::spawn_with_env(program, &args, Size::default(), &[("TERM", None)])
                 .expect("launch sh");
 
-        let output = output_through(&channel, "removed");
+        let output = output_through(&mut pty, &channel, "removed");
 
         assert!(
             contains(&output, "removed"),
@@ -2534,7 +2561,7 @@ mod tests {
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
 
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         let (handed_over, notice) = mpsc::channel();
         thread::spawn(move || {
@@ -2590,7 +2617,7 @@ mod tests {
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
 
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         // The write goes on a thread of its own for the reason the previous test explains, plus one
         // of this test's own: on a build with the bug, writing from here would **deadlock** rather
@@ -2600,24 +2627,24 @@ mod tests {
         let (counted, wait_for_the_count) = mpsc::channel::<()>();
         let writer = thread::spawn(move || {
             let payload = vec![FILLER; PAYLOAD];
-            let _ = handed_over.send(pty.write(&payload));
-            // The `Pty` is held until the count is done. Dropping it here kills `cat` mid-flight
-            // and whatever was still queued would never be handed over: the test would go red for a
-            // reason that is not the one it covers.
+            let result = pty.write(&payload);
+            let _ = handed_over.send((result, pty));
+            // Return the live PTY after handover so the receiving thread can answer any terminal
+            // query while counting. It keeps the child alive until the count is done.
             let _ = wait_for_the_count.recv();
         });
 
-        match notice.recv_timeout(DEADLINE) {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => panic!("the write failed instead of being handed over: {error}"),
+        let mut pty = match notice.recv_timeout(DEADLINE) {
+            Ok((Ok(()), pty)) => pty,
+            Ok((Err(error), _)) => panic!("the write failed instead of being handed over: {error}"),
             Err(_) => panic!("handing over {PAYLOAD} bytes did not return in {DEADLINE:?}"),
-        }
+        };
 
         // **The handover has to have happened while nobody was reading, or this test measures
         // nothing.** Its whole premise is that 64 KiB go in with the program not taking them; if the
         // machine were loaded enough for `cat` to be running already, what would be verified is that
         // a pseudoterminal delivers bytes, which nobody doubts.
-        wait_for_marker(&output, READING);
+        wait_for_marker(&mut pty, &output, READING);
 
         let mut arrived = 0usize;
         let mut foreign = 0usize;
@@ -2718,7 +2745,7 @@ mod tests {
         let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD]).expect("hand over");
         thread::sleep(Duration::from_millis(300));
@@ -2764,7 +2791,7 @@ mod tests {
 
         let (mut probe, probe_output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&probe_output, MARKER);
+        wait_for_marker(&mut probe, &probe_output, MARKER);
         let fits = one_byte_chunks_taken(&mut probe, MORE_THAN_FITS);
         assert!(
             fits < MORE_THAN_FITS,
@@ -2775,7 +2802,7 @@ mod tests {
 
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
         let taken = one_byte_chunks_taken(&mut pty, fits);
         // The premise: every byte went in, so the loop has nothing to wait on and only the
         // destructor's write is left to find the buffer full.
@@ -2823,7 +2850,7 @@ mod tests {
         let script = format!("stty raw -echo && printf {MARKER} && exec sleep 4");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD]).expect("hand over");
         thread::sleep(Duration::from_millis(300));
@@ -2887,7 +2914,7 @@ mod tests {
         let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD])
             .expect("a write landing exactly on the ceiling must still be accepted whole");
@@ -2936,7 +2963,7 @@ mod tests {
         let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD])
             .expect("a write landing exactly on the ceiling must still be accepted whole");
@@ -2979,7 +3006,7 @@ mod tests {
         let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD])
             .expect("a write landing exactly on the ceiling must still be accepted whole");
@@ -3020,8 +3047,8 @@ mod tests {
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
         let (mut other, other_output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&full_output, MARKER);
-        wait_for_marker(&other_output, MARKER);
+        wait_for_marker(&mut full, &full_output, MARKER);
+        wait_for_marker(&mut other, &other_output, MARKER);
 
         full.write(&vec![FILLER; 4 * PAYLOAD])
             .expect("a write landing exactly on the ceiling must still be accepted whole");
@@ -3062,7 +3089,7 @@ mod tests {
         let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; PAYLOAD])
             .expect("a first write well under the ceiling must be accepted");
@@ -3111,7 +3138,7 @@ mod tests {
             format!("stty raw -echo && printf {MARKER} && sleep 0.3 && exec cat >/dev/null");
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD])
             .expect("a write landing exactly on the ceiling must still be accepted whole");
@@ -3178,7 +3205,7 @@ mod tests {
         );
         let (mut pty, output) =
             Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
 
         pty.write(&vec![FILLER; 4 * PAYLOAD]).expect("hand over");
         thread::sleep(Duration::from_millis(300));
@@ -3311,11 +3338,12 @@ mod tests {
         let script = format!(
             "stty -echo && {{ setsid sh -c 'printf {HELD}; sleep {SECONDS_ALIVE}' & }} && exec sleep {SECONDS_ALIVE}"
         );
-        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
 
         // A marker somebody prints, never a `sleep`: what makes the bug reproduce is the state, and a
         // fixed wait would time the close against a shell that had not got there yet.
-        wait_for_marker(&output, HELD);
+        wait_for_marker(&mut pty, &output, HELD);
 
         // And then drained until the program goes quiet, so the channel is **empty** when the close
         // happens. See the doc comment: a full channel parks the reader somewhere the stop flag
@@ -3392,18 +3420,20 @@ mod tests {
         use std::sync::mpsc;
 
         const HOW_LONG_IT_LIVES: u32 = 5;
-        const MARKER: &str = "up";
+        const MARKER: &str = "ordinary-child-ready";
 
-        let unix = format!("printf {MARKER} && exec sleep {HOW_LONG_IT_LIVES}");
-        let windows = format!("Write-Output {MARKER}; Start-Sleep -Seconds {HOW_LONG_IT_LIVES}");
+        let unix = format!("printf '%s%s' ordinary- child-ready && exec sleep {HOW_LONG_IT_LIVES}");
+        let windows = format!(
+            "Write-Output ('ordinary-' + 'child-ready'); Start-Sleep -Seconds {HOW_LONG_IT_LIVES}"
+        );
         let (program, args) = shell_invocation(&unix, &windows);
-        let (pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
+        let (mut pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
         // The same discipline as the test above, and for the same reasons: the program says when it
         // is up, and the channel is drained to empty so the reader is parked inside `read` rather
         // than somewhere the stop flag reaches it. Without the drain this test would be measuring a
         // reader that left through the delivery path, which is not the path it is about.
-        wait_for_marker(&output, MARKER);
+        wait_for_marker(&mut pty, &output, MARKER);
         while output.recv_timeout(Duration::from_millis(50)).is_ok() {}
 
         let (done, answer) = mpsc::channel();
@@ -3436,10 +3466,10 @@ mod tests {
     /// that never comes back is a red test after two seconds rather than a `cargo test` that never
     /// ends. The drain parks the reader inside `read`, for the reasons the tests above give.
     #[cfg_attr(windows, allow(dead_code))]
-    fn time_the_close(pty: Pty, output: Receiver<Vec<u8>>, marker: &str) -> Duration {
+    fn time_the_close(mut pty: Pty, output: Receiver<Vec<u8>>, marker: &str) -> Duration {
         use std::sync::mpsc;
 
-        wait_for_marker(&output, marker);
+        wait_for_marker(&mut pty, &output, marker);
         while output.recv_timeout(Duration::from_millis(50)).is_ok() {}
 
         let (done, answer) = mpsc::channel();
