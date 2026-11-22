@@ -454,8 +454,9 @@ mod tests {
     use crate::viewer::StripAction;
 
     /// With an image beside the document and the review, the strip lays out all three tabs, each
-    /// with its close button, at the width a 1000-point window with Files open leaves; narrower, a
-    /// strip that leaves any of them out says so.
+    /// with its close button, at 718 points: the width the review's narrow-strip test holds the
+    /// strip to, chosen as roughly what a 1000-point window with Files open left the drawer.
+    /// Narrower, a strip that leaves any of them out says so.
     #[test]
     fn a_strip_with_three_tabs_lays_them_all_out_or_says_it_could_not() {
         let tabs = Tabs {

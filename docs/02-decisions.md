@@ -11615,7 +11615,8 @@ another image in that console while its Send is busy, and other consoles' slots 
 refusal ever give. Each refusal for a console still open says why under its image and keeps the
 marks; a delivered Send
 clears them. A failure says everything it knows: a write that fails after its console closed names
-both, and a half-written copy that could not be removed is named with why. Since #198 a console
+both, the close said once whether the console closed before or after Cancel, and a half-written
+copy that could not be removed is named with why. Since #198 a console
 that closes takes its image, marks and notice with it, so what a Send for it still has to say — a
 refusal, a failed write, a cancelled worker's last word — goes to standard error only, never under
 another console's image.

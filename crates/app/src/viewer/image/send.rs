@@ -44,7 +44,7 @@ pub(super) struct Request {
     pub(super) document: u64,
     pub(super) pane: usize,
     /// The console's name at the click: what another console's greyed Send waits for, and what
-    /// standard error is told about once the console is gone.
+    /// every line this Send tells standard error is prefixed with.
     pub(super) console: String,
     pub(super) path: PathBuf,
     pub(super) line: String,
@@ -72,7 +72,16 @@ pub(crate) struct Sending {
     /// it is kept and polled until it ends, and what it wrote is removed then; no other Send
     /// starts meanwhile, as the decoder's abandoned slot keeps a second decode from starting, so
     /// two workers never race for one copy name (#197).
-    parked: Option<(Request, Job<PathBuf>)>,
+    parked: Option<Parked>,
+}
+
+/// A cancelled Send's worker, kept until it ends.
+struct Parked {
+    request: Request,
+    job: Job<PathBuf>,
+    /// Whether standard error was already told that its console closed: a console closed with its
+    /// Send in flight is said once, however the worker ends.
+    closed_told: bool,
 }
 
 impl Sending {
@@ -137,7 +146,11 @@ impl Sending {
         if let Phase::Writing(request, job) = std::mem::take(&mut self.phase) {
             // `start` refuses while a worker is parked, so there is never a second one here.
             debug_assert!(self.parked.is_none(), "a second worker parked");
-            self.parked = Some((request, job));
+            self.parked = Some(Parked {
+                request,
+                job,
+                closed_told: false,
+            });
         }
         true
     }
@@ -324,23 +337,24 @@ thread_local! {
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
-    // No timer while it runs: its worker wakes the window when it ends, and one that never ends
-    // must not wake it for the life of the app.
     // A console that closed took its image, and the Cancel painted under it: its Send is taken
-    // back as Cancel would, so a worker is parked and removes what it wrote, and every other
-    // console's Send says what it waits for. That covers every way a console leaves.
+    // back as Cancel would, so its worker, if it has one, is parked and removes what it wrote, and
+    // every other console's Send says what it waits for. That covers every way a console leaves.
     let gone = (window.image.send.in_flight())
         .filter(|r| !window.all_panes().any(|p| p.name == r.pane))
         .map(|r| (r.pane, r.console.clone()));
     if let Some((pane, console)) = gone {
         window.image.send.cancel(|r| r.pane == pane);
+        if let Some(parked) = window.image.send.parked.as_mut() {
+            parked.closed_told = true;
+        }
         tell(&console, &format!("{}; nothing was sent.", Refusal::Closed));
     }
-    if let Some((_, job)) = &window.image.send.parked
-        && let Some(written) = take(job)
+    if let Some(parked) = &window.image.send.parked
+        && let Some(written) = take(&parked.job)
     {
-        let (request, _) = window.image.send.parked.take().expect("a parked worker");
-        forsake(window, &request, written);
+        let parked = window.image.send.parked.take().expect("a parked worker");
+        forsake(window, &parked, written);
     }
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
@@ -361,6 +375,8 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
         }
         phase => phase,
     };
+    // No timer while it runs: its worker wakes the window when it ends, and one that never ends
+    // must not wake it for the life of the app.
     window.image.send.phase = match phase {
         Phase::Writing(request, job) => match take(&job) {
             None => {
@@ -389,7 +405,9 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
 /// console that closed meanwhile. What could not be removed is said, and so is a worker's failure
 /// in its own words, which name a half-written copy it could not remove; a copy it did not write
 /// is not touched, because a refused `create_new` means the file is somebody else's.
-fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBuf, String>) {
+fn forsake(window: &mut crate::Window, parked: &Parked, written: Result<PathBuf, String>) {
+    let request = &parked.request;
+    let closed = !window.all_panes().any(|p| p.name == request.pane);
     let stays = match written {
         Ok(path) => match std::fs::remove_file(&path) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
@@ -398,8 +416,9 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             )),
             _ => None,
         },
-        // As `failed` says it: a console that closed under the worker is the likely cause.
-        Err(why) if !window.all_panes().any(|p| p.name == request.pane) => Some(format!(
+        // A console that closed under the worker is the likely cause, but a failure of its own is
+        // said too; the close is named once, here or where `poll` cancelled the Send.
+        Err(why) if closed && !parked.closed_told => Some(format!(
             "{}, and the cancelled copy's worker reported: {why}",
             Refusal::Closed
         )),
@@ -440,7 +459,7 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
         {
             *notice = Some(CANCELLED.into());
         }
-        slot.unshown = Some(said);
+        join(&mut slot.unshown, said);
     }
 }
 
@@ -456,9 +475,9 @@ pub(super) fn join(notice: &mut Option<String>, said: String) {
 /// A console that closed while its copy was being written could not remove its directory, which
 /// held the copy; once the copy is gone, the directory goes as it would have. Answers what is left
 /// to say about it, which only a closed console's Send has and so goes to standard error with the
-/// rest of what that Send says; nothing when it went or was already gone. `PanelDir`
-/// told standard error the directory remains when the console closed, so a removal here is told
-/// there too: otherwise that line stays the last word on a directory that is gone.
+/// rest of what that Send says; nothing when it was already gone. `PanelDir` told standard error
+/// the directory remains when the console closed, so a removal here is told there too: otherwise
+/// that line stays the last word on a directory that is gone.
 fn forsaken_folder(window: &crate::Window, request: &Request) -> String {
     let Some(folder) = request.path.parent() else {
         return String::new();
@@ -467,13 +486,7 @@ fn forsaken_folder(window: &crate::Window, request: &Request) -> String {
         return String::new();
     }
     match std::fs::remove_dir(folder) {
-        Ok(()) => {
-            eprintln!(
-                "the panel directory {} was removed once its annotated copy was gone",
-                folder.display()
-            );
-            String::new()
-        }
+        Ok(()) => format!(", and its folder {} was removed", folder.display()),
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => format!(
             ", and its folder {} could not be removed: {error}",
             folder.display()

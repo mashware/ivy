@@ -4107,6 +4107,16 @@ mod tests {
             !copy.exists() && !dir.exists(),
             "the copy or its folder stayed"
         );
+        // The folder's removal names its console as every other line of this Send does.
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told[1..],
+            [format!(
+                "Send to {}: The cancelled copy is gone, and its folder {} was removed.",
+                origin.1,
+                dir.display()
+            )]
+        );
         click_send(&mut window, &ctx);
         assert!(
             window.image.send.before_the_line(),
@@ -4140,6 +4150,8 @@ mod tests {
         write_png(&other, 64, 32);
         open_in(&mut window, &ctx, beside, &other);
         let reported = "the half-written copy could not be removed: busy";
+        // A word parked earlier for the same console, not yet read: the worker's joins it.
+        slot_called(&mut window, own).unshown = Some("An earlier word.".into());
         sender.send(Err(reported.into())).unwrap();
         let said = |shapes: &[egui::epaint::ClippedShape]| {
             texts(shapes, area()).iter().any(|t| t.contains(reported))
@@ -4153,9 +4165,51 @@ mod tests {
         assert!(!window.image.send.parked());
         let active = window.active;
         window.tabs[active].focus = own;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(said(&shapes), "lost on the way to its own console");
         assert!(
-            said(&painted(&mut window, &ctx, vec![])),
-            "lost on the way to its own console"
+            texts(&shapes, area()).iter().any(|t| t.contains(&format!(
+                "An earlier word. The cancelled copy's worker reported: {reported}"
+            ))),
+            "the earlier word was overwritten"
+        );
+    }
+
+    /// A console that closes with its Send's copy being written is said closed once on standard
+    /// error, though the worker it leaves then fails: the failure follows in its own words.
+    #[cfg(unix)]
+    #[test]
+    fn a_console_closed_mid_send_whose_worker_fails_is_said_closed_once() {
+        let received = term_core::received::Received::new("annotated-closed-fails");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let (name, label) = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        send::TOLD.with(|told| told.borrow_mut().clear());
+        window.close_a_pane_called(name, &ctx).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(window.image.send.parked());
+        sender.send(Err("disk full".into())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        let told = send::TOLD.with(|told| told.borrow().clone());
+        assert_eq!(
+            told,
+            [
+                format!("Send to {label}: The origin console has closed; nothing was sent."),
+                format!("Send to {label}: The cancelled copy's worker reported: disk full."),
+            ]
         );
     }
 
