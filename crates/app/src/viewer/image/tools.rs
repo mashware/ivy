@@ -210,7 +210,7 @@ fn send_label(console: &str, button: Button) -> String {
         Button::Free => format!("Send to {console} and press Enter"),
         Button::Sending => "Sending…".to_owned(),
         Button::Waiting(sending) => format!("Waiting for the Send to {sending}…"),
-        Button::Finishing => "Still finishing the previous copy…".to_owned(),
+        Button::Finishing(cancelled) => format!("Still finishing the copy for {cancelled}…"),
     }
 }
 
@@ -453,7 +453,7 @@ pub(super) fn notes(
     Some(Asked::Send(Request {
         document,
         pane: origin.pane,
-        console: origin.label.clone(),
+        console: send::console_name(origin),
         path: path.clone(),
         line,
     }))

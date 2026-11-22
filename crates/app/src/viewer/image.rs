@@ -4051,10 +4051,16 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 640, 400);
         let (mut window, ctx, dir) = window_to_send(&path, &received);
-        let origin = slot(&window)
-            .origin()
-            .map(|o| (o.pane, o.label.clone()))
-            .unwrap();
+        // Both consoles carry one title, as two consoles running one agent do: only the number
+        // the app gives each console tells them apart.
+        let sending = slot(&window).origin().unwrap().pane;
+        slot_called(&mut window, sending)
+            .document
+            .as_mut()
+            .unwrap()
+            .origin
+            .label = "claude".into();
+        let origin = (sending, format!("claude (Console {})", sending + 1));
         click_send(&mut window, &ctx);
         painted(&mut window, &ctx, vec![]);
         let (copy, sender) = window
@@ -4063,6 +4069,11 @@ mod tests {
             .stall()
             .expect("the copy is being written");
         let beside = window.active().panes()[0].name;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == beside)
+            .unwrap()
+            .label = Some("claude".into());
         let other = folder.0.join("other.png");
         write_png(&other, 64, 32);
         let other_rect = open_in(&mut window, &ctx, beside, &other);
@@ -4089,7 +4100,7 @@ mod tests {
         assert!(!said.contains(&waiting), "{said:?}");
         assert!(
             said.iter()
-                .any(|t| t == "Still finishing the previous copy…"),
+                .any(|t| *t == format!("Still finishing the copy for {}…", origin.1)),
             "{said:?}"
         );
         let told = send::TOLD.with(|told| told.borrow().clone());
@@ -4556,7 +4567,8 @@ mod tests {
         let parked = "Send cancelled; nothing was sent. Still finishing the previous copy.";
         assert_eq!(slot(&window).notice.as_deref(), Some(parked));
 
-        let finishing = "Still finishing the previous copy…";
+        let label = &slot(&window).origin().unwrap().label;
+        let finishing = format!("Still finishing the copy for {label}…");
         let shapes = painted(&mut window, &ctx, vec![]);
         let (_, button) = text_rect(&shapes, |t| t == finishing).expect("Send says why it waits");
         painted(

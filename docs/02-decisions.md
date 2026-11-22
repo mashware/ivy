@@ -11596,10 +11596,10 @@ click is refused too, and so is a second Send. **Until the line is typed, a Canc
 takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
 already writing is parked — a write cannot be interrupted — and polled from the window's input pass
 until it ends, when its copy is removed, and with it the folder of a console that closed meanwhile.
-While a worker is parked, Send is greyed out and reads «Still finishing the previous copy…» — on the
-button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
-before any other check, so two workers never race for one name; the decoder's abandoned read is the
-same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
+While a worker is parked, Send is greyed out and reads «Still finishing the copy for <console>…» —
+on the button, because any other notice can replace Cancel's — and a Send asked anyway is refused
+with «Still finishing the previous copy» before any other check, so two workers never race for one
+name; the decoder's abandoned read is the same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
 goes to standard error as well, and waits in its own console's slot until the drawer lays that
 console's image out, or its Image tab with no image, because the image it was for may be closed by
 then; there it joins the notice shown rather than replacing it,
@@ -11629,9 +11629,12 @@ that label and says why in the line under it. **A console that closes with its S
 takes that Send back as Cancel would**, on the next input pass and whichever way it closed — the
 console, its tab, a split or a retirement: its Cancel went with its image, and otherwise every
 console's Send stayed greyed, with no Cancel anywhere, until the worker ended. Its worker is parked
-as Cancel parks one, so the other consoles' Send reads «Still finishing the previous copy…» until it
-ends: the rule of one parked worker is kept. Every line a Send tells standard error names its
-console — «Send to <console>: …» — because that stream is shared by every console. Discarded:
+as Cancel parks one, so the other consoles' Send reads «Still finishing the copy for <console>…»
+until it ends: the rule of one parked worker is kept. Every line a Send tells standard error names
+its console — «Send to <console>: …» — because that stream is shared by every console, and so do
+«Waiting for…» and «Still finishing…»: by its label, followed by «(Console <n>)», the number the
+app gives every console, unless the label already is that number, because two consoles routinely
+share a title such as the agent they run. Discarded:
 cancelling in each place a console is closed, which the next way of closing one would miss; and
 letting the other consoles' Send start while a closed console's worker is still parked, which needs
 more than one parked worker and is a decision of its own.

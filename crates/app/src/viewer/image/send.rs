@@ -113,8 +113,10 @@ impl Sending {
             Phase::Asked(r) | Phase::Writing(r, _) if r.document == document => Button::Sending,
             Phase::Asked(r) | Phase::Writing(r, _) => Button::Waiting(&r.console),
             Phase::Enter(_, _, console) => Button::Waiting(console),
-            Phase::Idle if self.parked.is_some() => Button::Finishing,
-            Phase::Idle => Button::Free,
+            Phase::Idle => match &self.parked {
+                Some(parked) => Button::Finishing(&parked.request.console),
+                None => Button::Free,
+            },
         }
     }
 
@@ -184,9 +186,21 @@ pub(super) enum Button<'a> {
     Sending,
     /// The Send of the console named here is on its way: one runs at a time.
     Waiting(&'a str),
-    /// A cancelled Send's worker is still writing its copy, which may take the name this one
-    /// would write.
-    Finishing,
+    /// The cancelled Send of the console named here still has its worker writing a copy, which
+    /// may take the name this one would write.
+    Finishing(&'a str),
+}
+
+/// The name a Send gives its console wherever another console's Send or standard error reads it:
+/// its label, with the number the app gives every console unless the label already is it, since
+/// two consoles routinely share a title such as the program they run.
+pub(super) fn console_name(origin: &crate::viewer::Source) -> String {
+    let number = format!("Console {}", origin.pane + 1);
+    if origin.label == number {
+        number
+    } else {
+        format!("{} ({number})", origin.label)
+    }
 }
 
 #[cfg(test)]
@@ -634,6 +648,18 @@ mod tests {
         // The Enter owed after a line is typed still holds every other image's Send.
         sending.phase = Phase::Enter(Enter(7), 0, "A".into());
         assert_eq!(sending.button(2), Button::Waiting("A"));
+    }
+
+    /// A console with no name of its own already goes by its number, which is not said twice.
+    #[test]
+    fn a_console_named_by_its_number_is_not_numbered_twice() {
+        let source = |label: &str| crate::viewer::Source {
+            pane: 2,
+            label: label.into(),
+            cwd: None,
+        };
+        assert_eq!(console_name(&source("Console 3")), "Console 3");
+        assert_eq!(console_name(&source("claude")), "claude (Console 3)");
     }
 
     /// A console that closes takes the copies Send left in its directory, and then the directory
