@@ -99,12 +99,9 @@ pub fn exchange(request: &Request) -> io::Result<serde_json::Value> {
     }
     #[cfg(windows)]
     {
-        let stream = inherited_stream()?;
-        exchange_stream(
-            &request.line().map_err(io::Error::other)?,
-            stream,
-            Instant::now() + Duration::from_secs(2),
-        )
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let stream = inherited_stream(deadline)?;
+        exchange_stream(&request.line().map_err(io::Error::other)?, stream, deadline)
     }
 }
 
@@ -117,12 +114,12 @@ pub fn exchange_line(line: &[u8]) -> io::Result<serde_json::Value> {
     #[cfg(windows)]
     {
         let deadline = Instant::now() + Duration::from_secs(2);
-        exchange_stream(line, inherited_stream()?, deadline)
+        exchange_stream(line, inherited_stream(deadline)?, deadline)
     }
 }
 
 #[cfg(windows)]
-fn inherited_stream() -> io::Result<crate::endpoint::Stream> {
+fn inherited_stream(deadline: Instant) -> io::Result<crate::endpoint::Stream> {
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let (id, dir) =
         crate::client::whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(|| {
@@ -132,7 +129,12 @@ fn inherited_stream() -> io::Result<crate::endpoint::Stream> {
             )
         })?;
     crate::endpoint::private_to_this_user(dir)?;
-    crate::endpoint::connect_authenticated(dir, id, crate::client::inherited_server_pid()?)
+    crate::endpoint::connect_verified_authenticated(
+        dir,
+        id,
+        crate::client::inherited_server_pid()?,
+        deadline,
+    )
 }
 
 #[cfg(not(windows))]

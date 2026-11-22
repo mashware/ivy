@@ -3,6 +3,10 @@
 //! Every operation keeps its `OVERLAPPED` and event alive through cancellation completion. The
 //! only waits here are kernel waits; the caller's receive/send deadlines bound them.
 
+#[cfg(test)]
+mod peer_tests;
+
+use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
 use std::os::windows::ffi::OsStrExt;
@@ -11,6 +15,12 @@ use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+mod negotiation;
+mod process;
+mod rendezvous;
+pub(crate) use negotiation::connect_verified;
+pub(crate) use process::WindowsPeer;
 
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Security::Authorization::*;
@@ -156,6 +166,15 @@ pub struct Listener {
 }
 
 fn new_pipe(name: &[u16], security: &Security, first: bool) -> io::Result<Handle> {
+    new_pipe_with_instances(name, security, first, PIPE_UNLIMITED_INSTANCES)
+}
+
+fn new_pipe_with_instances(
+    name: &[u16],
+    security: &Security,
+    first: bool,
+    instances: u32,
+) -> io::Result<Handle> {
     let attributes = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: security.0,
@@ -167,7 +186,7 @@ fn new_pipe(name: &[u16], security: &Security, first: bool) -> io::Result<Handle
             name.as_ptr(),
             PIPE_ACCESS_DUPLEX | if first { PIPE_OPEN } else { PIPE_OPEN_NEXT },
             PIPE_MODE,
-            PIPE_UNLIMITED_INSTANCES,
+            instances,
             64 * 1024,
             64 * 1024,
             0,
@@ -328,13 +347,7 @@ impl Acceptor {
             listener.first,
         )?);
         listener.first = false;
-        Ok(Stream {
-            handle: pipe,
-            stop: Arc::clone(&self.stop),
-            tracker: Arc::new(IoTracker::default()),
-            read_timeout: Mutex::new(None),
-            write_timeout: Mutex::new(None),
-        })
+        Ok(Stream::new(pipe, Arc::clone(&self.stop)))
     }
 }
 impl Drop for Acceptor {
@@ -394,6 +407,9 @@ pub struct Stream {
     tracker: Arc<IoTracker>,
     read_timeout: Mutex<Option<Duration>>,
     write_timeout: Mutex<Option<Duration>>,
+    // Replayed bytes belong to the same pipe even when its handle is cloned.
+    prefetched: Arc<Mutex<VecDeque<u8>>>,
+    verified_peer: Option<Arc<WindowsPeer>>,
 }
 unsafe impl Send for Stream {}
 unsafe impl Sync for Stream {}
@@ -422,6 +438,28 @@ impl Drop for IoGuard {
     }
 }
 impl Stream {
+    fn new(handle: Handle, stop: Arc<Handle>) -> Self {
+        Self {
+            handle,
+            stop,
+            tracker: Arc::new(IoTracker::default()),
+            read_timeout: Mutex::new(None),
+            write_timeout: Mutex::new(None),
+            prefetched: Arc::new(Mutex::new(VecDeque::new())),
+            verified_peer: None,
+        }
+    }
+
+    /// Only a completed pin-before-connect upgrade can attach this witness.
+    pub(crate) fn verified_peer(&self) -> Option<Arc<WindowsPeer>> {
+        self.verified_peer.clone()
+    }
+
+    /// Runs inside an already counted connection worker, never the accept loop.
+    pub(crate) fn negotiate_peer(self) -> io::Result<Self> {
+        negotiation::accept(self)
+    }
+
     pub fn verify_server_pid(&self, expected: u32) -> io::Result<()> {
         if expected == 0 {
             return Err(io::Error::new(
@@ -464,6 +502,8 @@ impl Stream {
             tracker: Arc::clone(&self.tracker),
             read_timeout: Mutex::new(*self.read_timeout.lock().unwrap()),
             write_timeout: Mutex::new(*self.write_timeout.lock().unwrap()),
+            prefetched: Arc::clone(&self.prefetched),
+            verified_peer: self.verified_peer.clone(),
         })
     }
     pub fn set_recv_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
@@ -569,6 +609,16 @@ impl Read for &Stream {
         if buf.is_empty() {
             return Ok(0);
         }
+        {
+            let mut prefetched = self.prefetched.lock().unwrap();
+            if !prefetched.is_empty() {
+                let count = buf.len().min(prefetched.len());
+                for byte in &mut buf[..count] {
+                    *byte = prefetched.pop_front().unwrap();
+                }
+                return Ok(count);
+            }
+        }
         transfer(
             self.handle.0,
             self.stop.0,
@@ -619,13 +669,7 @@ pub fn connect(_dir: &Path, id: &str) -> io::Result<Stream> {
             null_mut(),
         )
     };
-    Ok(Stream {
-        handle: Handle::new(handle)?,
-        stop: Arc::new(event()?),
-        tracker: Arc::new(IoTracker::default()),
-        read_timeout: Mutex::new(None),
-        write_timeout: Mutex::new(None),
-    })
+    Ok(Stream::new(Handle::new(handle)?, Arc::new(event()?)))
 }
 
 pub fn private_to_this_user(_dir: &Path) -> io::Result<()> {

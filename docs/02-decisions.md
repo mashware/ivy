@@ -11781,8 +11781,53 @@ boundaries already in place (D107, D110).
 **Verification.** The code/image folder cases must run on Windows; a Linux pass does not exercise
 this open flag. Native desktop interaction remains separate from those loader tests.
 
+## D117 — Windows peer identity is verified on a fresh connection after its process is pinned
 
-## D117 — Windows graphics startup failures have a native explanation
+The first named-pipe connection is a bootstrap, not a process witness. Looking up its kernel PID
+with `OpenProcess` can acquire a later process if the original connector has already exited and
+its PID was reused. Reading creation time from that later handle, or comparing the PID twice,
+does not bind it to the original connection.
+
+**Decision.** An owned Windows producer opts into `peer_hello` v1. The server opens a candidate
+process with `SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION`, retaining its non-inheritable
+handle before creating a fresh one-shot pipe. Only a connector whose kernel PID matches that
+pinned, still-live process becomes a verified control stream. The new pipe has the existing
+user/SYSTEM DACL, rejects remote clients and uses `FILE_FLAG_FIRST_PIPE_INSTANCE`; its random name
+is never reused. Both streams' servers must match the independently inherited `PANEL_SERVER_PID`.
+
+**Why the order matters.** The candidate process's handle prevents its PID from being recycled.
+An earlier owner of that PID cannot have connected to a pipe that did not yet exist. Therefore a
+matching connector on the new pipe is exactly the retained process object, including when the
+bootstrap's numeric PID was already stale. The proof concerns the actual control stream, not the
+historical owner of the bootstrap. Microsoft's [PID-lifetime explanation](https://devblogs.microsoft.com/oldnewthing/20110107-00/?p=11803/)
+documents the retained-handle property.
+
+The verified stream and its clones retain the same process object. Its birth identity is the
+64-bit creation `FILETIME` from `GetProcessTimes`; liveness is a zero-timeout wait on that handle,
+never a new lookup by PID. Diagnostic attribution remains independent of session authorization
+(D91). A raw client or explicit unavailable-witness result has no verified peer, may publish with
+Unknown provenance, and cannot acquire session or attested-hook authority from payload metadata.
+
+Negotiation stays inside the existing counted connection workers, before authenticated requests
+or diagnostic inspection. It has one absolute deadline and shares the channel's stop signal;
+all pending overlapped operations are cancelled and drained before their buffers are dropped.
+Bootstrap bytes never become authenticated control bytes. Silent legacy clients retain the
+existing bounded-resource and shutdown behavior. The opt-in transport frames are specified in
+[04-panel-contract.md](04-panel-contract.md); the ordinary JSON operations remain unchanged.
+
+| Discarded | Why |
+|---|---|
+| `GetNamedPipeClientProcessId` followed by a retained handle on the same pipe | Protects identity after acquisition, but cannot establish whether it was already recycled. |
+| Repeat the PID query or compare creation time read from that same handle | Both observations can consistently describe the successor. |
+| Authenticate only the user's SID | The pipe's ACL already limits the user; a SID does not identify a console's process occurrence. |
+| Replace the channel with local RPC | Adds another transport and client bindings when an ordered connection upgrade reuses the existing implementation. |
+| Require a new preamble from every producer | Existing direct publishers must retain D91's Unknown publication behavior. |
+
+This supplies a Windows process witness. It does not by itself implement Windows process ancestry,
+native client recognition or complete recovery/hook authorization. Native Windows process/pipe
+witnesses are required; cross-compilation is not runtime evidence.
+
+## D118 — Windows graphics startup failures have a native explanation
 
 **Decided.** Returned graphics initialization errors show one native Windows message box before
 the process exits with failure. The original error still goes through D114's log. The notice says

@@ -1,4 +1,4 @@
-//! A native notice still works when the graphics needed by the application do not (D117).
+//! A native notice still works when the graphics needed by the application do not (D118).
 use log::{Level, Log, Metadata, Record};
 use std::sync::{
     Mutex, PoisonError,

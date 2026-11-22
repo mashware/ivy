@@ -13,6 +13,8 @@ pub struct DiagnosticPeer {
     pid: u32,
     #[cfg(target_os = "linux")]
     pidfd: Option<std::sync::Arc<std::os::fd::OwnedFd>>,
+    #[cfg(windows)]
+    lifetime: std::sync::Arc<crate::endpoint::WindowsPeer>,
 }
 
 impl DiagnosticPeer {
@@ -22,6 +24,10 @@ impl DiagnosticPeer {
 
     /// A momentary kernel liveness check. On Linux it uses the exact peer pidfd when available.
     pub fn is_alive(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.lifetime.is_alive()
+        }
         #[cfg(target_os = "linux")]
         if let Some(pidfd) = &self.pidfd {
             let mut p = libc::pollfd {
@@ -40,13 +46,29 @@ impl DiagnosticPeer {
                     || io::Error::last_os_error().kind() == io::ErrorKind::PermissionDenied
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             false
         }
     }
 
     pub(crate) fn capture(stream: &Stream) -> io::Result<Self> {
+        #[cfg(windows)]
+        {
+            let lifetime = stream.verified_peer().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "verified diagnostic peer unavailable",
+                )
+            })?;
+            if !lifetime.is_alive() {
+                return Err(io::Error::other("diagnostic peer is not alive"));
+            }
+            Ok(Self {
+                pid: lifetime.pid(),
+                lifetime,
+            })
+        }
         #[cfg(target_os = "linux")]
         {
             let Stream::UdSocket(stream) = stream;
@@ -91,7 +113,7 @@ impl DiagnosticPeer {
                 Err(io::Error::other("diagnostic peer is not alive"))
             }
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = stream;
             Err(io::Error::new(
