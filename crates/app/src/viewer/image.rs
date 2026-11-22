@@ -4798,20 +4798,24 @@ mod tests {
     /// Another image opened after a pick sends to its own console again.
     #[test]
     fn a_pick_is_forgotten_with_its_image() {
-        let (mut window, ctx, _harness, path, folder) = image_and_clipboard();
+        let (mut window, ctx, _harness, _path, folder) = image_and_clipboard();
         let own = window.image.origin().unwrap().pane;
         let other = window.active().panes()[0].name;
+        marks_mut(&mut window).general = "x".into();
+        painted(&mut window, &ctx, vec![]);
         let image = &mut window.image;
         image
             .send
             .answer(Some(tools::Asked::Aim(other)), &mut image.notice);
+        // The pick outlives a pass with nothing to send, as it does after a delivered Send.
+        marks_mut(&mut window).general.clear();
+        painted(&mut window, &ctx, vec![]);
         assert_eq!(window.image.send.chosen, Some(other));
         let second = folder.0.join("second.png");
         write_png(&second, 64, 40);
         crate::viewer::open_image_target(&mut window, own, second).unwrap();
         painted(&mut window, &ctx, vec![]);
         assert_eq!(window.image.send.chosen, None);
-        let _ = path;
     }
 
     /// AC6: with the image's own console gone, Send has nowhere to go and says so.

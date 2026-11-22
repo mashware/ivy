@@ -289,11 +289,10 @@ pub(crate) fn aim(window: &mut crate::Window) {
     };
     let to = destination(window, &consoles).filter(|_| !consoles.is_empty());
     // A picked console that closed is forgotten, so it is not picked again should its name return.
+    // Only a list that was made can say so: with nothing to send none is made, and the pick stays.
     let send = &mut window.image.send;
-    if send
-        .chosen
-        .is_some_and(|c| !consoles.iter().any(|(open, _)| *open == c))
-    {
+    let gone = |c: usize| !consoles.is_empty() && !consoles.iter().any(|(open, _)| *open == c);
+    if send.chosen.is_some_and(gone) {
         send.chosen = None;
     }
     // A Send on its way keeps the name its line showed: the first free name is no longer it once
