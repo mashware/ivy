@@ -69,9 +69,6 @@ pub(crate) struct Sending {
     /// starts meanwhile, as the decoder's abandoned slot keeps a second decode from starting, so
     /// two workers never race for one copy name (#197).
     parked: Option<(Request, Job<PathBuf>)>,
-    /// What a parked worker's end left to say, until a drawer lays it out: the image it was for
-    /// may be closed by then, and the next one opened clears the notice it would have gone to.
-    pub(super) unshown: Option<String>,
 }
 
 impl Sending {
@@ -89,11 +86,17 @@ impl Sending {
         self.busy() || self.parked.is_some()
     }
 
-    /// Whether Cancel can still take the Send back: until its line is typed. Offered for the
-    /// whole write rather than after a delay, because a slow disk is not a stuck one and no
-    /// constant tells them apart; the person does.
-    pub(super) fn cancellable(&self) -> bool {
-        self.in_flight().is_some()
+    /// Whether the Send whose line is not typed yet was clicked on the image opened as
+    /// `document`, which freezes that image's marks and no other console's.
+    pub(super) fn busy_for(&self, document: u64) -> bool {
+        self.in_flight().is_some_and(|r| r.document == document)
+    }
+
+    /// Whether Cancel can still take back the Send clicked on the image opened as `document`:
+    /// until its line is typed. Offered for the whole write rather than after a delay, because a
+    /// slow disk is not a stuck one and no constant tells them apart; the person does.
+    pub(super) fn cancellable_for(&self, document: u64) -> bool {
+        self.busy_for(document)
     }
 
     /// Takes up what a click in the notes asked, saying in `notice` what became of it.
@@ -385,8 +388,8 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
         {
             *notice = Some(CANCELLED.into());
         }
+        slot.unshown = Some(said);
     }
-    window.image.send.unshown = Some(said);
 }
 
 /// Puts `said` after the drawer's `notice` rather than in its place: that one may be a refusal or

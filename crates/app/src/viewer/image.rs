@@ -44,6 +44,10 @@ pub(crate) struct Slot {
     abandoned: Option<(PathBuf, Job<Picture>)>,
     /// Why the last thing asked of the marks was refused, or what became of them.
     notice: Option<String>,
+    /// What a cancelled Send's worker left to say when it ended, until a drawer lays this
+    /// console's image out: the image may be closed by then, and the next one opened clears the
+    /// notice it would have gone to.
+    unshown: Option<String>,
 }
 
 /// What the drawer keeps across consoles: one pointer, one Send at a time, one count of openings.
@@ -313,7 +317,7 @@ impl Viewer {
             return;
         };
         // Taken up only by a frame that lays the column out, where the notice is painted.
-        if let Some(said) = self.send.unshown.take() {
+        if let Some(said) = slot.unshown.take() {
             send::join(&mut slot.notice, said);
         }
         let panning = &mut self.panning;
@@ -349,14 +353,14 @@ impl Viewer {
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
         let send =
-            something_to_send.then(|| (origin.label.as_str(), sending.busy(), sending.parked()));
+            something_to_send.then(|| (origin.label.as_str(), sending.busy_for(*id), sending.parked()));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
         let roles = crate::ui::style::roles(ui.ctx(), &theme);
         // While a Send is on its way the marks stay as the click fixed them: the copy is drawn from
         // them a frame later, and a delivered Send clears them.
-        tools::toolbar(ui, layout.bar, marks, sending.busy(), &roles);
+        tools::toolbar(ui, layout.bar, marks, sending.busy_for(*id), &roles);
         let panel = tools::Panel {
             fixed,
             roles,
@@ -372,7 +376,7 @@ impl Viewer {
             ui.ctx().request_repaint();
         }
         // Read again after the notes: a click on Send in this frame freezes what follows it.
-        let frozen = sending.busy();
+        let frozen = sending.busy_for(*id);
         // Ctrl+Z reaches here only while the drawer holds the keys: a console that holds them
         // has taken it by now. Any text field with the keyboard keeps it, a note's own undo
         // among them.
@@ -3325,13 +3329,13 @@ mod tests {
         let refusal = "The line was typed, but Enter was not pressed: the console closed.";
         let held = "The cancelled copy's worker reported: disk full.";
         viewer.notice = Some(refusal.into());
-        viewer.image.send.unshown = Some(held.into());
+        viewer.unshown = Some(held.into());
         let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(700.0, 400.0));
         let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
         let said = texts(&shapes, view).join("\n");
         assert!(said.contains(refusal), "the refusal was lost: {said}");
         assert!(said.contains(held), "the worker's word was lost: {said}");
-        assert!(viewer.image.send.unshown.is_none());
+        assert!(viewer.unshown.is_none());
     }
 
     /// Between the heights where the Send button shows whole under the notice's line and those
@@ -3630,6 +3634,109 @@ mod tests {
         );
         assert!(marks_of(&window).is_empty());
         let _ = std::fs::remove_file(&copy);
+    }
+
+    /// The slot of the console called `name`, wherever the focus is.
+    fn slot_called(window: &mut crate::Window, name: usize) -> &mut Slot {
+        slot_of(&mut window.tabs, name).expect("the console is open")
+    }
+
+    /// A Send follows its image, not the focus: with another console's image shown while the copy
+    /// is written, the line is typed into the Send's own console and its marks clear there, while
+    /// the other console's image keeps its notes, says nothing and offers no Cancel for it.
+    #[cfg(unix)]
+    #[test]
+    fn a_send_reaches_its_own_console_while_another_consoles_image_is_shown() {
+        let received = term_core::received::Received::new("annotated-follows");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let origin = slot(&window)
+            .origin()
+            .map(|o| (o.pane, o.label.clone()))
+            .unwrap();
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        marks_mut(&mut window).general = "on the other console".into();
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            text_rect(&shapes, |t| t == "Cancel").is_none(),
+            "the other console's image offers to take this Send back"
+        );
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        let submitted = [line.as_bytes(), b"\r"].concat();
+        assert_eq!(
+            received.wait_for(submitted.len(), Duration::from_secs(5)),
+            submitted
+        );
+        let own = slot_called(&mut window, origin.0);
+        assert_eq!(own.notice, Some(format!("Sent to {}.", origin.1)));
+        assert!(own.document.as_ref().unwrap().marks.is_empty());
+        let shown = slot_called(&mut window, beside);
+        assert_eq!(shown.notice, None);
+        assert_eq!(
+            shown.document.as_ref().unwrap().marks.general,
+            "on the other console"
+        );
+        let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A cancelled Send whose worker ends after the focus moved to another console's image says
+    /// what it has to say under its own console's image, never under the one shown.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_sends_last_word_waits_for_its_own_consoles_image() {
+        let received = term_core::received::Received::new("annotated-cancel-elsewhere");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let own = slot(&window).origin().unwrap().pane;
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        let reported = "the half-written copy could not be removed: busy";
+        sender.send(Err(reported.into())).unwrap();
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains(reported))
+        };
+        for _ in 0..3 {
+            assert!(
+                !said(&painted(&mut window, &ctx, vec![])),
+                "said under another console's image"
+            );
+        }
+        assert!(!window.image.send.parked());
+        let active = window.active;
+        window.tabs[active].focus = own;
+        assert!(
+            said(&painted(&mut window, &ctx, vec![])),
+            "lost on the way to its own console"
+        );
     }
 
     /// Every refusal Send can know before writing anything says why, keeps the marks, writes no

@@ -392,7 +392,7 @@ pub(super) fn notes(
     let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);
         let label = Arc::clone(label);
-        if !sending.cancellable() {
+        if !sending.cancellable_for(document) {
             return (
                 send_button(&mut column, ready, label, height, &roles),
                 false,
@@ -420,7 +420,7 @@ pub(super) fn notes(
         }
         // A Send on its way takes the notes as they were at its click; only its Cancel answers.
         // After the notice: a disabled label shows no tooltip, and the cut one needs its own.
-        if sending.busy() {
+        if sending.busy_for(document) {
             ui.disable();
         }
         egui::ScrollArea::vertical()
@@ -437,7 +437,7 @@ pub(super) fn notes(
         None => Err("Nothing can be sent from here.".to_owned()),
     };
     if let Some(rect) = layout.footer {
-        footer(ui, rect, &line, sending.busy(), (refused, &roles));
+        footer(ui, rect, &line, sending.busy_for(document), (refused, &roles));
     }
     if cancelled {
         return Some(Asked::Cancel);
