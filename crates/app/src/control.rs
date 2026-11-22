@@ -557,7 +557,8 @@ struct OnScreen<'a> {
 }
 
 impl Window {
-    /// Answers what the open connections left for the tree: opening, reading and closing consoles.
+    /// Answers what the open connections left for the window: opening, reading and closing consoles,
+    /// and showing an agent's image in its own console's slot.
     ///
     /// **It runs in the interface pass**, which is where the geometry a split needs exists, and it
     /// drains a queue the panes filled while they were painted — so a request lands in the frame

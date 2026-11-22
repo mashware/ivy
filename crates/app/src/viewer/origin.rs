@@ -274,10 +274,11 @@ pub(crate) struct Room<'a> {
 
 /// Opens `path` in the slot of the console `pane`, for that console's own agent (D120).
 ///
-/// The person is not moved: the drawer opens on the image only where they are already working in
-/// that console and nothing else holds the screen or the keys, and the keyboard stays where it
-/// was. Refused over that console's unsent marks, with nothing shown and nothing said in the
-/// drawer, because the agent is the one asking. The file itself is never touched here.
+/// The person is not moved: where the Image tab already shows that console the new image simply
+/// takes its place, and otherwise the drawer opens on it only where the person is working in that
+/// console and nothing else holds the screen or the keys. The keyboard stays where it was. Refused
+/// over that console's unsent marks, with nothing shown and nothing said in the drawer, because the
+/// agent is the one asking. The file itself is not read here.
 pub(crate) fn open_for_an_agent(
     window: &mut Window,
     pane: usize,
@@ -291,15 +292,22 @@ pub(crate) fn open_for_an_agent(
         return Err(MARKS_NOT_SENT.to_owned());
     }
     window.image.open(slot, source, path);
-    // Set even where the drawer opens on it at once: one rule, and the frame that paints it
-    // takes the mark down.
+    // Set even where the drawer shows it at once: one rule, and the frame that paints it takes
+    // the mark down.
     slot.mark_unseen();
-    if !working_in(window, pane, room.ctx) {
+    if !in_front(window, pane, room.ctx) {
         return Ok(MARKED_FOR_THE_PERSON);
     }
-    super::select_state(window, true);
-    crate::sidebar::select(window, Tool::Image);
-    window.viewer.open = true;
+    // The Image tab on show already shows this console's image: nothing has to move for the new
+    // one to be seen, the keys and a maximized drawer included.
+    if !showing_image(window) {
+        if !free_to_switch(window) {
+            return Ok(MARKED_FOR_THE_PERSON);
+        }
+        super::select_state(window, true);
+        crate::sidebar::select(window, Tool::Image);
+        window.viewer.open = true;
+    }
     room.ctx.request_repaint();
     // Selected is not shown: a window too short for the drawer keeps the consoles whole.
     let geometry = crate::tab_bar::geometry(window, room.whole_window, room.metrics);
@@ -310,18 +318,22 @@ pub(crate) fn open_for_an_agent(
     })
 }
 
-/// Whether the person is working in the console `pane`: it is the focused one of the tab on show,
-/// and nothing over the drawer owns the screen or the keys. Opening the drawer anywhere else would
-/// take away what they are reading or typing into (D120).
-fn working_in(window: &Window, pane: usize, ctx: &eframe::egui::Context) -> bool {
+/// Whether the console `pane` is the focused one of the tab on show, with nothing over the drawer
+/// that would hide it.
+fn in_front(window: &Window, pane: usize, ctx: &eframe::egui::Context) -> bool {
     let tab = window.active();
     tab.focus == pane
         && tab.panes().iter().any(|p| p.name == pane)
-        && !matches!(crate::sidebar::active(window), Some(Tool::Board))
-        && !window.sidebar.maximized
         && !window.settings_editor.is_open()
         && !window.pane_view.is_modal()
         && !window.chrome.guide_blocked(ctx)
+}
+
+/// Whether the drawer may be switched to the Image tab: switching takes away what the Board or a
+/// maximized drawer shows, and the keys from the drawer or Files if they hold them (D120).
+fn free_to_switch(window: &Window) -> bool {
+    !matches!(crate::sidebar::active(window), Some(Tool::Board))
+        && !window.sidebar.maximized
         && !window.viewer.keyboard
         && !window.viewer_other.keyboard
         && !window.explorer.holds_keys()

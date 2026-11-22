@@ -1733,6 +1733,10 @@ mod tests {
             format!("{} is over 32 MiB", shown(&oversize))
         );
         assert_eq!(
+            refused(open_an_image(serde_json::json!(""))),
+            "image_open's \"path\" is empty"
+        );
+        assert_eq!(
             refused(open_an_image(serde_json::json!(7))),
             "image_open's \"path\" is not text"
         );

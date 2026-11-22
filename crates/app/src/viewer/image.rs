@@ -1,5 +1,6 @@
-//! The drawer's image: a PNG or JPEG a console printed, or Files opened, one per console and shown
-//! in the drawer's image tab while that console has the focus (D72). It is decoded once per open
+//! The drawer's image: a PNG or JPEG a console printed, Files opened or the console's agent opened
+//! (D120), one per console and shown in the drawer's image tab while that console has the focus
+//! (D72). It is decoded once per open
 //! and never refreshed, so a program that overwrites the same screenshot name does not change what
 //! is on screen.
 use super::Source;
@@ -6453,7 +6454,7 @@ mod tests {
         // Opened again by the agent, beside a drawer that already shows that console: the frame
         // that paints the image takes the mark down and asks for the next frame.
         let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, &path);
-        assert!(answer.is_ok(), "{answer:?}");
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
         let started = Instant::now();
         let output = loop {
             let output = pass(&mut window, &ctx, vec![]);
@@ -6606,5 +6607,42 @@ mod tests {
             (after.min - (before.min + by)).length() < 0.5,
             "the pan stopped: {before:?} -> {after:?}"
         );
+    }
+
+    /// Where the Image tab already shows the console, an agent's next image takes the place of the
+    /// last with nothing moved: the drawer keeps the keys it holds, maximized or not, and the reply
+    /// says the person sees it.
+    #[test]
+    fn an_agents_image_in_the_image_tab_on_show_takes_the_place_of_the_last() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let next = folder.0.join("next.png");
+        write_png(&next, 64, 32);
+        for maximized in [false, true] {
+            let (mut window, ctx, _) = window_with_image(&path);
+            let shown = window.active().focus;
+            if maximized {
+                crate::sidebar::toggle_maximize(&mut window);
+                painted(&mut window, &ctx, vec![]);
+            }
+            assert!(
+                window.viewer.keyboard,
+                "the premise: the drawer holds the keys"
+            );
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], shown, &next);
+            assert_eq!(
+                answer,
+                Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON),
+                "maximized: {maximized}"
+            );
+            assert_eq!(window.sidebar.maximized, maximized);
+            painted(&mut window, &ctx, vec![egui::Event::Text("x".into())]);
+            assert!(typed(&window, shown).is_empty(), "the keys left the drawer");
+            assert_eq!(
+                until_an_image(&mut window, &ctx).size(),
+                egui::vec2(64.0, 32.0)
+            );
+        }
     }
 }

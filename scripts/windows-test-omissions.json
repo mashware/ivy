@@ -1234,6 +1234,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::only_the_primary_button_answers_the_question",
     "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
   },

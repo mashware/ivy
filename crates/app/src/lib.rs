@@ -6957,6 +6957,54 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
+    /// **An agent's image shown in the console being typed into loses no keystroke** (D120): the
+    /// request is answered by the real frame's drain, after that frame's keys, and neither the key
+    /// typed in that frame nor the one typed in the next goes anywhere but the console.
+    #[test]
+    #[cfg(unix)]
+    fn an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        let typing = window.active().focus;
+        attach_a_channel(&mut window, typing);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 800.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let (answering, answer) = std::sync::mpsc::sync_channel(1);
+        window
+            .pane_called(typing)
+            .and_then(|pane| pane.control.as_mut())
+            .expect("that console keeps its channel")
+            .push_for_the_tests(panel_control::Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
+                connection: 7,
+                what: panel_control::What::ImageOpen {
+                    path: std::env::temp_dir().join("shot.png"),
+                },
+                answer: answering,
+                #[cfg(windows)]
+                release: None,
+            });
+        let typed = |window: &mut Window| window.pane_called(typing).unwrap().keystrokes.clone();
+        one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("a".into())]);
+        assert!(
+            matches!(answer.try_recv(), Ok(panel_control::Answer::Text(said)) if said.starts_with("opened and shown")),
+            "the drain of this frame did not show it"
+        );
+        assert_eq!(sidebar::active(&window), Some(sidebar::Tool::Image));
+        assert_eq!(
+            typed(&mut window),
+            b"a",
+            "the key of the drain's frame was lost"
+        );
+        one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("b".into())]);
+        assert_eq!(typed(&mut window), b"b", "the drawer took the next key");
+    }
+
+    crate::windows_unix_omission!(
+        an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
     /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
     /// close would pass the refusal tests and close nothing.

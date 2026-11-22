@@ -12076,7 +12076,9 @@ endpoint» is a same-user premise about which slot, never a statement about who 
 the screen or the keys, the drawer opens on its Image tab (switching from Document or Changes) and
 **the keyboard stays where it was**, as `split_open` leaves it. «Nothing else» means: the Board, the
 Settings editor, a modal pane view, the connection guide, a maximized drawer, or the drawer or Files
-holding the keys. Anywhere else nothing moves. The console's tab card and its header then show an
+holding the keys. Where the drawer already shows the Image tab, which is that console's, the new
+image takes the place of the last and nothing has to move, the drawer's keys and a maximized drawer
+included. Anywhere else nothing moves. The console's tab card and its header then show an
 image glyph until the drawer paints that image or its refusal. «Loading…» is not seeing it. The
 reply says which of the two happened. A window that runs no pass answers nothing within the
 listener's five seconds and still applies the open on its next pass, as `split_open` does.
