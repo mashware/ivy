@@ -128,7 +128,8 @@ jobs:
                             'panic_and_spawn_failure_paths_still_join_and_close_slots',
                             'windows_client_rejects_wrong_server_before_sending_request_bytes',
                             'windows_endpoint_connect_uses_inherited_server_pid',
-                            'windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips') {
+                            'windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips',
+                            'an_image_through_a_junction_named_with_a_trailing_dot_is_refused_by_the_bridge_on_windows') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
       - name: Prove Windows peer regression witnesses with mutations

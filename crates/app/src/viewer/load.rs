@@ -946,6 +946,44 @@ mod tests {
         );
     }
 
+    /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses an agent's
+    /// image before anything is asked** (D120), with the walk's own sentence: no entry is asked
+    /// whether it is a link, and the file, which does not exist, is never opened — a worker that
+    /// opened it would say «Cannot open …» instead.
+    #[test]
+    fn a_name_the_walk_cannot_ask_refuses_an_agents_image_before_anything_is_asked() {
+        let temp = Temp::new();
+        for (name, why) in [
+            ("..", "has a «..» in it; give the path without one".to_owned()),
+            (
+                "...",
+                "has «...» in it, a name made only of dots; give the path without it".to_owned(),
+            ),
+            (
+                "x.",
+                "has «x.» in it, a name that ends in a dot or a space, which Windows drops; give a \
+                 path whose names do not end in one"
+                    .to_owned(),
+            ),
+            (
+                "COM9",
+                "has «COM9» in it, which Windows reads as a device; give the path without it"
+                    .to_owned(),
+            ),
+        ] {
+            let missing = temp.0.join(name).join("missing.png");
+            let asked: IsLink = |at| panic!("{} was asked", at.display());
+            assert_eq!(
+                decode_image(&missing, 4096, Some(asked)).err().unwrap(),
+                format!(
+                    "{} {why}. Open it from Files to see it yourself.",
+                    missing.display()
+                ),
+                "{name}"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_fifo_named_like_an_image_is_refused_without_blocking() {

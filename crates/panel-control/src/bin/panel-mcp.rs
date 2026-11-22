@@ -1845,6 +1845,86 @@ mod tests {
         );
     }
 
+    /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses the path
+    /// before the bridge asks anything** (D120), each with its own sentence: no entry is asked
+    /// whether it is a link, and the file, which does not exist, is never asked for — a bridge that
+    /// asked would answer «cannot open …» instead.
+    #[test]
+    fn a_name_the_walk_cannot_ask_refuses_the_bridge_before_anything_is_asked() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-shape-{}", std::process::id()));
+        for (name, why) in [
+            ("..", "has a «..» in it; give the path without one".to_owned()),
+            (
+                "...",
+                "has «...» in it, a name made only of dots; give the path without it".to_owned(),
+            ),
+            (
+                "x.",
+                "has «x.» in it, a name that ends in a dot or a space, which Windows drops; give a \
+                 path whose names do not end in one"
+                    .to_owned(),
+            ),
+            (
+                "COM9",
+                "has «COM9» in it, which Windows reads as a device; give the path without it"
+                    .to_owned(),
+            ),
+        ] {
+            let file = folder.join(name).join("missing.png");
+            let mut asked = Vec::new();
+            let said = image_to_open_with(file.to_str().unwrap(), |at: &std::path::Path| {
+                asked.push(at.to_path_buf());
+                Ok(false)
+            });
+            assert_eq!(said, Err(format!("{} {why}", file.display())), "{name}");
+            assert_eq!(asked, Vec::<std::path::PathBuf>::new(), "{name}");
+        }
+    }
+
+    /// **On a real Windows disk, a junction named with a trailing dot is refused by the bridge**,
+    /// given plainly or verbatim: asked as the end of a path, Win32 would read `x.` as `x`, which is
+    /// not there, while the open passes through the junction. It is made through `\\?\`, the only
+    /// spelling that keeps the dot, and the test first checks the junction is there under that name,
+    /// so a setup that lost the dot cannot pass for a refusal.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_through_a_junction_named_with_a_trailing_dot_is_refused_by_the_bridge_on_windows() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-dot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let plain = folder.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        std::fs::write(plain.join("a.png"), png).unwrap();
+        let junction = std::path::PathBuf::from(format!(r"\\?\{}\x.", folder.display()));
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        assert!(
+            std::fs::symlink_metadata(&junction)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "{} is not a junction",
+            junction.display()
+        );
+        let ends = "a name that ends in a dot or a space, which Windows drops; give a path whose \
+                    names do not end in one";
+        for through in [folder.join("x.").join("a.png"), junction.join("a.png")] {
+            assert_eq!(
+                image_to_open(through.to_str().unwrap()),
+                Err(format!("{} has «x.» in it, {ends}", through.display()))
+            );
+        }
+        // Removed by the name that keeps the dot: a plain one would name `x`, and leave the junction.
+        std::fs::remove_dir(&junction).unwrap();
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     /// **On a real Windows disk**, a PNG reached through a junction — which needs no privilege to
     /// make — is refused by the bridge, and the same PNG by its own folder passes.
     #[cfg(windows)]
