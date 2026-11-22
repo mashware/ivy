@@ -2207,8 +2207,7 @@ mod tests {
                 .any(|t| t.contains("on the first console"))
         };
         assert!(noted(&painted(&mut window, &ctx, vec![])));
-        // A person's click on the console. While the drawer holds the keys the first click only
-        // takes them back, as it does on the Git tab; the next one focuses.
+        // Returning from the drawer takes the keys and focuses with the same click.
         let focus = |window: &mut crate::Window, name: usize| {
             let at = window
                 .active()
@@ -2229,8 +2228,6 @@ mod tests {
             painted(window, &ctx, vec![button(true), button(false)]);
         };
         focus(&mut window, names[1]);
-        assert_eq!(window.active().focus, names[0], "the drawer kept the keys");
-        focus(&mut window, names[1]);
         assert_eq!(window.active().focus, names[1]);
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(same_place(image_rect(&shapes).unwrap(), zoomed));
@@ -2248,6 +2245,238 @@ mod tests {
             same_place(settle(&mut window, &ctx), zoomed),
             "the second console's zoom was lost"
         );
+    }
+
+    #[test]
+    fn a_maximized_drawer_keeps_clicks_over_hidden_consoles() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 120, 60);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let focused = window.active().focus;
+        let hidden = window.active().panes()[0]
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        crate::sidebar::toggle_maximize(&mut window);
+        painted(&mut window, &ctx, vec![]);
+        assert!(window.sidebar.maximized);
+        assert!(window.sidebar.last_dock.unwrap().contains(hidden));
+        click(&mut window, &ctx, hidden);
+        assert_eq!(window.active().focus, focused);
+        assert!(window.viewer.keyboard);
+        assert_eq!(slot(&window).path(), Some(path.as_path()));
+    }
+
+    // The byte witnesses run POSIX shell preludes to disable echo and canonical input.
+    #[cfg(unix)]
+    #[test]
+    fn one_console_press_returns_the_keys_from_drawer_editors_before_typing() {
+        for image in [true, false] {
+            use term_core::received::Received;
+            let folder = Folder::new();
+            let path = folder.0.join("shot.png");
+            write_png(&path, 120, 60);
+            let first = Received::new("drawer-focus-first");
+            let second = Received::new("drawer-focus-second");
+            let programs = [
+                first.script("stty raw -echo"),
+                second.script("stty raw -echo"),
+            ];
+            let (mut window, ctx, _) = window_with_image_in(&path, [&programs[0], &programs[1]]);
+            first.wait_until_ready(Duration::from_secs(5));
+            second.wait_until_ready(Duration::from_secs(5));
+            let names: Vec<_> = window.active().panes().iter().map(|p| p.name).collect();
+            let field = if image {
+                place_of(&mut window, &ctx, "A note on the whole image")
+            } else {
+                crate::viewer::activate(&mut window, false);
+                window.viewer.job = None;
+                window.viewer.requested = None;
+                window.viewer.path.clear();
+                window.viewer.loaded = None;
+                window.viewer.kind = super::super::Kind::AgainstBase;
+                window.viewer.base = String::new();
+                // A newly shown egui Area first sizes itself without painting its contents.
+                painted(&mut window, &ctx, vec![]);
+                let shapes = painted(&mut window, &ctx, vec![]);
+                let label = text_rect(&shapes, |t| t == "Base").unwrap().1;
+                egui::pos2(label.right() + 30.0, label.center().y)
+            };
+            press(&mut window, &ctx, field);
+            painted(&mut window, &ctx, vec![egui::Event::Text("private".into())]);
+            assert!(ctx.memory(|m| m.focused()).is_some());
+            assert!(window.viewer.keyboard);
+            if image {
+                assert_eq!(marks_of(&window).general, "private");
+            } else {
+                assert_eq!(window.viewer.base, "private");
+            }
+            assert_eq!(window.active().focus, names[1]);
+            let at = window.active().panes()[0]
+                .painted_console
+                .as_ref()
+                .unwrap()
+                .area
+                .center();
+            painted(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+            painted(
+                &mut window,
+                &ctx,
+                vec![
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text("FIRST".into()),
+                ],
+            );
+            assert_eq!(window.active().focus, names[0]);
+            assert!(!window.viewer.keyboard);
+            assert!(ctx.memory(|m| m.focused()).is_none());
+            assert_eq!(first.wait_for(5, Duration::from_secs(5)), b"FIRST");
+            window.active_mut().panes_mut()[1]
+                .pty
+                .write(b"PREVIOUS-1")
+                .unwrap();
+            assert_eq!(
+                second.wait_for(b"PREVIOUS-1".len(), Duration::from_secs(5)),
+                b"PREVIOUS-1"
+            );
+            painted(
+                &mut window,
+                &ctx,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            painted(&mut window, &ctx, vec![egui::Event::Text("!".into())]);
+            assert_eq!(first.wait_for(6, Duration::from_secs(5)), b"FIRST!");
+            if image {
+                assert_eq!(
+                    window.active().panes()[1]
+                        .image
+                        .slot
+                        .document
+                        .as_ref()
+                        .unwrap()
+                        .marks
+                        .general,
+                    "private"
+                );
+            } else {
+                assert_eq!(window.viewer.base, "private");
+            }
+            window.active_mut().panes_mut()[1]
+                .pty
+                .write(b"PREVIOUS-2")
+                .unwrap();
+            assert_eq!(
+                second.wait_for(b"PREVIOUS-1PREVIOUS-2".len(), Duration::from_secs(5)),
+                b"PREVIOUS-1PREVIOUS-2"
+            );
+        }
+    }
+
+    // Real byte witnesses use POSIX shell preludes to disable echo and canonical input.
+    #[cfg(unix)]
+    #[test]
+    fn drawer_boundaries_keep_focus_and_input_away_from_console_programs() {
+        use term_core::received::Received;
+        for boundary in ["drawer", "files", "divider", "modal", "held gesture"] {
+            let folder = Folder::new();
+            let path = folder.0.join("shot.png");
+            write_png(&path, 120, 60);
+            let first = Received::new("boundary-first");
+            let second = Received::new("boundary-second");
+            let programs = [
+                first.script("stty raw -echo"),
+                second.script("stty raw -echo"),
+            ];
+            let (mut window, ctx, _) = window_with_image_in(&path, [&programs[0], &programs[1]]);
+            first.wait_until_ready(Duration::from_secs(5));
+            second.wait_until_ready(Duration::from_secs(5));
+            crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+            painted(&mut window, &ctx, vec![]);
+            let field = place_of(&mut window, &ctx, "A note on the whole image");
+            press(&mut window, &ctx, field);
+            assert!(window.viewer.keyboard);
+            assert!(ctx.memory(|m| m.focused()).is_some());
+            let focus = window.active().focus;
+            let other = window.active().panes()[0]
+                .painted_console
+                .as_ref()
+                .unwrap()
+                .area
+                .center();
+            // Mouse reports make a leaked gesture observable in the same byte witness as text.
+            for pane in window.active_mut().panes_mut() {
+                pane.screen.advance(b"\x1b[?1003h\x1b[?1006h");
+            }
+            let at = match boundary {
+                "files" => window.sidebar.last_files.unwrap().center(),
+                "divider" => {
+                    let dock = window.sidebar.last_dock.unwrap();
+                    egui::pos2(dock.center().x, dock.top() - crate::sidebar::DIVIDER / 2.0)
+                }
+                "modal" => {
+                    window
+                        .pane_view
+                        .begin_rename(window.active, focus, "Rename".into());
+                    painted(&mut window, &ctx, vec![]);
+                    other
+                }
+                _ => field,
+            };
+            painted(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+            painted(
+                &mut window,
+                &ctx,
+                vec![button(egui::PointerButton::Primary, at, true)],
+            );
+            let released = if boundary == "held gesture" {
+                other
+            } else {
+                at
+            };
+            painted(
+                &mut window,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(released),
+                    egui::Event::Text("private".into()),
+                ],
+            );
+            assert_eq!(window.active().focus, focus, "{boundary}");
+            painted(
+                &mut window,
+                &ctx,
+                vec![button(egui::PointerButton::Primary, released, false)],
+            );
+            assert_eq!(window.active().focus, focus, "{boundary} release");
+            // Each barrier uses the program's own FIFO writer, behind any leaked input.
+            for (index, received, barrier) in [
+                (0, &first, b"FIRST-BARRIER".as_slice()),
+                (1, &second, b"SECOND-BARRIER".as_slice()),
+            ] {
+                window.active_mut().panes_mut()[index]
+                    .pty
+                    .write(barrier)
+                    .unwrap();
+                assert_eq!(
+                    received.wait_for(barrier.len(), Duration::from_secs(5)),
+                    barrier,
+                    "{boundary}: program {index} received input before its barrier"
+                );
+            }
+        }
     }
 
     /// On a console with no image the image tab stays selected and says how to open one with
@@ -3300,7 +3529,13 @@ mod tests {
         painted(&mut window, &ctx, vec![undo.clone()]);
         assert_eq!(marks_of(&window).notes().len(), 2);
         // A console that took the keys gets its Ctrl+Z; the markers stay.
-        click(&mut window, &ctx, egui::pos2(300.0, 100.0));
+        let console = window.active().panes()[1]
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        click(&mut window, &ctx, console);
         assert!(!window.viewer.keyboard);
         painted(&mut window, &ctx, vec![undo]);
         assert_eq!(marks_of(&window).notes().len(), 2);

@@ -4,6 +4,7 @@ mod code_header;
 mod delivery;
 mod diff;
 mod drawer;
+mod focus;
 mod highlight;
 pub(crate) mod image;
 mod load;
@@ -426,9 +427,15 @@ pub(crate) fn before_keys(
         // Read before a press below hands the keys over: a Space a console was given stays its own.
         let holds = window.viewer.keyboard || window.sidebar.maximized;
         window.viewer.space = ctx.input(|i| image::space_is_ours(i, holds, held));
+        // Console keys are dispatched before its egui click response can run. Transfer focus
+        // at the drawer's handoff so even text batched with this press has the right recipient.
+        let returned = holds
+            && !window.viewer.held
+            && !window.sidebar.maximized
+            && focus::return_to_console(window, &ctx, geometry.consoles, metrics);
         if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
-            window.viewer.keyboard = over;
-            window.viewer.held = over;
+            window.viewer.keyboard = over && !returned;
+            window.viewer.held = over && !returned;
         }
         window.viewer.keys = window.viewer.keyboard || window.sidebar.maximized;
         let gesture_owned = window.viewer.held;
