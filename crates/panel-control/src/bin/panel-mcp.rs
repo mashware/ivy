@@ -670,9 +670,64 @@ fn tools() -> serde_json::Value {
                     },
                     "required": ["pane"],
                 },
+            },
+            {
+                "name": "image_open",
+                // The one guard a subagent meets (D88): nothing on the wire tells it from the agent
+                // whose connection it shares, so the last sentence is the whole of it (D120).
+                "description": IMAGE_OPEN,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "The image file's absolute path.",
+                        },
+                    },
+                    "required": ["path"],
+                },
             }
         ],
     })
+}
+
+/// What `image_open` tells the agent it does, as the contract words it (D120).
+const IMAGE_OPEN: &str = "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.";
+
+/// The file `path` names, if an agent may hand it to the window: refused with the sentence the agent
+/// reads otherwise.
+///
+/// **A courtesy, not the enforcement** (D120): it answers at once, in the agent's own process, so a
+/// stuck filesystem stalls the agent's call and never the window — but the window may see another
+/// file (another mount namespace, a file replaced meanwhile), so its own read checks again. A path
+/// on another machine is refused before anything is asked of it: asking is what reaches that host.
+fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
+    if path.is_empty() {
+        return Err("image_open's \"path\" is empty".to_owned());
+    }
+    let file = std::path::PathBuf::from(path);
+    if !file.is_absolute() {
+        return Err(format!(
+            "image_open needs an absolute path, and {path} is relative"
+        ));
+    }
+    if !panel_control::image::is_local(&file) {
+        return Err(format!("{path} is not on this machine"));
+    }
+    let found = std::fs::metadata(&file).map_err(|why| format!("cannot open {path}: {why}"))?;
+    if found.is_dir() {
+        return Err(format!("{path} is a folder, not an image"));
+    }
+    if !found.is_file() {
+        return Err(format!("{path} is not a regular file"));
+    }
+    if found.len() > panel_control::image::MAX_BYTES {
+        return Err(format!(
+            "{path} is over {} MiB",
+            panel_control::image::MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(file)
 }
 
 /// What one tool call asks for, **already read and validated**.
@@ -690,6 +745,7 @@ enum Ask {
     Open(Side, Option<String>, Vec<String>),
     Read(String, bool),
     Close(String),
+    ImageOpen(std::path::PathBuf),
 }
 
 /// What to call an empty `ok`, **decided from what was asked and never from the shape of the reply**.
@@ -703,6 +759,8 @@ enum Ask {
 fn what_it_did(ask: &Ask) -> &'static str {
     match ask {
         Ask::Close(_) => "closed",
+        // The window's own sentence is the answer; this word is only for an empty `ok`.
+        Ask::ImageOpen(_) => "opened",
         Ask::Patch(_) => "patched",
         Ask::Retire => "retired",
         Ask::PlanRetire(..) => "retired",
@@ -742,6 +800,7 @@ fn called_routed(
             | "split_open"
             | "split_read"
             | "split_close"
+            | "image_open"
     ) {
         return failed(id, -32602, &format!("no tool \"{name}\""));
     }
@@ -856,6 +915,18 @@ fn called_routed(
             };
             Ask::Read(handle.to_owned(), scrollback)
         }
+        "image_open" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let path = match arguments.get("path") {
+                None => return succeeded(id, refusal("image_open needs a \"path\"")),
+                Some(serde_json::Value::String(path)) => path,
+                Some(_) => return succeeded(id, refusal("image_open's \"path\" is not text")),
+            };
+            match image_to_open(path) {
+                Ok(path) => Ask::ImageOpen(path),
+                Err(why) => return succeeded(id, refusal(&why)),
+            }
+        }
         // `split_close`, the only name left after the check above.
         _ => {
             let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
@@ -917,6 +988,7 @@ fn called_routed(
         Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
         Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
         Ask::Close(handle) => producer.close_a_pane(&handle),
+        Ask::ImageOpen(path) => producer.open_an_image(&path),
     };
 
     match answer {
@@ -1571,7 +1643,8 @@ mod tests {
                 "panel_patch",
                 "split_open",
                 "split_read",
-                "split_close"
+                "split_close",
+                "image_open"
             ]
         );
         let retire = tools
@@ -1582,6 +1655,129 @@ mod tests {
             retire["inputSchema"],
             serde_json::json!({"type": "object", "properties": {}})
         );
+    }
+
+    /// **`image_open` is advertised as the contract writes it** (D120): its schema, its whole
+    /// description, and the clause that keeps a subagent off it — which lives in the description
+    /// and not in the handshake, whose instructions name only what publishing needs (D88).
+    #[test]
+    fn image_open_is_advertised_as_the_contract_writes_it_and_tells_a_subagent_to_leave_it_alone() {
+        let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+        let tool = answered["result"]["tools"]
+            .as_array()
+            .expect("there is a list of tools")
+            .iter()
+            .find(|tool| tool["name"] == "image_open")
+            .expect("image_open is advertised")
+            .clone();
+        assert_eq!(
+            tool,
+            serde_json::json!({
+                "name": "image_open",
+                "description": "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "description": "The image file's absolute path."}},
+                    "required": ["path"]
+                }
+            })
+        );
+        let described = tool["description"].as_str().unwrap();
+        assert!(described.contains("If you work for another agent in this same console"));
+        assert!(described.contains("do not call this"));
+        assert!(!INSTRUCTIONS.contains("image_open"));
+    }
+
+    /// The agent's call for `path`, answered with no pane to reach: every answer below is the
+    /// bridge's own, given before any channel is opened.
+    fn open_an_image(path: serde_json::Value) -> serde_json::Value {
+        let call = serde_json::json!({
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "image_open", "arguments": {"path": path}},
+        });
+        ask(&call.to_string())["result"].clone()
+    }
+
+    /// **The bridge answers a file problem at once, as an error the agent reads, and the pane is
+    /// never reached** (D120): each refusal names the file and what is wrong with it.
+    #[test]
+    fn an_image_the_window_could_not_show_is_refused_by_the_bridge_with_its_reason() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-open-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let missing = folder.join("missing.png");
+        let oversize = folder.join("huge.png");
+        std::fs::File::create(&oversize)
+            .unwrap()
+            .set_len(panel_control::image::MAX_BYTES + 1)
+            .unwrap();
+        let shown = |path: &std::path::Path| path.to_str().unwrap().to_owned();
+        let refused = |result: serde_json::Value| {
+            assert_eq!(result["isError"], true, "{result}");
+            result["content"][0]["text"].as_str().unwrap().to_owned()
+        };
+        assert_eq!(
+            refused(open_an_image(serde_json::json!("shot.png"))),
+            "image_open needs an absolute path, and shot.png is relative"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(shown(&folder)))),
+            format!("{} is a folder, not an image", shown(&folder))
+        );
+        let gone = refused(open_an_image(serde_json::json!(shown(&missing))));
+        assert!(
+            gone.starts_with(&format!("cannot open {}: ", shown(&missing))),
+            "{gone}"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(shown(&oversize)))),
+            format!("{} is over 32 MiB", shown(&oversize))
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(7))),
+            "image_open's \"path\" is not text"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::Value::Null)),
+            "image_open's \"path\" is not text"
+        );
+        let call = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\
+             \"params\":{\"name\":\"image_open\",\"arguments\":{}}}";
+        assert_eq!(
+            refused(ask(call)["result"].clone()),
+            "image_open needs a \"path\""
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// Something that is neither a file nor a folder — here a FIFO, which would hang a reader — is
+    /// refused by name.
+    #[cfg(unix)]
+    #[test]
+    fn an_image_that_is_not_a_regular_file_is_refused_by_the_bridge() {
+        let fifo = std::env::temp_dir().join(format!("ivy-image-fifo-{}", std::process::id()));
+        let _ = std::fs::remove_file(&fifo);
+        let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: `name` is a valid NUL-terminated path that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let result = open_an_image(serde_json::json!(fifo.to_str().unwrap()));
+        let _ = std::fs::remove_file(&fifo);
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["content"][0]["text"],
+            format!("{} is not a regular file", fifo.to_str().unwrap())
+        );
+    }
+
+    /// The window's sentence is what the agent reads: the bridge adds no word of its own.
+    #[test]
+    fn an_image_opened_answers_with_the_windows_sentence() {
+        let said = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do";
+        let result = result_of(
+            what_it_did(&Ask::ImageOpen(std::env::temp_dir())),
+            Answered::Text(said.to_owned()),
+        );
+        assert_eq!(result["content"][0]["text"], said);
+        assert!(result.get("isError").is_none());
     }
 
     /// **An open answers with its handle, or says it has none** — never with the verb's word. An open
