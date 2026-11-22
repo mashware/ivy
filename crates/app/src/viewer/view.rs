@@ -16,7 +16,7 @@ pub(super) fn show(
     (tabs, title, image): (
         &super::drawer::Tabs,
         &super::drawer::Title,
-        Option<&mut super::image::Viewer>,
+        Option<(&mut super::image::Viewer, &mut super::image::Slot)>,
     ),
 ) {
     let namespace = if state.kind.is_document() {
@@ -120,7 +120,7 @@ pub(super) fn show(
                     roles.base,
                 );
                 match image {
-                    Some(image) => image.show(&mut body_ui, theme, state.space),
+                    Some((image, slot)) => image.show(slot, &mut body_ui, theme, state.space),
                     None => body_content(state, &mut body_ui, theme, unavailable),
                 }
             });

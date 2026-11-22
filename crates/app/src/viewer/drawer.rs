@@ -175,9 +175,8 @@ pub(super) fn tabs(window: &crate::Window) -> Tabs {
             .and_then(|path| path.file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .or_else(|| markdown.then(|| "File".to_owned())),
-        image: window
-            .image
-            .file_name()
+        image: super::image::focused(window)
+            .and_then(super::image::Slot::file_name)
             .or_else(|| (active == Some(Tool::Image)).then(|| "Image".to_owned())),
         active,
         side_by_side: git.is_some_and(|s| s.review.side_by_side()),

@@ -512,7 +512,9 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         window.viewer.refresh_at = Some(Instant::now());
     }
     if image {
-        window.image.poll(&ctx);
+        if let Some(slot) = image::focused_mut(&mut window.tabs, window.active) {
+            slot.poll(&ctx);
+        }
     } else {
         if window.viewer.requested.is_none()
             && !window.viewer.path.is_empty()
@@ -538,7 +540,14 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         window.theme,
         unavailable,
         window.sidebar.maximized,
-        (&tabs, &title, image.then_some(&mut window.image)),
+        (
+            &tabs,
+            &title,
+            image
+                .then(|| image::focused_mut(&mut window.tabs, window.active))
+                .flatten()
+                .map(|slot| (&mut window.image, slot)),
+        ),
     );
     ctx.input_mut(|input| input.events = filtered);
     code_header::reveal_in_files(window);
@@ -591,11 +600,11 @@ mod tests;
 pub(crate) fn hide(window: &mut crate::Window) {
     suspend(window);
 }
-/// The image the document tab shows, with the console it is pinned to.
+/// The image the image tab shows, the focused console's, with the console it is pinned to.
 #[cfg(test)]
 pub(crate) fn shown_image(window: &crate::Window) -> Option<(usize, PathBuf)> {
-    let image = &window.image;
-    Some((image.origin()?.pane, image.path()?.to_owned()))
+    let slot = image::focused(window)?;
+    Some((slot.origin()?.pane, slot.path()?.to_owned()))
 }
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {

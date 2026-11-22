@@ -1,7 +1,7 @@
 //! Send: a copy of the image with its marks written into the origin console's own folder, then one
 //! line naming the copy, with the notes, typed into that console and submitted with Enter.
 use super::super::delivery::{self, Enter, Refusal};
-use super::flatten;
+use super::{Slot, flatten};
 use super::tools::Asked;
 use crate::viewer::load::{Job, take};
 use eframe::egui;
@@ -241,21 +241,35 @@ fn copy_path(window: &crate::Window, name: usize) -> Result<PathBuf, String> {
 pub(crate) fn aim(window: &mut crate::Window) {
     // A Send on its way keeps the name its line showed: the first free name is no longer it once
     // the worker creates the copy, and the line painted must stay the line that will be typed.
-    let shown = window.image.document();
+    let shown = super::focused(window);
     let in_flight = window.image.send.in_flight();
     let kept = in_flight
-        .filter(|r| Some(r.document) == shown)
+        .filter(|r| Some(r.document) == shown.and_then(Slot::document))
         .map(|r| r.path.clone());
     if let Some(path) = kept {
         window.image.send.target = Some(Ok(path));
         return;
     }
-    let target = window
-        .image
-        .origin()
-        .filter(|_| window.image.has_marks())
-        .map(|origin| copy_path(window, origin.pane));
+    let target = shown
+        .filter(|slot| slot.has_marks())
+        .and_then(Slot::origin)
+        .map(|origin| origin.pane)
+        .map(|pane| copy_path(window, pane));
     window.image.send.target = target;
+}
+
+/// The slot of the console `pane`, where everything a Send for it has to say goes.
+fn slot(window: &mut crate::Window, pane: usize) -> Option<&mut Slot> {
+    super::slot_of(&mut window.tabs, pane)
+}
+
+/// Says `said` in the slot of the console `pane`. A console that closed took its slot with it:
+/// what is left to say goes to standard error, never under another console's image.
+fn say(window: &mut crate::Window, pane: usize, said: String) {
+    match slot(window, pane) {
+        Some(slot) => slot.say(said),
+        None => eprintln!("{said}"),
+    }
 }
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
@@ -271,17 +285,20 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
         Phase::Enter(enter, at) if frame > at => {
+            let pane = enter.0;
             if let Err(refusal) = delivery::press(window, enter) {
-                window.image.say(format!(
-                    "The line was typed, but Enter was not pressed: {refusal}."
-                ));
+                let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
+                say(window, pane, said);
             }
             Phase::Idle
         }
-        Phase::Asked(request) => start(window, request, ctx).unwrap_or_else(|why| {
-            window.image.say(format!("{why}; nothing was sent."));
-            Phase::Idle
-        }),
+        Phase::Asked(request) => {
+            let pane = request.pane;
+            start(window, request, ctx).unwrap_or_else(|why| {
+                say(window, pane, format!("{why}; nothing was sent."));
+                Phase::Idle
+            })
+        }
         phase => phase,
     };
     window.image.send.phase = match phase {
@@ -310,7 +327,7 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
         format!("{}, and the copy's worker reported: {why}", Refusal::Closed)
     };
     let left = forsaken_folder(window, request);
-    window.image.say(format!("{why}; nothing was sent{left}."));
+    say(window, request.pane, format!("{why}; nothing was sent{left}."));
 }
 
 /// A cancelled Send's worker ended: the copy it wrote is removed, and with it the folder of a
@@ -341,12 +358,12 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             // Send is greyed out while the worker is parked, and the drawer says why: once it
             // ends cleanly, that is no longer true. Send is said ready only where it would be:
             // with marks to send and a folder to write their copy into.
-            let ready = window.image.has_marks()
-                && window
-                    .image
-                    .origin()
-                    .is_some_and(|o| copy_path(window, o.pane).is_ok());
-            let notice = &mut window.image.notice;
+            let ready = copy_path(window, request.pane).is_ok();
+            let Some(slot) = slot(window, request.pane) else {
+                return;
+            };
+            let ready = ready && slot.has_marks();
+            let notice = &mut slot.notice;
             if notice
                 .as_deref()
                 .is_some_and(|n| n.contains(STILL_FINISHING))
@@ -360,12 +377,14 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
     // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
     eprintln!("{said}");
     // The worker it waited for has ended: a notice saying so is no longer true, and is not kept.
-    let notice = &mut window.image.notice;
-    if notice
-        .as_deref()
-        .is_some_and(|n| n.contains(STILL_FINISHING))
-    {
-        *notice = Some(CANCELLED.into());
+    if let Some(slot) = slot(window, request.pane) {
+        let notice = &mut slot.notice;
+        if notice
+            .as_deref()
+            .is_some_and(|n| n.contains(STILL_FINISHING))
+        {
+            *notice = Some(CANCELLED.into());
+        }
     }
     window.image.send.unshown = Some(said);
 }
@@ -417,14 +436,17 @@ fn start(
     if window.image.send.parked.is_some() {
         return Err(STILL_FINISHING.into());
     }
-    if window.image.document() != Some(request.document) {
+    let opened = |window: &mut crate::Window| slot(window, request.pane).and_then(|s| s.document());
+    if opened(window) != Some(request.document) {
         return Err(REPLACED.into());
     }
     if copy_path(window, request.pane)? != request.path {
         return Err("The copy's name changed since the line was shown".into());
     }
     delivery::check(window, request.pane, &request.line).map_err(|r| r.to_string())?;
-    let (original, marks) = window.image.to_flatten().ok_or("The image is not loaded")?;
+    let (original, marks) = slot(window, request.pane)
+        .and_then(|slot| slot.to_flatten())
+        .ok_or("The image is not loaded")?;
     let job = flatten::start(original, marks, request.path.clone(), ctx.clone())?;
     Ok(Phase::Writing(request, job))
 }
@@ -437,7 +459,8 @@ fn deliver(
     path: &Path,
     ctx: &egui::Context,
 ) -> Phase {
-    let sent = if window.image.document() == Some(request.document) {
+    let opened = slot(window, request.pane).and_then(|s| s.document());
+    let sent = if opened == Some(request.document) {
         let send = delivery::Send {
             text: &request.line,
             submit: true,
@@ -449,9 +472,11 @@ fn deliver(
     match sent {
         Ok(enter) => {
             if let Some(pane) = window.all_panes_mut().find(|p| p.name == request.pane) {
-                pane.annotated.record(path.to_owned());
+                pane.image.annotated.record(path.to_owned());
             }
-            window.image.sent();
+            if let Some(slot) = slot(window, request.pane) {
+                slot.sent();
+            }
             ctx.request_repaint();
             enter.map_or(Phase::Idle, |enter| {
                 Phase::Enter(enter, ctx.cumulative_frame_nr())
@@ -466,9 +491,8 @@ fn deliver(
                 ),
             };
             let left = forsaken_folder(window, &request);
-            window
-                .image
-                .say(format!("{why}; nothing was sent and {removed}{left}."));
+            let said = format!("{why}; nothing was sent and {removed}{left}.");
+            say(window, request.pane, said);
             Phase::Idle
         }
     }
@@ -533,7 +557,7 @@ mod tests {
             let copy = folder.join("annotated-1.png");
             std::fs::write(&copy, b"png").unwrap();
             let pane = window.all_panes_mut().find(|p| p.name == *name).unwrap();
-            pane.annotated.record(copy);
+            pane.image.annotated.record(copy);
             pane.panel = Some(dir);
             folders.push(folder);
         }
@@ -564,7 +588,7 @@ mod tests {
             let copy = folder.join("annotated-1.png");
             std::fs::write(&copy, b"png").unwrap();
             let pane = window.all_panes_mut().find(|p| p.name == name).unwrap();
-            pane.annotated.record(copy);
+            pane.image.annotated.record(copy);
             pane.panel = Some(dir);
             folders.push((name, folder));
         }

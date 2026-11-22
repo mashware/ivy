@@ -157,13 +157,14 @@ pub(crate) fn show_image(window: &mut Window, keys: bool) {
     }
 }
 
-/// Whether the shown image carries marks or notes not yet sent, which would be lost: if so it is
-/// shown, says so, and keeps them, as unsent review comments keep their review.
-pub(super) fn keeps_marks(window: &mut Window) -> bool {
-    if !window.image.has_marks() {
+/// Whether the image of the console `pane` carries marks or notes not yet sent, which would be
+/// lost: if so it is shown, says so, and keeps them, as unsent review comments keep their review.
+/// Another console's marks are not its business.
+pub(super) fn keeps_marks(window: &mut Window, pane: usize) -> bool {
+    let Some(slot) = super::image::slot_of(&mut window.tabs, pane).filter(|s| s.has_marks()) else {
         return false;
-    }
-    window.image.say(UNSENT_MARKS);
+    };
+    slot.say(UNSENT_MARKS);
     show_image(window, true);
     true
 }
@@ -183,7 +184,7 @@ pub(super) fn showing_image(window: &Window) -> bool {
 /// The console the shown document was opened from.
 pub(super) fn shown_origin(window: &Window) -> Option<&super::Source> {
     if showing_image(window) {
-        window.image.origin()
+        super::image::focused(window)?.origin()
     } else {
         window.viewer.origin.as_ref()
     }
@@ -194,7 +195,7 @@ pub(super) fn shown_origin(window: &Window) -> Option<&super::Source> {
 pub(crate) enum NotOpened {
     /// The console it was printed in is gone.
     Gone,
-    /// The image shown has marks not yet sent; the drawer shows it and says so.
+    /// The console's image has marks not yet sent; the drawer shows it and says so.
     Marks,
 }
 
@@ -207,10 +208,10 @@ impl std::fmt::Display for NotOpened {
     }
 }
 
-/// Opens an image in the drawer's image tab, pinned to the console it was printed in. A
-/// relative path is read from that console's directory, as the review reads its repository.
-/// Refused when that console is gone or the image shown keeps unsent marks; the refusals of the
-/// image itself, a file that does not decode among them, are painted in the drawer.
+/// Opens an image in the slot of the console it was printed in, focuses that console and shows
+/// the drawer's image tab. A relative path is read from that console's directory, as the review
+/// reads its repository. Refused when that console is gone or its image keeps unsent marks; the
+/// refusals of the image itself, a file that does not decode among them, are painted in the drawer.
 pub(crate) fn open_image_target(
     window: &mut Window,
     pane: usize,
@@ -219,19 +220,37 @@ pub(crate) fn open_image_target(
     let Some(source) = source(window, pane) else {
         return Err(NotOpened::Gone);
     };
-    if keeps_marks(window) {
+    focus(window, pane);
+    if keeps_marks(window, pane) {
         return Err(NotOpened::Marks);
     }
     let path = match &source.cwd {
         Some(cwd) if path.is_relative() => cwd.join(path),
         _ => path,
     };
-    window.image.open(source, path);
+    let Some(slot) = super::image::slot_of(&mut window.tabs, pane) else {
+        return Err(NotOpened::Gone);
+    };
+    window.image.open(slot, source, path);
     show_image(window, true);
-    if let Some(ctx) = window.viewer.context.clone() {
-        window.image.poll(&ctx);
+    if let Some(ctx) = window.viewer.context.clone()
+        && let Some(slot) = super::image::slot_of(&mut window.tabs, pane)
+    {
+        slot.poll(&ctx);
     }
     Ok(())
+}
+
+/// Gives the console `pane` the keys, showing its tab: the image tab shows the focused console's.
+fn focus(window: &mut Window, pane: usize) {
+    if let Some(tab) = window
+        .tabs
+        .iter()
+        .position(|tab| tab.panes().iter().any(|p| p.name == pane))
+    {
+        window.active = tab;
+        window.tabs[tab].focus = pane;
+    }
 }
 
 /// Close one tab of the drawer: what it showed is forgotten, the drawer moves to the next tab the
@@ -248,10 +267,13 @@ pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::C
     .find(|&(tool, shown)| shown && tool != closed)
     .map(|(tool, _)| tool);
     if closed == Tool::Image {
-        if keeps_marks(window) {
+        let focus = window.active().focus;
+        if keeps_marks(window, focus) {
             return;
         }
-        window.image.clear();
+        if let Some(slot) = super::image::slot_of(&mut window.tabs, focus) {
+            slot.clear();
+        }
     } else {
         let markdown = closed == Tool::Document;
         let state = if window.viewer.tool_markdown.unwrap_or(true) == markdown {
@@ -517,7 +539,7 @@ mod tests {
         };
         open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
         open_image_target(&mut window, names[1], PathBuf::from("/shots/screen.png")).unwrap();
-        assert_eq!(window.image.origin().unwrap().pane, names[1]);
+        assert_eq!(super::super::image::focused(&window).unwrap().origin().unwrap().pane, names[1]);
         assert_eq!(active(&window), Some(Tool::Image));
         assert_eq!(
             strip(&window),
@@ -568,9 +590,9 @@ mod tests {
             crate::viewer::shown_image(&window),
             Some((names[0], path.join("shot.png")))
         );
-        while !window.image.loaded() {
+        while !super::super::image::focused(&window).unwrap().loaded() {
             one_frame_in(&mut window, &ctx, area, vec![]);
-            assert!(Instant::now() < deadline, "{:?}", window.image.message());
+            assert!(Instant::now() < deadline, "{:?}", super::super::image::focused(&window).unwrap().message());
             std::thread::sleep(Duration::from_millis(10));
         }
         window
@@ -581,9 +603,7 @@ mod tests {
         assert_eq!(source(&mut window, names[1]).unwrap().cwd, None);
         open_image_target(&mut window, names[1], PathBuf::from("shot.png")).unwrap();
         assert!(
-            window
-                .image
-                .message()
+            super::super::image::focused(&window).unwrap().message()
                 .is_some_and(|why| why.contains("working directory"))
         );
     }
