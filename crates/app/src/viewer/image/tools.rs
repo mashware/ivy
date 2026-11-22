@@ -437,7 +437,13 @@ pub(super) fn notes(
         None => Err("Nothing can be sent from here.".to_owned()),
     };
     if let Some(rect) = layout.footer {
-        footer(ui, rect, &line, sending.busy_for(document), (refused, &roles));
+        footer(
+            ui,
+            rect,
+            &line,
+            sending.busy_for(document),
+            (refused, &roles),
+        );
     }
     if cancelled {
         return Some(Asked::Cancel);

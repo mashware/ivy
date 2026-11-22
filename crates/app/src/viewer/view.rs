@@ -24,11 +24,7 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    (tabs, title, image): (
-        &super::drawer::Tabs,
-        &super::drawer::Title,
-        Body,
-    ),
+    (tabs, title, image): (&super::drawer::Tabs, &super::drawer::Title, Body),
 ) {
     let namespace = if state.kind.is_document() {
         "markdown-viewer"
@@ -135,9 +131,11 @@ pub(super) fn show(
                         image.show(slot, &mut body_ui, theme, state.space);
                     }
                     Body::Image(None) => {
-                        egui::Frame::new().inner_margin(14).show(&mut body_ui, |ui| {
-                            ui.label(NO_IMAGE);
-                        });
+                        egui::Frame::new()
+                            .inner_margin(14)
+                            .show(&mut body_ui, |ui| {
+                                ui.label(NO_IMAGE);
+                            });
                     }
                     Body::Document => body_content(state, &mut body_ui, theme, unavailable),
                 }

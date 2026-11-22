@@ -253,9 +253,12 @@ pub(crate) fn before_keys(
     let frame = ctx.cumulative_frame_nr();
     // The drawer's own buttons change the partition, so they are resolved before final tiling,
     // against the drawer as displayed.
-    let drawer = matches!(active(window), Some(Tool::Document | Tool::Image | Tool::Git))
-        .then_some(geometry.dock)
-        .flatten();
+    let drawer = matches!(
+        active(window),
+        Some(Tool::Document | Tool::Image | Tool::Git)
+    )
+    .then_some(geometry.dock)
+    .flatten();
     let list = crate::explorer::list_rect(window);
     let target = |window: &Window| {
         ctx.input(|i| i.pointer.interact_pos())

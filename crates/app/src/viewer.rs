@@ -13,9 +13,9 @@ mod palette;
 mod review;
 mod view;
 
+use crate::sidebar::Tool;
 pub(crate) use drawer::StripAction;
 use eframe::egui;
-use crate::sidebar::Tool;
 use load::{Job, Kind, Loaded};
 use std::{
     path::PathBuf,
@@ -566,7 +566,10 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
     // An empty image tab names the focused console, which is there by definition.
     if let Some(pane) = origin::empty_image_tab(window) {
         return drawer::Title {
-            project: pane.project.as_ref().map(|badge| (badge.name.clone(), badge.ink)),
+            project: pane
+                .project
+                .as_ref()
+                .map(|badge| (badge.name.clone(), badge.ink)),
             folder: pane
                 .program
                 .as_ref()

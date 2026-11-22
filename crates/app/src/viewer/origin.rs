@@ -548,7 +548,14 @@ mod tests {
         };
         open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
         open_image_target(&mut window, names[1], PathBuf::from("/shots/screen.png")).unwrap();
-        assert_eq!(super::super::image::focused(&window).unwrap().origin().unwrap().pane, names[1]);
+        assert_eq!(
+            super::super::image::focused(&window)
+                .unwrap()
+                .origin()
+                .unwrap()
+                .pane,
+            names[1]
+        );
         assert_eq!(active(&window), Some(Tool::Image));
         assert_eq!(
             strip(&window),
@@ -601,7 +608,11 @@ mod tests {
         );
         while !super::super::image::focused(&window).unwrap().loaded() {
             one_frame_in(&mut window, &ctx, area, vec![]);
-            assert!(Instant::now() < deadline, "{:?}", super::super::image::focused(&window).unwrap().message());
+            assert!(
+                Instant::now() < deadline,
+                "{:?}",
+                super::super::image::focused(&window).unwrap().message()
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         window
@@ -612,7 +623,9 @@ mod tests {
         assert_eq!(source(&mut window, names[1]).unwrap().cwd, None);
         open_image_target(&mut window, names[1], PathBuf::from("shot.png")).unwrap();
         assert!(
-            super::super::image::focused(&window).unwrap().message()
+            super::super::image::focused(&window)
+                .unwrap()
+                .message()
                 .is_some_and(|why| why.contains("working directory"))
         );
     }

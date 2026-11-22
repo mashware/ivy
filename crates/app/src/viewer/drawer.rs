@@ -165,11 +165,11 @@ pub(super) fn tabs(window: &crate::Window) -> Tabs {
         changes: git
             .filter(|s| s.origin.is_some() || active == Some(Tool::Git))
             .map(|s| {
-            s.loaded
-                .as_ref()
-                .and_then(|loaded| loaded.diff.as_ref())
-                .map(|diff| diff.files.len())
-        }),
+                s.loaded
+                    .as_ref()
+                    .and_then(|loaded| loaded.diff.as_ref())
+                    .map(|diff| diff.files.len())
+            }),
         document: document
             .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
             .and_then(|path| path.file_name())

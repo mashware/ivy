@@ -1,8 +1,8 @@
 //! Send: a copy of the image with its marks written into the origin console's own folder, then one
 //! line naming the copy, with the notes, typed into that console and submitted with Enter.
 use super::super::delivery::{self, Enter, Refusal};
-use super::{Slot, flatten};
 use super::tools::Asked;
+use super::{Slot, flatten};
 use crate::viewer::load::{Job, take};
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -37,10 +37,10 @@ impl Drop for Written {
 /// What a click on Send fixed: the image it was for, the console, the copy's name and the line
 /// painted under the image and its notes.
 pub(super) struct Request {
-    /// Which opening of an image this Send belongs to, checked again before the copy starts and
-    /// before the line is typed. The drawer refuses to open another image while marks are unsent,
-    /// which they stay until the Send delivers; this id keeps the line off another image should
-    /// that refusal ever give.
+    /// Which opening of an image this Send belongs to, checked against its console's slot again
+    /// before the copy starts and before the line is typed. That console refuses another image
+    /// while its marks are unsent, which they stay until the Send delivers; this id keeps the line
+    /// off another image should that refusal ever give.
     pub(super) document: u64,
     pub(super) pane: usize,
     pub(super) path: PathBuf,
@@ -330,7 +330,11 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
         format!("{}, and the copy's worker reported: {why}", Refusal::Closed)
     };
     let left = forsaken_folder(window, request);
-    say(window, request.pane, format!("{why}; nothing was sent{left}."));
+    say(
+        window,
+        request.pane,
+        format!("{why}; nothing was sent{left}."),
+    );
 }
 
 /// A cancelled Send's worker ended: the copy it wrote is removed, and with it the folder of a
@@ -507,8 +511,8 @@ const CANCELLED: &str = "Send cancelled; nothing was sent.";
 /// Why Send waits while a cancelled Send's worker is still writing its copy.
 const STILL_FINISHING: &str = "Still finishing the previous copy";
 
-/// Why a Send whose image is no longer the one shown goes nowhere.
-const REPLACED: &str = "The image this was drawn on is no longer the one shown";
+/// Why a Send whose image is no longer in its console's slot goes nowhere.
+const REPLACED: &str = "The image this was drawn on is no longer the one in its console";
 
 #[cfg(test)]
 mod tests {

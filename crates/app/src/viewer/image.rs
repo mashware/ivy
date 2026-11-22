@@ -351,8 +351,13 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send =
-            something_to_send.then(|| (origin.label.as_str(), sending.busy_for(*id), sending.parked()));
+        let send = something_to_send.then(|| {
+            (
+                origin.label.as_str(),
+                sending.busy_for(*id),
+                sending.parked(),
+            )
+        });
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
@@ -486,7 +491,10 @@ pub(super) fn slot_of(tabs: &mut [crate::tree::Tab], pane: usize) -> Option<&mut
 /// The slot the image tab shows: the focused console's, in the tab on show.
 pub(super) fn focused(window: &crate::Window) -> Option<&Slot> {
     let tab = window.active();
-    let pane = tab.panes().into_iter().find(|pane| pane.name == tab.focus)?;
+    let pane = tab
+        .panes()
+        .into_iter()
+        .find(|pane| pane.name == tab.focus)?;
     Some(&pane.image.slot)
 }
 
@@ -1181,7 +1189,9 @@ mod tests {
     /// An image holding `original`, decoded and not yet shown.
     fn ready(original: image::RgbaImage) -> Alone {
         let mut alone = Alone::default();
-        alone.image.open(&mut alone.slot, source(), PathBuf::from("/shot.png"));
+        alone
+            .image
+            .open(&mut alone.slot, source(), PathBuf::from("/shot.png"));
         alone.slot.document.as_mut().unwrap().load = Load::Ready {
             original: Arc::new(original),
             gpu: Gpu::Waiting(egui::ColorImage::filled([4, 2], egui::Color32::RED)),
@@ -1746,12 +1756,12 @@ mod tests {
 
     /// How the drawer's body was split around the image on the last pass.
     fn layout(window: &crate::Window, ctx: &egui::Context) -> tools::Layout {
-        let marks = &slot(&window).document.as_ref().unwrap().marks;
+        let marks = &slot(window).document.as_ref().unwrap().marks;
         let something_to_send = !marks.is_empty();
-        let label = slot(&window).origin().unwrap().label.as_str();
+        let label = slot(window).origin().unwrap().label.as_str();
         let sending = &window.image.send;
         let send = something_to_send.then(|| (label, sending.busy(), sending.parked()));
-        let notice = slot(&window).notice.as_deref();
+        let notice = slot(window).notice.as_deref();
         let style = ctx.global_style();
         let refused = egui::Color32::RED;
         let fixed = tools::Fixed::new(ctx, &style, body(window), notice, refused, send);
@@ -1962,7 +1972,10 @@ mod tests {
         focus(&mut window, names[1]);
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(same_place(image_rect(&shapes).unwrap(), zoomed));
-        assert!(!noted(&shapes), "the first console's note shows on the second's image");
+        assert!(
+            !noted(&shapes),
+            "the first console's note shows on the second's image"
+        );
         focus(&mut window, names[0]);
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(noted(&shapes), "the first console's note was lost");
@@ -1984,9 +1997,8 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 64, 32);
         let (mut window, ctx, _) = window_with_image(&path);
-        let grids = |window: &crate::Window| {
-            window.all_panes().map(|p| p.measured).collect::<Vec<_>>()
-        };
+        let grids =
+            |window: &crate::Window| window.all_panes().map(|p| p.measured).collect::<Vec<_>>();
         let before = grids(&window);
         let empty = window.active().panes()[0].name;
         let active_tab = window.active;
@@ -1994,14 +2006,21 @@ mod tests {
         let shapes = painted(&mut window, &ctx, vec![]);
         let dock = window.sidebar.last_dock.unwrap();
         let said = texts(&shapes, dock);
-        assert!(said.iter().any(|t| t == crate::viewer::view::NO_IMAGE), "{said:?}");
         assert!(
-            !said.iter().any(|t| t.contains("unavailable") || t.contains("No source")),
+            said.iter().any(|t| t == crate::viewer::view::NO_IMAGE),
+            "{said:?}"
+        );
+        assert!(
+            !said
+                .iter()
+                .any(|t| t.contains("unavailable") || t.contains("No source")),
             "{said:?}"
         );
         assert!(image_rect(&shapes).is_none());
         assert_eq!(active(&window), Some(Tool::Image));
-        assert!(crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Image).is_some());
+        assert!(
+            crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Image).is_some()
+        );
         painted(&mut window, &ctx, vec![]);
         assert_eq!(grids(&window), before);
     }
@@ -2060,7 +2079,10 @@ mod tests {
         assert_eq!(window.active().focus, kept);
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(same_place(image_rect(&shapes).unwrap(), kept_rect));
-        assert!(!noted(&shapes), "a closed console's marks are still painted");
+        assert!(
+            !noted(&shapes),
+            "a closed console's marks are still painted"
+        );
         assert_eq!(slot(&window).notice, None);
     }
 
@@ -2386,7 +2408,9 @@ mod tests {
             rect
         };
         let mut viewer = Alone::default();
-        viewer.image.open(&mut viewer.slot, source(), PathBuf::from("/shot.png"));
+        viewer
+            .image
+            .open(&mut viewer.slot, source(), PathBuf::from("/shot.png"));
         let at = egui::pos2(150.0, 50.0);
         // Loading, then decoded: no pass before this one painted the image.
         assert_eq!(run(&mut viewer, vec![egui::Event::PointerMoved(at)]), None);
@@ -2746,7 +2770,7 @@ mod tests {
     }
 
     fn marks_of(window: &crate::Window) -> &marks::Marks {
-        &slot(&window).document.as_ref().unwrap().marks
+        &slot(window).document.as_ref().unwrap().marks
     }
 
     fn marks_mut(window: &mut crate::Window) -> &mut marks::Marks {
@@ -3465,7 +3489,7 @@ mod tests {
         let other = folder.0.join("other.png");
         write_png(&other, 64, 32);
         let kept = |window: &crate::Window| {
-            assert_eq!(slot(&window).path(), Some(path.as_path()));
+            assert_eq!(slot(window).path(), Some(path.as_path()));
             assert_eq!(marks_of(window).general, "the header overlaps");
             assert!(crate::viewer::origin::showing_image(window));
         };
@@ -3564,7 +3588,7 @@ mod tests {
     }
 
     fn origin_pane(window: &mut crate::Window) -> &mut crate::Pane {
-        let name = slot(&window).origin().unwrap().pane;
+        let name = slot(window).origin().unwrap().pane;
         window.all_panes_mut().find(|p| p.name == name).unwrap()
     }
 
@@ -3572,7 +3596,7 @@ mod tests {
     /// Answers the line painted under it on that frame.
     fn click_send(window: &mut crate::Window, ctx: &egui::Context) -> String {
         let shapes = painted(window, ctx, vec![]);
-        let label = slot(&window).origin().unwrap().label.clone();
+        let label = slot(window).origin().unwrap().label.clone();
         let (_, button) = text_rect(&shapes, |t| t == format!("Send to {label} and press Enter"))
             .expect("the button names the console");
         let line = text_rect(&shapes, |t| t.starts_with("Annotated screenshot: "))
@@ -3594,7 +3618,7 @@ mod tests {
             assert!(
                 started.elapsed() < Duration::from_secs(30),
                 "{:?}",
-                slot(&window).notice
+                slot(window).notice
             );
             painted(window, ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
@@ -3785,7 +3809,7 @@ mod tests {
         std::fs::write(dir.join("keep"), b"").unwrap();
         let refused = |window: &mut crate::Window, ctx: &egui::Context, why: &str| {
             until_written(window, ctx);
-            let notice = slot(&window).notice.clone().unwrap_or_default();
+            let notice = slot(window).notice.clone().unwrap_or_default();
             assert!(
                 // Refused before the copy was written, not written and then removed.
                 notice.contains(why) && notice.ends_with("; nothing was sent."),
@@ -4203,7 +4227,8 @@ mod tests {
             painted(&mut window, &ctx, vec![]);
             assert!(!window.image.send.parked());
             assert!(!copy.exists(), "the cancelled copy stayed");
-            let said = (case == "cleared").then_some("Send cancelled; nothing was sent. Its copy is gone.");
+            let said = (case == "cleared")
+                .then_some("Send cancelled; nothing was sent. Its copy is gone.");
             assert_eq!(slot(&window).notice.as_deref(), said, "{case}");
         }
     }
@@ -4314,7 +4339,7 @@ mod tests {
         other: &Path,
         started: bool,
     ) -> Option<(PathBuf, std::sync::mpsc::Sender<Result<PathBuf, String>>)> {
-        let name = slot(&window).origin().unwrap().pane;
+        let name = slot(window).origin().unwrap().pane;
         click_send(window, ctx);
         if started {
             painted(window, ctx, vec![]);
@@ -4324,7 +4349,7 @@ mod tests {
         crate::viewer::open_image_target(window, name, other.to_owned()).unwrap();
         // Decoded without a pass, so that the asked Send is still waiting for its frame.
         let begun = Instant::now();
-        while !slot(&window).loaded() {
+        while !slot(window).loaded() {
             slot_mut(window).poll(ctx);
             assert!(begun.elapsed() < Duration::from_secs(30));
             std::thread::sleep(Duration::from_millis(5));
@@ -4347,8 +4372,11 @@ mod tests {
         write_png(&other, 320, 200);
         let (mut window, ctx, dir) = window_to_send(&path, &received);
         let replaced = |window: &crate::Window| {
-            let notice = slot(&window).notice.clone().unwrap_or_default();
-            assert!(notice.contains("no longer the one shown"), "{notice}");
+            let notice = slot(window).notice.clone().unwrap_or_default();
+            assert!(
+                notice.contains("no longer the one in its console"),
+                "{notice}"
+            );
             assert_eq!(marks_of(window).general, "the new image's note");
             assert!(received.so_far().is_empty());
             assert!(!window.image.sending());
