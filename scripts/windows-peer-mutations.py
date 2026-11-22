@@ -72,7 +72,7 @@ def main() -> int:
         source = ROOT / relative
         original = source.read_bytes()
         try:
-            source.write_text(original.decode("utf-8").replace(needle, replacement), encoding="utf-8")
+            source.write_bytes(original.replace(needle.encode("utf-8"), replacement.encode("utf-8")))
             result = subprocess.run(
                 ["cargo", "test", "--locked", "-p", "panel-control", "--lib", "--", test, "--exact", "--nocapture"],
                 cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
