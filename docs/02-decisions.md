@@ -11586,8 +11586,8 @@ before choosing to send, the D42 precedent.
 window's input pass, before the copy is started — the image replaced, the console gone, no
 `PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
 keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
-or an earlier one freed) — and a refused Send writes no file. **From the click to the Enter the
-marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
+or an earlier one freed) — and a refused Send writes no file. **From the click to the typed line
+the marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
 Send clears them, so an edit made meanwhile would be wiped unsent; a Ctrl+Z in the very pass of the
 click is refused too, and so is a second Send. **Until the line is typed, a Cancel beside «Sending…»
 takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
@@ -11610,7 +11610,10 @@ another image in that console while its Send is busy, and other consoles' slots 
 (#198); the Send still carries which opening of an image it belongs to, as a guard should that
 refusal ever give. Each refusal says why and keeps the marks; a delivered Send
 clears them. A failure says everything it knows: a write that fails after its console closed names
-both, and a half-written copy that could not be removed is named with why.
+both, and a half-written copy that could not be removed is named with why. Since #198 a console
+that closes takes its image, marks and notice with it, so what a Send for it still has to say — a
+refusal, a failed write, a cancelled worker's last word — goes to standard error only, never under
+another console's image.
 
 **The copies are the app's to remove.** A console records the copies delivered to it in a field
 declared before its `PanelDir` (since #198 the console's image, `image: viewer::image::Console`), so when its `Pane` is dropped — the console, its tab or the window

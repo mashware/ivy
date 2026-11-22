@@ -1945,8 +1945,8 @@ mod tests {
         }
     }
 
-    /// The image tab shows the focused console's image: focusing the other console shows its own,
-    /// and focusing back shows the first as it was left, at its zoom and with its notes.
+    /// The image tab shows the focused console's image: clicking the other console shows its own,
+    /// and clicking back shows the first as it was left, at its zoom and with its notes.
     #[test]
     fn the_image_tab_follows_the_focus_and_each_console_keeps_its_own() {
         let folder = Folder::new();
@@ -1965,11 +1965,31 @@ mod tests {
                 .any(|t| t.contains("on the first console"))
         };
         assert!(noted(&painted(&mut window, &ctx, vec![])));
+        // A person's click on the console. While the drawer holds the keys the first click only
+        // takes them back, as it does on the Git tab; the next one focuses.
         let focus = |window: &mut crate::Window, name: usize| {
-            let active = window.active;
-            window.tabs[active].focus = name;
+            let at = window
+                .active()
+                .panes()
+                .into_iter()
+                .find(|pane| pane.name == name)
+                .and_then(|pane| pane.painted_console.as_ref())
+                .unwrap()
+                .area
+                .center();
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            painted(window, &ctx, vec![egui::Event::PointerMoved(at)]);
+            painted(window, &ctx, vec![button(true), button(false)]);
         };
         focus(&mut window, names[1]);
+        assert_eq!(window.active().focus, names[0], "the drawer kept the keys");
+        focus(&mut window, names[1]);
+        assert_eq!(window.active().focus, names[1]);
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(same_place(image_rect(&shapes).unwrap(), zoomed));
         assert!(
@@ -1977,6 +1997,7 @@ mod tests {
             "the first console's note shows on the second's image"
         );
         focus(&mut window, names[0]);
+        assert_eq!(window.active().focus, names[0]);
         let shapes = painted(&mut window, &ctx, vec![]);
         assert!(noted(&shapes), "the first console's note was lost");
         assert_eq!(image_rect(&shapes).unwrap().size(), first.size());
@@ -1997,6 +2018,10 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 64, 32);
         let (mut window, ctx, _) = window_with_image(&path);
+        // Every real window runs the integrated chrome.
+        window.chrome.enable();
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![]);
         let grids =
             |window: &crate::Window| window.all_panes().map(|p| p.measured).collect::<Vec<_>>();
         let before = grids(&window);
@@ -4304,7 +4329,7 @@ mod tests {
     /// under: it goes to standard error, and the console left hears nothing of it.
     #[cfg(unix)]
     #[test]
-    fn a_cancelled_send_whose_worker_fails_after_its_console_closed_says_so() {
+    fn a_cancelled_send_whose_worker_fails_after_its_console_closed_says_nothing_under_another() {
         let received = term_core::received::Received::new("annotated-cancel-closed");
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
@@ -4511,7 +4536,7 @@ mod tests {
     /// left.
     #[cfg(unix)]
     #[test]
-    fn a_write_that_fails_after_its_console_closed_says_so_and_leaves_no_folder() {
+    fn a_write_that_fails_after_its_console_closed_leaves_no_folder() {
         let received = term_core::received::Received::new("annotated-failed-closed");
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
