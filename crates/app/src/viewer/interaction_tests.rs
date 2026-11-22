@@ -433,7 +433,15 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
         Some(crate::sidebar::Tool::Image)
     );
     assert_eq!(shown_image(&window), Some((names[1], shot)));
+    assert!(window.viewer.keyboard, "the drawer does not hold the keys");
     assert!(!crate::sidebar::files_visible(&window));
+    assert_eq!(
+        super::image::slot_of(&mut window.tabs, names[0])
+            .and_then(|slot| slot.path())
+            .map(ToOwned::to_owned),
+        Some(path.join("third.png")),
+        "the click touched the other console's image"
+    );
     fn shown(window: &crate::Window) -> &super::image::Slot {
         super::image::focused(window).unwrap()
     }
