@@ -115,6 +115,8 @@ pub fn dispatch_scope_helper() -> Option<i32> {
 #[cfg(target_os = "linux")]
 mod nonblocking;
 pub use foreground::{Ancestry, Argument, ForegroundAncestry, ForegroundScope, NativeProcess};
+#[cfg(windows)]
+pub use foreground::{ProcessIdentity, ProcessObservation};
 #[cfg(any(test, feature = "testing"))]
 pub mod received;
 mod screen;

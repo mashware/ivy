@@ -7,8 +7,21 @@ use std::path::PathBuf;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{ProcessIdentity, ProcessObservation};
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+#[cfg(all(test, not(windows)))]
+#[path = "foreground/windows/arguments.rs"]
+mod windows_arguments;
+#[cfg(all(test, not(windows)))]
+#[path = "foreground/windows/chain.rs"]
+mod windows_chain_test;
+#[cfg(all(test, not(windows)))]
+#[path = "foreground/windows/memory.rs"]
+mod windows_memory_test;
 
 #[cfg(all(test, windows))]
 mod tests {
@@ -204,6 +217,8 @@ pub struct ForegroundScope {
     native: linux::Scope,
     #[cfg(target_os = "macos")]
     native: macos::Scope,
+    #[cfg(windows)]
+    native: windows::Scope,
 }
 
 /// Process identity includes kernel birth ticks so a recycled PID cannot inherit authority.
@@ -241,7 +256,9 @@ pub(crate) fn scope(pty: &crate::Pty) -> io::Result<ForegroundScope> {
     return linux::scope(pty).map(|native| ForegroundScope { native });
     #[cfg(target_os = "macos")]
     return macos::scope(pty).map(|native| ForegroundScope { native });
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    return windows::scope(pty).map(|native| ForegroundScope { native });
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = pty;
         Err(io::ErrorKind::Unsupported.into())
@@ -256,7 +273,9 @@ impl ForegroundScope {
         return self.native.classify_ancestry(pid);
         #[cfg(target_os = "macos")]
         return self.native.classify_ancestry(pid);
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(windows)]
+        return self.native.classify_ancestry(pid);
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = pid;
             Ancestry::Unknown
@@ -268,8 +287,16 @@ impl ForegroundScope {
         return self.native.is_open();
         #[cfg(target_os = "macos")]
         return self.native.is_open();
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(windows)]
+        return self.native.is_open();
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         false
+    }
+
+    /// Observes a live Windows descendant without granting foreground authority.
+    #[cfg(windows)]
+    pub fn observe_process(&self, pid: u32) -> io::Result<ProcessObservation> {
+        self.native.observe_process(pid)
     }
 
     /// The caller must obtain `pid` and `birth` from native socket credentials.
