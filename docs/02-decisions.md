@@ -12113,20 +12113,22 @@ link, and an agent's image is not opened through one`. A link is a name-surrogat
 which is the rule std's `is_symlink` applies: a symbolic link, a junction, or any other tag that
 names a path. A reparse point that names nothing — a cloud placeholder, deduplication,
 compression — passes, as D108 lets it pass: it holds the file's own data behind its filter, and
-refusing it would refuse every image a sync client such as OneDrive keeps. **A path with a `..`
-in it is refused before anything is asked** (`<path> has a «..» in it; give the path without one`),
-on every platform (review round 4): Windows collapses `..` by the text, without asking the disk, so
-in `C:\repo\gone\..\shots\a.png` the walk would stop at the missing `gone` while the open reached
-`shots`, a link, and an agent has no reason to send one. Without a `..`, an entry that is not there
-stops the walk and leaves the path to the open, which has to pass through that same entry and fails;
-**any other error refuses** (`cannot tell whether <path> passes through a link: <error>`), because a
-folder the walk may not look into can still be passed through by the open.
-Where a link leads is never read. The bridge walks before its `stat`, and the image worker walks
-before it opens, **only for an agent's open**: the open carries who named the path to the worker,
-and a person's own click or Files open is not walked. A link swapped in between the walk and the
-open is not caught, the race D108 also leaves. Elsewhere no link is refused: a link leads where
-the user made it reach, as a mapped drive letter does on Windows. That is accepted, not a claim
-that no path there names a host — macOS's `/net` and an autofs `-hosts` map do.
+refusing it could refuse images a sync client such as OneDrive keeps as placeholders. **A path
+with a `..` in it is refused before anything is asked** (`<path> has a «..» in it; give the path
+without one`), on every platform (review round 4): Windows collapses `..` by the text, without
+asking the disk, so in `C:\repo\gone\..\shots\a.png` the walk would stop at the missing `gone`
+while the open reached `shots`, a link, and an agent has no reason to send one. Without a `..`, an
+entry that is not there stops the walk and leaves the path to the open, which has to pass through
+that same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through
+a link: <error>`), because a folder the walk may not look into can still be passed through by the
+open. The drawer follows the window's refusal with «Open it from Files to see it yourself.»: the
+person's own open is theirs to make. Where a link leads is never read. The bridge walks before
+its `stat`, and the image worker walks before it opens, **only for an agent's open**: the open
+carries who named the path to the worker, and a person's own click or Files open is not walked. A
+link swapped in between the walk and the open is not caught, the race D108 also leaves. Elsewhere
+no link is refused: a link leads to what the user made reachable, as a mapped drive letter does on
+Windows. That is accepted, not a claim that no path there names a host — macOS's `/net` and an
+autofs `-hosts` map do.
 
 The MCP bridge also `stat`s the file in its own process, which is not always the agent's, so a
 missing file, a folder, something that is not a regular file or a file over 32 MiB is refused at

@@ -101,7 +101,8 @@ struct Opened {
     path: PathBuf,
     /// Who named the path, which every decode of it is held to: see [`Opener`].
     opener: Opener,
-    /// The reader an agent's open is walked with.
+    /// The reader an agent's open is walked with: on Windows it refuses a path through a link, and
+    /// elsewhere it refuses none (D120).
     links: IsLink,
     load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
@@ -6543,7 +6544,8 @@ mod tests {
         assert_eq!(
             decoded_or_why(&mut window, &ctx, focused),
             Err(format!(
-                "{} passes through a link, and an agent's image is not opened through one",
+                "{} passes through a link, and an agent's image is not opened through one. Open it from \
+                 Files to see it yourself.",
                 path.display()
             ))
         );
@@ -6594,7 +6596,8 @@ mod tests {
         assert_eq!(
             decoded_or_why(&mut window, &ctx, focused),
             Err(format!(
-                "{} passes through a link, and an agent's image is not opened through one",
+                "{} passes through a link, and an agent's image is not opened through one. Open it from \
+                 Files to see it yourself.",
                 through.display()
             ))
         );

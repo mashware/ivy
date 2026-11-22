@@ -283,8 +283,9 @@ pub(crate) struct Room<'a> {
 /// takes its place, and otherwise the drawer opens on it only where the person is working in that
 /// console and nothing else holds the screen or the keys. The keyboard stays where it was. Refused
 /// over that console's unsent marks, with nothing shown and nothing said in the drawer, because the
-/// agent is the one asking. The file itself is not read here: the worker that decodes it refuses a
-/// path through a link first, which a person's own open is spared.
+/// agent is the one asking. The file itself is not read here: the worker that decodes it walks the
+/// path first and, on Windows, refuses one through a link, a walk a person's own open is spared
+/// (D120).
 pub(crate) fn open_for_an_agent(
     window: &mut Window,
     pane: usize,

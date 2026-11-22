@@ -85,10 +85,11 @@ fn is_volume(component: &OsStr) -> bool {
 /// three ways around (D120). Entries are asked from the root down and the walk stops at the first
 /// link, so nothing is asked through one. A path with a `..` in it is refused before anything is
 /// asked: Windows collapses `..` by the text, without asking the disk, so in
-/// `C:\repo\gone\..\shots\a.png` the open reaches `shots` — a link, maybe — through an entry the
-/// walk stopped at because it is not there. Without a `..`, an entry that is not there stops the
-/// walk without a refusal, since the open that follows has to pass through that same entry and
-/// fails; any other error refuses, because the walk can no longer tell what is there.
+/// `C:\repo\gone\..\shots\a.png` the open reaches the folder `C:\repo\shots` — a link, maybe —
+/// past an entry the walk stopped at because it is not there. Without a `..`, an entry that is not
+/// there stops the walk without a refusal, since the open that follows has to pass through that
+/// same entry and fails; any other error refuses, because the walk can no longer tell what is
+/// there.
 ///
 /// `is_link` answers for one entry without following it: [`refused_link`] in the bridge and the
 /// window, and a stand-in in the tests, so the walk and both callers are pinned where no entry is
@@ -133,8 +134,8 @@ pub fn no_link_on_the_way(
 /// the reparse point rather than what it names. std's `is_symlink` is the name-surrogate rule — a
 /// symbolic link, a junction, or any other reparse tag that names another path — so those are what
 /// is refused. A reparse point that is no name (a cloud placeholder, deduplication, compression)
-/// holds the file's own data behind its filter and passes, as D108 lets it pass: refusing it would
-/// refuse every image under a OneDrive-synced folder (D120).
+/// holds the file's own data behind its filter and passes, as D108 lets it pass: refusing it could
+/// refuse images a sync client such as OneDrive keeps as placeholders (D120).
 #[cfg(windows)]
 pub fn refused_link(path: &Path) -> std::io::Result<bool> {
     Ok(std::fs::symlink_metadata(path)?.file_type().is_symlink())

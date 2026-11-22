@@ -737,10 +737,11 @@ replaces it.
 - **On Windows no link is passed through.** If the file, or any folder on its way, is a symbolic
   link, a junction or another reparse point that names a path, the open is refused with `<path>
   passes through a link, and an agent's image is not opened through one`, and a folder or file that
-  cannot be looked at refuses it with `cannot tell whether <path> passes through a link: <error>`.
-  Where a link leads is never read. `panel-mcp` refuses before it asks for the file, and the window
-  refuses again before its worker reads, where the refusal is painted in the drawer. A person's own
-  open of the same file is not refused, and other platforms refuse no link (**D120**).
+  cannot be looked at, other than one that is not there, refuses it with `cannot tell whether
+  <path> passes through a link: <error>`. Where a link leads is never read. `panel-mcp` refuses
+  before it asks for the file, and the window refuses again before its worker reads, where the
+  refusal is painted in the drawer followed by `Open it from Files to see it yourself.` A person's
+  own open of the same file is not refused, and other platforms refuse no link (**D120**).
 - **No `..`.** On every platform a path with a `..` in it is refused with `<path> has a «..» in it;
   give the path without one`, before anything is asked of the disk: Windows collapses it by the
   text, so it could step past a missing folder onto a link (**D120**).

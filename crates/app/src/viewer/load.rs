@@ -242,9 +242,10 @@ fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<P
     use image::{ImageDecoder, ImageFormat, ImageReader};
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
     // The enforcement of what the bridge only advises, for an agent's open; a person's own open is
-    // not walked (D120).
+    // not walked (D120), so the person reading the refusal is told that open is theirs to make.
     if let Some(is_link) = links {
-        panel_control::image::no_link_on_the_way(path, is_link)?;
+        panel_control::image::no_link_on_the_way(path, is_link)
+            .map_err(|why| format!("{why}. Open it from Files to see it yourself."))?;
     }
     let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
@@ -938,7 +939,8 @@ mod tests {
                 .err()
                 .unwrap(),
             format!(
-                "{} passes through a link, and an agent's image is not opened through one",
+                "{} passes through a link, and an agent's image is not opened through one. Open it from \
+                 Files to see it yourself.",
                 missing.display()
             )
         );
