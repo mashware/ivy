@@ -37,6 +37,7 @@ use std::time::Instant;
 struct DeliveryTest {
     capacity: usize,
     full: Option<SyncSender<()>>,
+    armed: Arc<AtomicBool>,
 }
 
 #[cfg(test)]
@@ -1212,13 +1213,21 @@ fn deliver(
         if stop.load(Ordering::Relaxed) {
             return Err(Undelivered::Closing);
         }
+        #[cfg(test)]
+        let report_full = DELIVERY_TEST.with(|test| {
+            test.borrow()
+                .as_ref()
+                .is_some_and(|test| test.armed.load(Ordering::Acquire))
+        });
         match channel.try_send(pending) {
             Ok(()) => return Ok(()),
             Err(TrySendError::Full(returned)) => {
                 #[cfg(test)]
                 DELIVERY_TEST.with(|test| {
-                    if let Some(probe) =
-                        test.borrow_mut().as_mut().and_then(|test| test.full.take())
+                    if let Some(probe) = test
+                        .borrow_mut()
+                        .as_mut()
+                        .and_then(|test| report_full.then(|| test.full.take()).flatten())
                     {
                         let _ = probe.try_send(());
                     }
@@ -2508,8 +2517,8 @@ mod tests {
     ///
     /// A one-shot probe reports an actual full delivery queue before closing starts. The test
     /// takes ownership of the real reader handle and joins it after closing the console, so the
-    /// destructor cannot hide a stuck reader by abandoning it. The receiver stays alive and is
-    /// never drained: only the real close signal can end this delivery wait.
+    /// destructor cannot hide a stuck reader by abandoning it. After the child and ConPTY startup
+    /// barriers, the receiver stays alive and undrained: only the real close signal ends the wait.
     ///
     /// Whole-destructor timing cannot prove that effect: native pseudoconsole cleanup and thread
     /// scheduling can exceed the reader's abandon reserve even when the reader ended correctly.
@@ -2518,7 +2527,9 @@ mod tests {
         use std::sync::mpsc;
 
         const CHILD: &str = "IVY_TEST_FULL_DELIVERY_CHILD";
+        const READY: &str = "IVY_TEST_FULL_DELIVERY_READY";
         if std::env::var_os(CHILD).is_some() {
+            std::fs::write(std::env::var_os(READY).unwrap(), "ready").unwrap();
             // A native executable on every platform, with real printable output for ConPTY.
             let mut output = std::io::stdout().lock();
             for counter in 0u64.. {
@@ -2527,13 +2538,32 @@ mod tests {
             unreachable!();
         }
         let (full, observed_full) = mpsc::sync_channel(1);
+        let armed = Arc::new(AtomicBool::new(false));
         // This tests closing a full queue, not its capacity or ConPTY's output coalescing.
         DELIVERY_TEST.with(|test| {
             *test.borrow_mut() = Some(DeliveryTest {
                 capacity: 1,
                 full: Some(full),
+                armed: Arc::clone(&armed),
             });
         });
+        struct ReadyDirectory(std::path::PathBuf);
+        impl Drop for ReadyDirectory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let directory = std::env::temp_dir().join(format!(
+            "ivy-delivery-ready-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("exclusively own the fixture marker directory");
+        let directory = ReadyDirectory(directory);
+        let marker = directory.0.join("ready");
         let executable = std::env::current_exe().unwrap();
         let (mut pty, output) = Pty::spawn_with_env(
             executable.to_str().unwrap(),
@@ -2543,12 +2573,64 @@ mod tests {
                 "--nocapture",
             ],
             Size::default(),
-            &[(CHILD, Some(OsStr::new("1")))],
+            &[
+                (CHILD, Some(OsStr::new("1"))),
+                (READY, Some(marker.as_os_str())),
+            ],
         )
         .expect("launch native delivery fixture");
-        observed_full
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the actual reader reached a full delivery queue");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut startup = Vec::new();
+        let mut cursor_answers = 0;
+        while !std::fs::read_to_string(&marker).is_ok_and(|value| value == "ready")
+            || (cfg!(windows) && cursor_answers == 0)
+        {
+            if std::time::Instant::now() >= deadline {
+                panic!(
+                    "native delivery fixture startup timed out: ready={}, child={:?}, ending={:?}, startup={:?}",
+                    marker.exists(),
+                    pty.child.as_mut().unwrap().try_wait(),
+                    pty.ending(),
+                    String::from_utf8_lossy(&startup)
+                );
+            }
+            match output.try_recv() {
+                Ok(bytes) => {
+                    // Retain only this fixture's controlled startup; preserve split ESC[6n queries.
+                    assert!(
+                        startup.len() + bytes.len() <= 64 * 1024,
+                        "unexpected startup output volume"
+                    );
+                    startup.extend(bytes);
+                    let queries = startup
+                        .windows(4)
+                        .filter(|bytes| *bytes == b"\x1b[6n")
+                        .count();
+                    for _ in cursor_answers..queries {
+                        pty.write(b"\x1b[1;1R").unwrap();
+                    }
+                    cursor_answers = queries;
+                }
+                Err(mpsc::TryRecvError::Empty) => thread::yield_now(),
+                Err(mpsc::TryRecvError::Disconnected) => panic!(
+                    "native delivery fixture output disconnected before ready: child={:?}, ending={:?}, startup={:?}",
+                    pty.child.as_mut().unwrap().try_wait(),
+                    pty.ending(),
+                    String::from_utf8_lossy(&startup)
+                ),
+            }
+        }
+        // From this point output stays alive and undrained through the full/close/join assertions.
+        armed.store(true, Ordering::Release);
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if let Err(problem) = observed_full.recv_timeout(remaining) {
+            panic!(
+                "the actual reader never reached a full delivery queue: {problem:?}, child={:?}, ending={:?}, cursor_answers={cursor_answers}, startup={:?}",
+                pty.child.as_mut().unwrap().try_wait(),
+                pty.ending(),
+                String::from_utf8_lossy(&startup)
+            );
+        }
         let reader = pty.reader.take().expect("the console owns its real reader");
 
         let (done, answer) = mpsc::channel();

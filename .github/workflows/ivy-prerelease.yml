@@ -67,6 +67,13 @@ jobs:
       - name: Check Windows launch helper contracts
         shell: pwsh
         run: ./packaging/windows/test-launch-contract.ps1
+      - name: Check native full-queue reader completion before the workspace
+        shell: pwsh
+        run: |
+          $name = 'tests::closing_with_the_channel_full_ends_reader_without_draining'
+          cargo test --locked -p term-core --lib -- $name --exact --nocapture 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
       - name: Lint all Windows workspace targets
         shell: pwsh
         run: |
