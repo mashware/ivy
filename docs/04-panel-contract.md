@@ -745,6 +745,14 @@ replaces it.
 - **No `..`.** On every platform a path with a `..` in it is refused with `<path> has a «..» in it;
   give the path without one`, before anything is asked of the disk: Windows collapses it by the
   text, so it could step past a missing folder onto a link (**D120**).
+- **No name Windows rewrites.** On every platform, and before anything is asked of the disk, a path
+  is refused when a folder or file on it has a name made only of dots (`<path> has «<name>» in it,
+  a name made only of dots; give the path without it`), a name that ends in a dot or a space
+  (`<path> has «<name>» in it, a name that ends in a dot or a space, which Windows drops; give a
+  path whose names do not end in one`), or a reserved device name — CON, PRN, AUX, NUL, COM0–9,
+  LPT0–9 and COM¹–³, LPT¹–³, in any case, with or without an extension (`<path> has «<name>» in
+  it, which Windows reads as a device; give the path without it`). The check for links asks each
+  entry as the end of a path, where Windows reads those names as another entry (**D120**).
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
   person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
   image — it opened on it, or its Image tab was already on show for that console — and `opened; the

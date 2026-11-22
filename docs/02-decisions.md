@@ -12117,7 +12117,22 @@ refusing it could refuse images a sync client such as OneDrive keeps as placehol
 with a `..` in it is refused before anything is asked** (`<path> has a «..» in it; give the path
 without one`), on every platform (review round 4): Windows collapses `..` by the text, without
 asking the disk, so in `C:\repo\gone\..\shots\a.png` the walk would stop at the missing `gone`
-while the open reached `shots`, a link, and an agent has no reason to send one. Without a `..`, an
+while the open reached `shots`, a link, and an agent has no reason to send one. **The names Win32
+rewrites at the end of a path are refused the same way** (review round 5), because the walk asks
+each entry as the end of a path while the open passes through it as written: a name made only of
+dots (`...` is asked as the folder it sits in), one that ends in a dot or a space (`x.` is asked as
+`x`), and a reserved device name — CON, PRN, AUX, NUL, COM0–9 and LPT0–9 with the superscripts
+¹ ² ³ as well, in any case, with or without an extension — which is asked as the device. Each kind
+has its sentence, naming the name and what to send instead. That is a junction named `x.` or
+COM9, made through `\\?\`, that the walk could not see. The price is images an agent cannot open
+by such a name on any platform, judged small. How likely such a junction was is no reason to let
+it through: git refuses those names in a checkout on Windows (`core.protectNTFS`) and Windows'
+archive tools refuse them when unpacking, so the two sources this rule names — a cloned repository,
+an unpacked archive — do not bring one, and what is left is local code making it through `\\?\`,
+which could reach a share by itself; but the walk's claim is that it asks what the open passes
+through, and with these names it did not. Discarded: asking each folder with a trailing
+separator, which turns the last-segment rewrites off for the dots and spaces but could not be
+shown to for the device names. Without those, an
 entry that is not there stops the walk and leaves the path to the open, which has to pass through
 that same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through
 a link: <error>`), because a folder the walk may not look into can still be passed through by the
