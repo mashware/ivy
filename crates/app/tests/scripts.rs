@@ -584,6 +584,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/viewer.rs", include_str!("../src/viewer.rs")),
     (
+        "app/src/viewer/focus.rs",
+        include_str!("../src/viewer/focus.rs"),
+    ),
+    (
         "app/src/viewer/load.rs",
         include_str!("../src/viewer/load.rs"),
     ),
