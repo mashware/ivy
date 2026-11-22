@@ -107,9 +107,16 @@ enum Gpu {
 }
 
 impl Viewer {
-    /// Replaces the image `slot` held with `path`, read from `origin`'s console.
+    /// Replaces the image `slot` held with `path`, read from `origin`'s console. A pan latched on
+    /// another console's image is that image's, and an agent may open into a console the person is
+    /// not looking at, so only a pan on the image being replaced is let go.
     pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf) {
-        self.panning = None;
+        if self
+            .painted
+            .is_some_and(|(_, opening)| slot.document() == Some(opening))
+        {
+            self.panning = None;
+        }
         self.opened += 1;
         slot.open(self.opened, origin, path);
     }
@@ -2510,9 +2517,8 @@ mod tests {
     }
 
     /// On a console with no image the image tab stays selected and says how to open one with
-    /// Ctrl+click, named after that console and not as unavailable; the drawer neither closes nor
-    /// switches, so no console's grid changes. The agent's own way in is not named until the agent
-    /// has a tool that opens one.
+    /// Ctrl+click or by its agent, named after that console and not as unavailable; the drawer
+    /// neither closes nor switches, so no console's grid changes.
     #[test]
     fn a_console_with_no_image_keeps_the_tab_and_says_how_to_open_one() {
         use crate::sidebar::{Tool, active};
@@ -2540,7 +2546,7 @@ mod tests {
         };
         let how = format!(
             "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a \
-             screenshot and press Paste screenshot or {chord} here."
+             screenshot and press Paste screenshot or {chord} here. Its agent can open one too."
         );
         assert!(said.contains(&how), "{said:?}");
         assert!(
@@ -6571,5 +6577,34 @@ mod tests {
         alone.slot.mark_unseen();
         assert_eq!(frame(&mut alone), Duration::ZERO);
         assert!(!alone.slot.unseen);
+    }
+
+    /// An agent opening an image in another console leaves a pan the person is making on the image
+    /// they are looking at: it keeps moving with the pointer.
+    #[test]
+    fn an_agents_image_elsewhere_does_not_drop_a_pan_in_progress() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let other = window.active().panes()[0].name;
+        assert_ne!(window.active().focus, other);
+        let small = folder.0.join("small.png");
+        write_png(&small, 64, 32);
+        let at = start_middle_drag(&mut window, &ctx);
+        let before = settle(&mut window, &ctx);
+        let (answer, _) = agent_pass(
+            &mut window,
+            &ctx,
+            vec![egui::Event::PointerMoved(at)],
+            other,
+            &small,
+        );
+        assert!(answer.is_ok(), "{answer:?}");
+        let by = egui::vec2(-30.0, -45.0);
+        travel(&mut window, &ctx, at, by);
+        let after = settle(&mut window, &ctx);
+        assert!(
+            (after.min - (before.min + by)).length() < 0.5,
+            "the pan stopped: {before:?} -> {after:?}"
+        );
     }
 }

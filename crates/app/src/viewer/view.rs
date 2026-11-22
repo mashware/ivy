@@ -13,11 +13,12 @@ pub(super) enum Body<'a> {
     ),
 }
 
-/// What the image tab says on a console with no image. The chord is the platform's: Cmd on macOS.
+/// What the image tab says on a console with no image: the person's two ways in — the paste chord is
+/// the platform's, Cmd on macOS — and its agent's (D120).
 pub(super) const NO_IMAGE: &str = if cfg!(target_os = "macos") {
-    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Cmd+V here."
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Cmd+V here. Its agent can open one too."
 } else {
-    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Ctrl+V here."
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Ctrl+V here. Its agent can open one too."
 };
 
 /// The radius of the body's bottom corners, inside the drawer's one-point frame.

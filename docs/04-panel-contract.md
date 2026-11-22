@@ -449,8 +449,13 @@ is that **a channel has somebody to tell** what that tolerance dropped — see
 ← {"ok":true,"text":"..."}
 → {"tool":"split_close","pane":"<opaque handle>"}
 ← {"ok":true}
+→ {"tool":"image_open","path":"/home/me/shots/login.png"}
+← {"ok":true,"text":"opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do"}
 ← {"ok":false,"error":"..."}
 ```
+
+On Windows the path is written with its drive, `"C:\\Users\\me\\shots\\login.png"`: `/home/…` has
+no drive there and is relative.
 
 ### What fell away is said
 
@@ -714,6 +719,30 @@ only verbs that name another pane:
   button does not revoke it**: that is the application writing on the person's behalf, not the person
   taking the console back. This is an **application** boundary and not a confidentiality one: the
   program `split_open` launched keeps reading whatever the person types afterwards.
+
+### `image_open`
+
+It shows an image to the person in the drawer of **the console whose endpoint asked** — it names no
+pane, and a `pane` sent beside it reaches nothing (**D120**). Each console holds one image, and this
+replaces it.
+
+- **`path` is absolute and on this machine.** A relative path is refused — there is no directory it
+  could honestly be read from — and on Windows so is a share or a device (`\\host\share\…`,
+  `\\?\UNC\…`, `\\.\…`). No extension is asked for: the file's bytes decide whether it is a PNG or
+  a JPEG, and one that is neither is opened and says so in the drawer. The line's own bound is the
+  only bound on the path's length.
+- **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
+  person is working in` where the drawer opened on it, and `opened; the person is not looking at this
+  console's drawer, so its tab and header mark a new image until they do` everywhere else. The
+  keyboard never moves.
+- **It is refused** while that console's image carries marks the person has not sent (`the image open
+  in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the
+  marks, then call image_open again`) and when the console that asked is gone. Malformed lines say
+  `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
+  not absolute` or `an image_open's "path" is not on this machine`, and the connection lives on.
+- **`panel-mcp` checks the file first**, in the agent's own process: a missing file, a folder,
+  something that is not a regular file and a file over 32 MiB are refused before the window is asked.
+  Those checks are a courtesy; the window's read is the enforcement.
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport
