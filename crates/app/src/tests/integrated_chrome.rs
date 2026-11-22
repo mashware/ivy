@@ -1046,6 +1046,27 @@ mod tests {
         assert_eq!(window.active().root.describe(), original);
     }
 
+    /// D117: the header's «Paste screenshot» asks the clipboard for its image, for the console
+    /// whose header was pressed, focused or not.
+    #[test]
+    fn a_header_paste_asks_the_clipboard_for_its_own_console() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let (service, harness) = crate::clipboard::Service::testing();
+        window.clipboard = service;
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let dir = crate::PanelDir::create().unwrap();
+        window.all_panes_mut().find(|p| p.name == names[1]).unwrap().panel = Some(dir);
+        let paste = control(&window, &ctx, area, 1, 87.5);
+        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(paste)]);
+        frame(&mut window, &ctx, area, click_at(paste));
+        assert_eq!(harness.requested_image(), Some(names[1]));
+        assert_ne!(window.active().focus, names[1], "the paste took the focus");
+    }
+
     fn tall_area() -> egui::Rect {
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))
     }

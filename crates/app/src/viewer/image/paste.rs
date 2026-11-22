@@ -127,22 +127,33 @@ fn write(
         .and_then(|p| p.panel.as_ref())
         .map(|dir| dir.path().to_owned())
         .ok_or(NO_FOLDER)?;
-    let raw = u64::from(image.width()) * u64::from(image.height()) * 4;
-    if raw > DECODE_LIMIT {
+    if decodes_too_large(image.width(), image.height()) {
         return Err(too_large(DECODE_LIMIT));
     }
     let job = spawn(ctx.clone(), move || {
-        let mut png = Vec::new();
-        image
-            .write_with_encoder(image::codecs::png::PngEncoder::new(&mut png))
-            .map_err(|e| format!("The screenshot could not be encoded: {e}"))?;
-        if png.len() > IMAGE_LIMIT {
-            return Err(too_large(IMAGE_LIMIT as u64));
-        }
+        let png = encode(&image, IMAGE_LIMIT)?;
         write_new(&folder, &png)
     })?;
     window.image.paste.writing = Some((pane, by, job));
     Ok(())
+}
+
+/// Whether the viewer's decode would refuse an image this size: it decodes to RGBA, four bytes a
+/// pixel, under the same limit.
+fn decodes_too_large(width: u32, height: u32) -> bool {
+    u64::from(width) * u64::from(height) * 4 > DECODE_LIMIT
+}
+
+/// The screenshot as a PNG, refused over `limit` bytes as an opened image's file would be.
+fn encode(image: &image::RgbaImage, limit: usize) -> Result<Vec<u8>, String> {
+    let mut png = Vec::new();
+    image
+        .write_with_encoder(image::codecs::png::PngEncoder::new(&mut png))
+        .map_err(|e| format!("The screenshot could not be encoded: {e}"))?;
+    if png.len() > limit {
+        return Err(too_large(limit as u64));
+    }
+    Ok(png)
 }
 
 fn too_large(limit: u64) -> String {
@@ -255,4 +266,48 @@ fn tell(window: &mut crate::Window, pane: usize, by: Asked, said: Option<&str>) 
         None => HINT.to_owned(),
     };
     let _ = origin::pin_empty_image(window, pane, text);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC8: the viewer's own decode limit, at its edge: 8192 × 8192 RGBA is exactly 256 MiB.
+    #[test]
+    fn an_image_the_decode_would_refuse_is_refused_before_a_file_is_written() {
+        assert!(!decodes_too_large(8192, 8192));
+        assert!(decodes_too_large(8192, 8193));
+        assert!(!decodes_too_large(0, u32::MAX));
+        assert_eq!(
+            too_large(DECODE_LIMIT),
+            "The clipboard image is too large to open (limit: 256 MiB)."
+        );
+    }
+
+    /// AC8: a PNG over the file limit is refused, one at it is kept.
+    #[test]
+    fn a_png_over_the_file_limit_is_refused() {
+        let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 255]));
+        let size = encode(&image, usize::MAX).unwrap().len();
+        assert_eq!(encode(&image, size).unwrap().len(), size);
+        assert_eq!(encode(&image, size - 1), Err(too_large(size as u64 - 1)));
+    }
+
+    /// AC1: the first name nothing takes, a dangling link included, and nobody's file touched.
+    #[cfg(unix)]
+    #[test]
+    fn the_screenshot_takes_the_first_free_name_and_touches_nothing_else() {
+        let dir = panel_contract::PanelDir::create().unwrap();
+        let folder = dir.path();
+        std::os::unix::fs::symlink(folder.join("nowhere"), folder.join("pasted-1.png")).unwrap();
+        std::fs::write(folder.join("pasted-2.png"), b"theirs").unwrap();
+        let written = write_new(folder, b"png").unwrap();
+        assert_eq!(written, folder.join("pasted-3.png"));
+        assert_eq!(std::fs::read(&written).unwrap(), b"png");
+        assert_eq!(std::fs::read(folder.join("pasted-2.png")).unwrap(), b"theirs");
+        assert!(!folder.join("nowhere").exists());
+        for name in ["pasted-1.png", "pasted-2.png", "pasted-3.png"] {
+            let _ = std::fs::remove_file(folder.join(name));
+        }
+    }
 }

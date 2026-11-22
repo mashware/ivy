@@ -651,6 +651,12 @@ mod tests {
         assert_eq!(tooltip(Target::Search, false, false), "Search this console");
     }
 
+    /// D117: the paste control is named by what it does.
+    #[test]
+    fn the_paste_control_says_it_pastes_a_screenshot() {
+        assert_eq!(tooltip(Target::Paste, false, false), "Paste screenshot");
+    }
+
     #[test]
     fn integrated_split_threshold_keeps_twenty_columns_and_three_rows() {
         let m = CellMetrics::of(8.0, 16.0);
