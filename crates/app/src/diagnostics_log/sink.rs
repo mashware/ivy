@@ -78,7 +78,10 @@ impl RotatingSink {
         if let (Err(why), Some(file)) = (moved, &mut self.file) {
             // Windows append handles lack the right to truncate, even with write(true).
             // Keep appending through the original handle so other windows cannot overwrite us.
-            OpenOptions::new().write(true).open(&self.path)?.set_len(0)?;
+            OpenOptions::new()
+                .write(true)
+                .open(&self.path)?
+                .set_len(0)?;
             writeln!(
                 file,
                 "ivy: could not move the full log aside ({why}); it was started again"
@@ -223,6 +226,7 @@ mod tests {
         let dir = scratch("stuck");
         let path = dir.join("ivy.log");
         let mut sink = RotatingSink::open(path.clone(), 4).unwrap();
+        let mut other_window = RotatingSink::open(path.clone(), 4).unwrap();
         sink.write(b"1234").unwrap();
         // A directory where the copy should go makes every rename fail, on every platform.
         std::fs::create_dir(rotated(&path)).unwrap();
@@ -234,6 +238,34 @@ mod tests {
         );
         assert!(text.ends_with("it was started again\n5"), "{text}");
         assert!(!text.contains("1234"), "the full file was emptied: {text}");
+
+        // The explanation itself crossed this tiny cap: another window must reset it again.
+        other_window.write(b"6").unwrap();
+        let again = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            again.starts_with("ivy: could not move the full log aside ("),
+            "{again}"
+        );
+        assert!(again.ends_with("it was started again\n6"), "{again}");
+        assert_eq!(
+            again
+                .matches("ivy: could not move the full log aside (")
+                .count(),
+            1,
+            "the previous explanation and bytes were emptied: {again}"
+        );
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_reopened_returns_an_error_without_claiming_a_restart() {
+        let dir = scratch("missing-parent");
+        let path = dir.join("ivy.log");
+        let mut sink = RotatingSink::open(path.clone(), 4).unwrap();
+        sink.write(b"1234").unwrap();
+        sink.path = dir.join("missing-parent/ivy.log");
+
+        assert!(sink.write(b"5").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"1234");
     }
 
     #[cfg(unix)]
