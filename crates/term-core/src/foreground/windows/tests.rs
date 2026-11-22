@@ -224,3 +224,38 @@ fn windows_foreground_nested_descendant_is_inside() {
     drop(pty);
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn windows_foreground_sequence_agrees_with_telemetry_and_creation_order() {
+    use std::os::windows::io::AsHandle;
+    let host = process::open(std::process::id()).unwrap();
+    let host_sequence = ancestry::sequence(host.as_handle()).unwrap();
+    assert_eq!(
+        host_sequence,
+        ancestry::telemetry_sequence(host.as_handle())
+    );
+    let base = directory();
+    let (mut pty, output) = console(&base, "sequence");
+    let mut scope = scope(&pty).unwrap();
+    let child_sequence = ancestry::sequence(scope.root.as_handle()).unwrap();
+    assert!(host_sequence < child_sequence);
+    assert_eq!(scope.root_sequence, Some(child_sequence));
+    assert_eq!(
+        child_sequence,
+        ancestry::telemetry_sequence(scope.root.as_handle())
+    );
+    scope.root_sequence = None;
+    assert_eq!(
+        scope.classify_ancestry(scope.root_identity.pid),
+        Ancestry::Unknown
+    );
+    scope.root_sequence = Some(child_sequence);
+    std::fs::write(base.join("sequence.release"), "go").unwrap();
+    wait_until(&mut pty, &output, || !scope.is_open());
+    assert_eq!(
+        ancestry::sequence(scope.root.as_handle()).unwrap(),
+        child_sequence
+    );
+    drop(pty);
+    let _ = std::fs::remove_dir_all(base);
+}

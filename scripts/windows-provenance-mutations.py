@@ -12,6 +12,16 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = "panel::provenance_route::windows_tests::windows_provenance_opened_panes_label_only_verified_outside_and_keep_unknown"
 MUTATIONS = [
     (
+        "parent-order-falls-back-to-wall-clock", "crates/term-core/src/foreground/windows/chain.rs",
+        "id.sequence >= child.sequence", "id.birth >= child.birth", "term-core",
+        "foreground::windows::chain::tests::later_reused_parent_is_unknown_despite_earlier_wall_clock_birth",
+    ),
+    (
+        "malformed-executable-is-not-an-error", "crates/term-core/src/foreground/windows/arguments.rs",
+        "if malformed || high {", "if false && (malformed || high) {", "term-core",
+        "foreground::windows::arguments::tests::malformed_executable_is_rejected_by_both_invocation_readers",
+    ),
+    (
         "application-discards-publication-scope", "crates/app/src/control/channel.rs",
         "services.with_publication_scope(inspector.flatten())",
         "services.with_publication_scope(None)", "app", APP,

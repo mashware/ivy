@@ -3,6 +3,7 @@
 pub(super) struct Identity {
     pub pid: u32,
     pub birth: u64,
+    pub sequence: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Outcome {
@@ -34,7 +35,7 @@ pub(super) fn walk<N>(
         if nodes.iter().any(|(_, seen, _)| seen.pid == id.pid)
             || nodes
                 .last()
-                .is_some_and(|(_, child, _)| id.birth >= child.birth)
+                .is_some_and(|(_, child, _)| id.sequence >= child.sequence)
         {
             return Outcome::Unknown;
         }
@@ -74,7 +75,11 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     fn id(pid: u32, birth: u64) -> Identity {
-        Identity { pid, birth }
+        Identity {
+            pid,
+            birth,
+            sequence: birth,
+        }
     }
     fn run(edges: &[(u32, u64, u32)], root: Identity, anchor: Option<Identity>) -> Outcome {
         walk(
@@ -117,6 +122,29 @@ mod tests {
         let edges = [(3, 30, 2), (2, 20, 999)];
         assert_eq!(run(&edges, id(9, 1), Some(id(2, 20))), Outcome::Outside);
         assert_eq!(run(&edges, id(9, 1), None), Outcome::Unknown);
+    }
+
+    #[test]
+    fn later_reused_parent_is_unknown_despite_earlier_wall_clock_birth() {
+        let records = [(3, 100, 20, 2), (2, 50, 30, 1), (1, 10, 10, 0)];
+        let identity = |pid: &u32| {
+            records.iter().find(|r| r.0 == *pid).map(|r| Identity {
+                pid: r.0,
+                birth: r.1,
+                sequence: r.2,
+            })
+        };
+        assert_eq!(
+            walk(
+                3,
+                identity(&1).unwrap(),
+                None,
+                identity,
+                |pid| records.iter().find(|r| r.0 == *pid).map(|r| r.3),
+                Some
+            ),
+            Outcome::Unknown
+        );
     }
 
     #[test]

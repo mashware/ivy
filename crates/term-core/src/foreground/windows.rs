@@ -25,8 +25,10 @@ pub struct ProcessIdentity {
 pub(super) struct Scope {
     root: Arc<OwnedHandle>,
     root_identity: ProcessIdentity,
+    root_sequence: Option<u64>,
     anchor: Option<OwnedHandle>,
     anchor_identity: Option<ProcessIdentity>,
+    anchor_sequence: Option<u64>,
     stop: Weak<AtomicBool>,
 }
 
@@ -42,25 +44,31 @@ pub(super) fn scope(pty: &crate::Pty) -> io::Result<Scope> {
     if !process::is_alive(root.as_handle()) {
         return Err(io::ErrorKind::PermissionDenied.into());
     }
+    let root_sequence = ancestry::sequence(root.as_handle()).ok();
     let parent_pid = ancestry::parent(root.as_handle()).unwrap_or(0);
-    let (anchor, anchor_identity) = if parent_pid == std::process::id() {
+    let (anchor, anchor_identity, anchor_sequence) = if parent_pid == std::process::id() {
         let handle = process::open(parent_pid)?;
         let identity = process::identity(handle.as_handle())?;
+        let sequence = ancestry::sequence(handle.as_handle()).ok();
         if !process::is_alive(handle.as_handle())
             || ancestry::parent(root.as_handle())? != identity.pid
-            || identity.birth >= root_identity.birth
+            || sequence
+                .zip(root_sequence)
+                .is_some_and(|(parent, child)| parent >= child)
         {
             return Err(io::ErrorKind::PermissionDenied.into());
         }
-        (Some(handle), Some(identity))
+        (Some(handle), Some(identity), sequence)
     } else {
-        (None, None)
+        (None, None, None)
     };
     Ok(Scope {
         root: Arc::new(root),
         root_identity,
+        root_sequence,
         anchor,
         anchor_identity,
+        anchor_sequence,
         stop: Arc::downgrade(&pty.stop),
     })
 }

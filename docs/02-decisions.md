@@ -11843,8 +11843,19 @@ diagnostic: incomplete evidence is unknown and does not refuse a publication.
 The Windows scope pins its original child and revokes on console close or root exit. A validated
 peer chain reaching that exact root is inside; one reaching its verified, pinned Ivy parent first
 is outside. A coherent parent-PID-zero boundary is outside too. Missing or dead history is unknown;
-PID 1 and UTC birth ordering are not Windows outside boundaries. Handles, creation identities and
-revalidation protect against stale observations and PID reuse, without claiming an atomic tree.
+PID1 is ordinary. Each retained handle supplies a creation FILETIME for identity and a native
+process sequence number for ordering. Parent sequence must be strictly earlier than child's;
+missing, zero or malformed sequence evidence is unknown, with no wall-clock fallback. UTC clock
+rollback can make a recycled parent's creation date appear earlier, so FILETIME ordering is
+insufficient even with repeated reads. Sequences and handle revalidation provide a bounded
+observation, without claiming an atomic process tree.
+
+The sequence query uses dynamically resolved `NtQueryInformationProcess` class92, an existing
+native implementation surface documented by [PHNT](https://github.com/winsiderss/phnt/blob/master/ntpsapi.h).
+Microsoft documents the process sequence in its [telemetry header](https://learn.microsoft.com/en-us/windows/win32/devnotes/process_telemetry_id_information_type);
+the strict ordering premise relies on the native implementation, not a universal public API
+guarantee. A named native witness checks the exact8-byte result against telemetry, parent/child
+order and retained-handle stability after exit. Unsupported queries conservatively yield unknown.
 
 Executable and lifetime inspection use process handles. Directory and structural argument/script
 inspection are separate, bounded, best-effort reads of mutable process parameters, initially for
