@@ -367,6 +367,16 @@ mod tests {
         }
     }
 
+    /// The empty image tab names the gestures this build has for opening an image. The agent's
+    /// own way in is not named until the agent has a tool that opens one.
+    #[test]
+    fn the_empty_image_tab_names_the_ways_to_open_an_image() {
+        assert_eq!(
+            NO_IMAGE,
+            "No image in this console. Ctrl+click a PNG or JPEG path printed in it."
+        );
+    }
+
     /// The strip reads as the artboard: source, then the tabs with the count, the layout toggle
     /// for a diff, and maximize and close at the right, all on one row.
     #[test]

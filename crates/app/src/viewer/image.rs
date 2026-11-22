@@ -2279,6 +2279,44 @@ mod tests {
         assert_eq!(slot(&window).notice, None);
     }
 
+    /// The two other ways a console leaves, the chord that closes the focused one and a retirement
+    /// that detaches it, take its image and unsent marks with no question as well: the console
+    /// left inherits the focus and its own image is painted where it was.
+    #[test]
+    fn closing_the_focused_console_or_retiring_it_leaves_the_other_consoles_image_painted() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let small = folder.0.join("small.png");
+        write_png(&small, 120, 60);
+        let noted = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains("unsent"))
+        };
+        let leaves = |close: &dyn Fn(&mut crate::Window, &egui::Context, usize)| {
+            let (mut window, ctx, _) = window_with_image(&path);
+            let kept = window.active().panes()[1].name;
+            let kept_rect = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+            let leaving = window.active().panes()[0].name;
+            open_in(&mut window, &ctx, leaving, &small);
+            marks_mut(&mut window).general = "unsent".into();
+            assert!(noted(&painted(&mut window, &ctx, vec![])));
+            close(&mut window, &ctx, leaving);
+            assert!(window.all_panes().all(|pane| pane.name != leaving));
+            assert_eq!(window.active().focus, kept);
+            let shapes = painted(&mut window, &ctx, vec![]);
+            let rect = image_rect(&shapes).expect("the console left shows no image");
+            assert!(same_place(rect, kept_rect), "{rect:?} {kept_rect:?}");
+            assert!(
+                !noted(&shapes),
+                "a closed console's marks are still painted"
+            );
+        };
+        leaves(&|window, ctx, _| window.close_the_focused(ctx));
+        leaves(&|window, ctx, leaving| {
+            drop(window.detach_panes_called(&[leaving], ctx).unwrap());
+        });
+    }
+
     /// An image opened while the middle button of a pan is still down is not dragged by it.
     #[test]
     fn a_new_image_is_not_moved_by_a_pan_begun_on_the_old_one() {
@@ -3980,6 +4018,24 @@ mod tests {
             shown.document.as_ref().unwrap().marks.general,
             "on the other console"
         );
+        assert_eq!(
+            window.active().focus,
+            origin.0,
+            "the delivery kept the keys"
+        );
+        let sent = format!("Sent to {}.", origin.1);
+        let said = texts(&painted(&mut window, &ctx, vec![]), area());
+        assert!(
+            said.contains(&sent),
+            "not said under its own image: {said:?}"
+        );
+        let active = window.active;
+        window.tabs[active].focus = beside;
+        let said = texts(&painted(&mut window, &ctx, vec![]), area());
+        assert!(
+            !said.contains(&sent),
+            "said under the other console's image"
+        );
         let _ = std::fs::remove_file(&copy);
     }
 
@@ -4009,7 +4065,7 @@ mod tests {
         let beside = window.active().panes()[0].name;
         let other = folder.0.join("other.png");
         write_png(&other, 64, 32);
-        open_in(&mut window, &ctx, beside, &other);
+        let other_rect = open_in(&mut window, &ctx, beside, &other);
         origin_pane(&mut window).panel = Some(crate::PanelDir::create().unwrap());
         marks_mut(&mut window).general = "on the console left".into();
         let painted_texts =
@@ -4020,6 +4076,11 @@ mod tests {
         flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
         send::TOLD.with(|told| told.borrow_mut().clear());
         window.close_a_pane_called(origin.0, &ctx).unwrap();
+        let rect = image_rect(&painted(&mut window, &ctx, vec![]));
+        assert!(
+            rect.is_some_and(|rect| same_place(rect, other_rect)),
+            "the console left's image is not painted where it was: {rect:?}"
+        );
         let said = painted_texts(&mut window);
         assert!(
             window.image.send.parked(),
