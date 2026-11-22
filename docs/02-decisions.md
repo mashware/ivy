@@ -12061,3 +12061,57 @@ clipboard thread for images, against one outstanding read keyed by console.
 
 **Verification.** The clipboard formats on macOS and Windows are compiled but only checked by hand
 there.
+
+---
+
+## D120 — An agent opens an image in its own console's slot, and the person is not moved to it
+
+**22 November 2026 — #198.** `image_open(path)` on a console's control channel fills **that**
+console's image slot (D72), the one whose endpoint the request arrived on. A name in the message
+reaches nothing (D44). **The endpoint authenticates the user, not the console**: any process of the
+same user that can read a console's `PANEL_DIR` can be that console (D44, D7), so «scoped by the
+endpoint» is a same-user premise about which slot, never a statement about who asked.
+
+**What moves on screen.** If the console is the focused one of the tab on show, and nothing else owns
+the screen or the keys, the drawer opens on its Image tab (switching from Document or Changes) and
+**the keyboard stays where it was**, as `split_open` leaves it. «Nothing else» means: the Board, the
+Settings editor, a modal pane view, the connection guide, a maximized drawer, or the drawer or Files
+holding the keys. Anywhere else nothing moves. The console's tab card and its header then show an
+image glyph until the drawer paints that image or its refusal. «Loading…» is not seeing it. The
+reply says which of the two happened. A window that runs no pass answers nothing within the
+listener's five seconds and still applies the open on its next pass, as `split_open` does.
+
+**What is refused, and where.** The path must be absolute and local. On Windows a UNC, verbatim UNC
+or device path (`\\host\share\a.png`, `\\?\UNC\…`, `\\.\…`) is refused on the wire, because the
+image worker would otherwise authenticate to a remote host over SMB on an agent's word. The MCP
+bridge also `stat`s the file in the agent's own process, so a missing file, a folder, something
+that is not a regular file or a file over 32 MiB is refused at once. The interface pass never
+touches the file. **Those bridge checks are advisory**: the bridge and the window may see different
+files (another mount namespace, a file replaced in between), and a hand-written line skips the
+bridge. The image worker's own checks stay the enforcement, and their refusal is painted in the
+drawer. The format is decided by the file's bytes, never by its extension. Unsent marks on that
+console's image refuse the call with a sentence the agent can act on; another console's marks never
+do.
+
+**What leaves the file.** The window reads the file with its own rights, which a sandboxed caller
+that reaches the socket may not have. Nothing of the file goes back over the channel. Its pixels
+leave only through the person's Send, a copy written into the console's own folder, so the person's
+Send is the only gate for the file's content.
+
+**Subagents.** The tool's description tells an agent working for another agent in the same console
+not to call it (D88). Nothing on the wire tells them apart. A subagent that ignores it is bounded to
+its own console's slot and refused over unsent marks.
+
+**No measurement batch opens an image**, so no batch paints the glyph or the Image tab and no
+published figure changes. The glyph's read sits inside the tab bar's and the header's declared spans
+(D13).
+
+| Discarded | Why |
+|---|---|
+| An `image` field in the panel document | A foreign `panel.json` (a cloned repository, a container) would make the app read local files, and the agent gets no error. |
+| Resolving a relative path against the console's directory | Unknown on Windows without OSC 7, and the synchronous file checks would need a `stat` in the interface pass, where a dead mount hangs the window. |
+| Resolving a relative path against the bridge's directory | The routed bridge runs in a daemon shared by every pane, so its directory is not the conversation's. |
+| Replacing over unsent marks, or queueing behind them | The marks are the person's unfinished work; a queue adds a mechanism and leaves the agent believing the image is shown. |
+| An extension gate on the wire | The bytes decide the format, and extension-less PNGs exist. |
+| Replacing the Board, or switching a maximized drawer | Both take away what the person is reading. |
+| Opening the drawer while the drawer or Files holds the keys | The person is typing there, and switching the drawer's tab or blurring Files would take the keys from them. |
