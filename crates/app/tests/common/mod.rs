@@ -14,6 +14,11 @@ use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::Path;
 
+/// Census names use `/` even when the checkout's native separator is `\`.
+pub fn slash_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 /// Lowercase, and Spanish accents folded onto ASCII.
 ///
 /// **Both sides get folded**, the text judged and the list it is judged against, so an entry written
@@ -73,11 +78,10 @@ fn files_below(root: &Path, dirs: &[&str], keep: &dyn Fn(&OsStr) -> bool) -> BTr
             if file_type.is_dir() {
                 walk(&path, root, keep, found);
             } else if path.extension().is_some_and(keep) {
-                let relative = path
-                    .strip_prefix(root)
-                    .expect("a file found below the root has the root as its prefix")
-                    .to_string_lossy()
-                    .replace('\\', "/");
+                let relative = slash_path(
+                    path.strip_prefix(root)
+                        .expect("a file found below the root has the root as its prefix"),
+                );
                 assert!(
                     found.insert(relative.clone()),
                     "the source walk found {relative} twice"
