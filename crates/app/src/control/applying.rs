@@ -147,16 +147,18 @@ impl PaneControl {
                     signals.closed(delivery.connection, std::time::Instant::now());
                     self.apply_closed(state, delivery);
                 }
-                // **The `split_*` verbs and `image_open` are the window's, and a pane has no tree.** They are
-                // held here until the window's drain takes them, which is where the handles, the
-                // focus and the revocation live — and the window is woken for it, because the drain
-                // of this very pass has already run: without that, a request arriving while the
-                // window is at rest would be answered by no pass at all.
+                // A retirement is held for the window the same way (`defer_retirement`), and
+                // nothing after it is applied in this pass.
                 deferred @ What::Retire => {
                     delivery.what = deferred;
                     self.defer_retirement(delivery);
                     break;
                 }
+                // **`split_*`, `image_open` and `plan_*` need the window, and a pane has no
+                // tree.** They are held here until the window's drain takes them, which is where
+                // the handles, the focus and the revocation live — and the window is woken for it,
+                // because the drain of this very pass has already run: without that, a request
+                // arriving while the window is at rest would be answered by no pass at all.
                 deferred @ (What::Open { .. }
                 | What::Read { .. }
                 | What::Close { .. }

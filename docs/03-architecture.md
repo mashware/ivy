@@ -66,9 +66,10 @@ is given is «the app stops handing you that buffer; the program you opened does
 
 `image_open` fills **the image slot of the console whose endpoint asked** (D120), never another's: it
 names no pane. It takes an absolute path on this machine — on Windows a drive letter or a volume
-GUID, where a mapped drive is the user's own mapping and not a host the agent chose — which the bridge `stat`s in the agent's own
-process before the window is asked, so the interface pass never touches the file; the window's own
-read stays the enforcement. The drawer opens on the image only where the person is already working
+GUID, where a mapped drive is the user's own mapping and not a host the agent chose. The bridge
+`stat`s it and reads its first bytes in its own process before the window is asked, as a courtesy
+that answers at once; in the window the image worker's thread reads the file, so the interface
+pass never touches it, and that read stays the enforcement. The drawer opens on the image only where the person is already working
 in that console and nothing else holds the screen or the keys; anywhere else the console's tab card
 and header mark a new image until the drawer paints it. Unsent marks on that console's image refuse
 the call. The endpoint authenticates the user, not the console, and nothing of the file returns over

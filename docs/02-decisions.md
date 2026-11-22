@@ -12075,13 +12075,17 @@ endpoint» is a same-user premise about which slot, never a statement about who 
 **What moves on screen.** If the console is the focused one of the tab on show, and nothing else owns
 the screen or the keys, the drawer opens on its Image tab (switching from Document or Changes) and
 **the keyboard stays where it was**, as `split_open` leaves it. «Nothing else» means: the Board, the
-Settings editor, a modal pane view, the connection guide, a maximized drawer, or the drawer or Files
-holding the keys. Where the drawer already shows the Image tab, which is that console's, the new
-image takes the place of the last and nothing has to move, the drawer's keys and a maximized drawer
-included. Anywhere else nothing moves. The console's tab card and its header then show an
-image glyph until the drawer paints that image or its refusal. «Loading…» is not seeing it. The
-reply says which of the two happened. A window that runs no pass answers nothing within the
-listener's five seconds and still applies the open on its next pass, as `split_open` does.
+Settings editor, a modal pane view, the title bar's menu, the connection guide, a maximized drawer,
+or the drawer or Files holding the keys. A window too short for the drawer is asked before anything
+is switched, so there too nothing moves. Where the drawer already shows the Image tab, which is
+that console's, and the console is still in front — the focused one of the tab on show, under no
+modal surface — the new image takes the place of the last and nothing has to move, the drawer's
+keys, Files' keys and a maximized drawer included. Anywhere else nothing moves. The console's tab
+card and its header then show an image glyph until the drawer paints that image or its refusal.
+«Loading…» is not seeing it. The reply says «shown» where the drawer shows the image, whether it
+opened on it or its Image tab was already on show, and «marked» everywhere else. A window that runs
+no pass answers nothing within the listener's five seconds and still applies the open on its next
+pass, as `split_open` does.
 
 **What is refused, and where.** The path must be absolute and local. On Windows only a drive
 letter (`C:\…`, `\\?\C:\…`) or a volume GUID (`\\?\Volume{…}\…`) is local; every other prefix is
@@ -12090,17 +12094,18 @@ refused on the wire — a share, a device, and any other name in the NT object n
 worker would otherwise authenticate to a remote host over SMB on an agent's word. It is an
 allowlist because a refusal list let `\\?\GLOBALROOT\…` and a lowercase `\\?\unc\…` through. A
 mapped drive letter passes: it is the user's own mapping, not a host the agent chose. The MCP
-bridge also `stat`s the file in the agent's own process, so a missing file, a folder, something
-that is not a regular file or a file over 32 MiB is refused at once. It then reads the file's
-first bytes and refuses anything that begins as neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a
-JPEG (`FF D8 FF`), a file too short to say included, with `<path> is not a PNG or JPEG image`,
-before the pane is reached (owner, 22 November 2026): told «opened» for a file the drawer cannot
-show, the agent would wait for marks that never come. The interface pass never
-touches the file. **Those bridge checks are advisory**: the bridge and the window may see different
+bridge also `stat`s the file in its own process — the agent's, or the shared daemon when Codex's
+calls are routed — so a missing file, a folder, something that is not a regular file or a file
+over 32 MiB is refused at once. It then reads the file's first bytes and refuses anything that
+begins as neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to
+say included, with `<path> is not a PNG or JPEG image`, before the pane is reached (owner, 22
+November 2026): told «opened» for a file the drawer cannot show, the agent would wait for marks
+that never come. **Those bridge checks are advisory**: the bridge and the window may see different
 files (another mount namespace, a file replaced in between), and a hand-written line skips the
-bridge. The image worker's own checks stay the enforcement, and their refusal is painted in the
-drawer. The format is decided by the file's bytes, never by its extension; a hand-written line that
-skips the bridge still reaches the window, which paints «This file is not a PNG or JPEG image». Unsent marks on that
+bridge. The window's interface pass never touches the file either: the image worker's thread reads
+it, its checks stay the enforcement, and their refusal is painted in the drawer. The format is
+decided by the file's bytes, never by its extension; a hand-written line that skips the bridge
+still reaches the window, which paints «This file is not a PNG or JPEG image». Unsent marks on that
 console's image refuse the call with a sentence the agent can act on; another console's marks never
 do.
 

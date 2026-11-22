@@ -730,24 +730,25 @@ replaces it.
   could honestly be read from — and on Windows anything but a drive letter or a volume GUID
   (`C:\…`, `\\?\C:\…`, `\\?\Volume{…}\…`) is refused too: a share, a device or another name in
   the object namespace (`\\host\share\…`, `\\?\UNC\…`, `\\?\GLOBALROOT\…`, `\\.\…`). A mapped
-  drive letter passes, because it is the user's own mapping. No extension is asked for: the file's bytes decide whether it is a PNG or
-  a JPEG. `panel-mcp` refuses one that is neither (below); a hand-written line that skips it is
-  opened, and the drawer says the file is not a PNG or JPEG image. The line's own bound is the
-  only bound on the path's length.
+  drive letter passes, because it is the user's own mapping. No extension is asked for: the file's
+  bytes decide whether it is a PNG or a JPEG. `panel-mcp` refuses one that is neither (below); a
+  hand-written line that skips it is opened, and the drawer says the file is not a PNG or JPEG
+  image. The line's own bound is the only bound on the path's length.
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
-  person is working in` where the drawer opened on it, and `opened; the person is not looking at this
-  console's drawer, so its tab and header mark a new image until they do` everywhere else. The
-  keyboard never moves.
+  person is working in` where the drawer shows the image — it opened on it, or its Image tab was
+  already on show for that console — and `opened; the person is not looking at this console's
+  drawer, so its tab and header mark a new image until they do` everywhere else, a window too short
+  for the drawer included. The keyboard never moves.
 - **It is refused** while that console's image carries marks the person has not sent (`the image open
   in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the
   marks, then call image_open again`) and when the console that asked is gone. Malformed lines say
   `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
   not absolute` or `an image_open's "path" is not on this machine`, and the connection lives on.
-- **`panel-mcp` checks the file first**, in the agent's own process: a missing file, a folder,
-  something that is not a regular file, a file over 32 MiB and a file whose first bytes are neither
-  a PNG's signature nor a JPEG's `FF D8 FF` (`<path> is not a PNG or JPEG image`, a file too short to
-  say included) are refused before the window is asked.
-  Those checks are a courtesy; the window's read is the enforcement.
+- **`panel-mcp` checks the file first**, in its own process — the agent's, or the shared daemon
+  when Codex's calls are routed: a missing file, a folder, something that is not a regular file, a
+  file over 32 MiB and a file whose first bytes are neither a PNG's signature nor a JPEG's
+  `FF D8 FF` (`<path> is not a PNG or JPEG image`, a file too short to say included) are refused
+  before the window is asked. Those checks are a courtesy; the window's read is the enforcement.
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport

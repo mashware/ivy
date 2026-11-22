@@ -255,7 +255,8 @@ pub(crate) fn open_image_target(
     Ok(())
 }
 
-/// What an agent's open answers when the drawer opened on the image (D120).
+/// What an agent's open answers when the drawer shows the image: it opened on it, or its Image
+/// tab was already on show for that console (D120).
 pub(crate) const SHOWN_TO_THE_PERSON: &str =
     "opened and shown in the drawer of this console, which the person is working in";
 

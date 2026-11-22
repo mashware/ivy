@@ -6929,7 +6929,10 @@ mod tests {
         let asking = window.active().panes()[1].name;
         let beside = window.active().panes()[0].name;
         attach_a_channel(&mut window, asking);
-        let path = std::env::temp_dir().join("shot.png");
+        // A folder only this process names, so no other run's file is what the worker reads.
+        let path = std::env::temp_dir()
+            .join(format!("ivy-agent-image-{}", std::process::id()))
+            .join("shot.png");
         let answer = ask_the_window(
             &mut window,
             &ctx,
@@ -6958,8 +6961,9 @@ mod tests {
     );
 
     /// **An agent's image shown in the console being typed into loses no keystroke** (D120): the
-    /// request is answered by the real frame's drain, after that frame's keys, and neither the key
-    /// typed in that frame nor the one typed in the next goes anywhere but the console.
+    /// request is answered by the real frame's drain, after that frame's keys, the drawer opens on
+    /// the Image tab, and the key typed in that frame and the one typed in the next both reach the
+    /// console.
     #[test]
     #[cfg(unix)]
     fn an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke() {
@@ -6978,7 +6982,10 @@ mod tests {
                 origin: panel_control::PublicationOrigin::Unknown,
                 connection: 7,
                 what: panel_control::What::ImageOpen {
-                    path: std::env::temp_dir().join("shot.png"),
+                    // A folder only this process names, so no other run's file is read.
+                    path: std::env::temp_dir()
+                        .join(format!("ivy-agent-image-{}", std::process::id()))
+                        .join("shot.png"),
                 },
                 answer: answering,
                 #[cfg(windows)]
