@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::ffi::{CString, OsString};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -22,7 +21,7 @@ impl Drop for Attributes {
 
 struct Prepared {
     attributes: Attributes,
-    executable: CString,
+    executables: Vec<CString>,
     _arguments: Vec<CString>,
     _environment: Vec<CString>,
     argv: Vec<*mut libc::c_char>,
@@ -78,12 +77,13 @@ impl Prepared {
                 }
             }
         }
-        let executable = CString::new(
-            resolve_executable(command, &environment)?
-                .as_os_str()
-                .as_bytes(),
-        )
-        .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let executables = executable_candidates(command, &environment)?
+            .into_iter()
+            .map(|path| {
+                CString::new(path.as_os_str().as_bytes())
+                    .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))
+            })
+            .collect::<io::Result<_>>()?;
         let environment: Vec<_> = environment
             .into_iter()
             .map(|(key, value)| {
@@ -102,7 +102,7 @@ impl Prepared {
         };
         Ok(Self {
             attributes,
-            executable,
+            executables,
             argv: pointers(&arguments),
             envp: pointers(&environment),
             _arguments: arguments,
@@ -113,51 +113,61 @@ impl Prepared {
     fn exec(&self) -> io::Result<()> {
         // SETEXEC keeps std's child PID, prepared stdio/cwd/signals and error pipe.
         // Successful replacement never returns. Nothing in this hook allocates or locks.
-        let result = unsafe {
-            libc::posix_spawn(
-                std::ptr::null_mut(),
-                self.executable.as_ptr(),
-                std::ptr::null(),
-                &self.attributes.0,
-                self.argv.as_ptr(),
-                self.envp.as_ptr(),
-            )
-        };
-        Err(io::Error::from_raw_os_error(if result == 0 {
-            libc::EIO
+        let mut last = libc::ENOENT;
+        let mut denied = false;
+        for executable in &self.executables {
+            let result = unsafe {
+                libc::posix_spawn(
+                    std::ptr::null_mut(),
+                    executable.as_ptr(),
+                    std::ptr::null(),
+                    &self.attributes.0,
+                    self.argv.as_ptr(),
+                    self.envp.as_ptr(),
+                )
+            };
+            match result {
+                libc::EACCES => denied = true,
+                libc::ENOENT | libc::ENOTDIR => {}
+                other => {
+                    return Err(io::Error::from_raw_os_error(if other == 0 {
+                        libc::EIO
+                    } else {
+                        other
+                    }));
+                }
+            }
+            last = result;
+        }
+        Err(io::Error::from_raw_os_error(if denied {
+            libc::EACCES
         } else {
-            result
+            last
         }))
     }
 }
 
-fn resolve_executable(
+fn executable_candidates(
     command: &Command,
     environment: &BTreeMap<OsString, OsString>,
-) -> io::Result<PathBuf> {
+) -> io::Result<Vec<PathBuf>> {
     let mut directory = std::env::current_dir()?;
     if let Some(cwd) = command.get_current_dir() {
         directory = directory.join(cwd);
     }
     let program = Path::new(command.get_program());
     if program.as_os_str().as_bytes().contains(&b'/') {
-        return Ok(directory.join(program));
+        return Ok(vec![directory.join(program)]);
     }
-    // posix_spawnp reads PATH through getenv, which may lock after fork. Resolve
-    // here instead, using the same effective environment passed to the command.
+    // posix_spawnp reads PATH through getenv, which may lock after fork. Prepare
+    // absolute candidates here; let exec, not mode bits, decide access to each one.
     let path = environment
         .get(std::ffi::OsStr::new("PATH"))
         .map(OsString::as_os_str)
         .unwrap_or(std::ffi::OsStr::new("/usr/bin:/bin"));
-    for entry in std::env::split_paths(path) {
-        let candidate = directory.join(entry).join(program);
-        if std::fs::metadata(&candidate)
-            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        {
-            return Ok(candidate);
-        }
-    }
-    Err(io::Error::from(io::ErrorKind::NotFound))
+    Ok(std::env::split_paths(path)
+        .map(|entry| directory.join(entry).join(program))
+        .collect())
 }
 
 fn errno(result: libc::c_int) -> io::Result<()> {
@@ -181,6 +191,7 @@ pub(super) fn spawn(mut command: Command) -> io::Result<Child> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
@@ -301,5 +312,57 @@ mod tests {
             std::env::temp_dir().join(format!("ivy-absent-executable-{}", std::process::id()));
         let failure = spawn(Command::new(missing)).unwrap_err();
         assert_eq!(failure.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn native_path_search_skips_an_inaccessible_candidate_and_keeps_the_later_programs_io() {
+        // Root may execute the first file through its group execute bit, so it cannot
+        // supply the EACCES control this macOS PATH regression needs.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("not executed: native PATH EACCES witness requires a non-root user");
+            return;
+        }
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let directory = std::env::temp_dir().join(format!("ivy-native-path-{:x?}", random));
+        let denied = directory.join("denied");
+        let usable = directory.join("usable");
+        std::fs::create_dir_all(&denied).unwrap();
+        std::fs::create_dir(&usable).unwrap();
+        let program = "codex probe";
+        std::fs::write(denied.join(program), "#!/bin/sh\nprintf 'wrong program'\n").unwrap();
+        // The fixture belongs to us: owner execute is denied even though the file
+        // has a group execute bit. Checking whether any execute bit exists is wrong.
+        std::fs::set_permissions(denied.join(program), std::fs::Permissions::from_mode(0o610))
+            .unwrap();
+        std::fs::write(
+            usable.join(program),
+            "#!/bin/sh\nprintf 'usable:%s' \"$1\"\nprintf 'native diagnostic' >&2\nexit 37\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(usable.join(program), std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let path = std::env::join_paths([&denied, &usable]).unwrap();
+        let make_command = || {
+            let mut command = Command::new(program);
+            command
+                .arg("argument with spaces")
+                .env("PATH", &path)
+                .current_dir(&directory)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            command
+        };
+        // Establish the ordinary Command behavior before exercising the adapter.
+        let control = finish(make_command().spawn().unwrap());
+        assert_eq!(control.status.code(), Some(37));
+        assert_eq!(control.stdout, b"usable:argument with spaces");
+        assert_eq!(control.stderr, b"native diagnostic");
+        let corrected = finish(spawn(make_command()).unwrap());
+        assert_eq!(corrected.status.code(), control.status.code());
+        assert_eq!(corrected.stdout, control.stdout);
+        assert_eq!(corrected.stderr, control.stderr);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

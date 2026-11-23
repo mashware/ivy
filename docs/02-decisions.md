@@ -10313,7 +10313,7 @@ being itself after its original parent exits does not remove the cached applicat
 attribution, so PPID 1 or `setsid` does not establish an independent application lifetime.
 
 Only this persistent-service launch uses the native adapter. Argument/environment storage,
-PATH resolution and spawn attributes are prepared before fork; the final hook replaces
+absolute PATH candidates and spawn attributes are prepared before fork; the final hook replaces
 the already-prepared child with `posix_spawn(POSIX_SPAWN_SETEXEC)`, retaining its PID,
 stdio, directory, signal setup and the existing timeout/reaping path. The dynamically
 resolved `responsibility_spawnattrs_setdisclaim` SPI follows LLVM's spawn-time interface;
