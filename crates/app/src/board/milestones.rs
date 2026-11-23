@@ -404,12 +404,17 @@ pub(super) fn project_header(
             .width()
             + 10.0;
     }
-    // An unreadable roadmap says why instead of passing for no roadmap.
+    // A usable plan can carry diagnostics about fields the parser dropped.
     if let Some(error) = error {
+        let label = if section.roadmap.as_ref().is_some_and(|r| r.plan.is_some()) {
+            "roadmap"
+        } else {
+            "roadmap unreadable"
+        };
         painter.text(
             pos2(rect.right() - 4.0, y),
             Align2::RIGHT_CENTER,
-            format!("roadmap unreadable: {}", super::cards::clean(error)),
+            format!("{label}: {}", super::cards::clean(error)),
             FontId::proportional(11.5),
             roles.block,
         );

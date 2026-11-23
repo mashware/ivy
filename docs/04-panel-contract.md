@@ -225,8 +225,8 @@ wants two lines, let them publish two elements in `lines`.
 
 ## Project plan document
 
-The board accepts a project plan from `plan_set`. It is parsed into the same model as the settings-file
-Markdown fallback. Unknown or malformed fields are dropped independently; an invalid top-level
+The board accepts this project plan document from `plan_set` or a configured JSON roadmap file.
+Both use the same parser and model; Markdown task lists remain a file fallback. Unknown or malformed fields are dropped independently; an invalid top-level
 document or one over `MAX_BYTES` is refused whole. Item marks are the closed vocabulary `done`,
 `current`, `pending`, `wait`, and `block`; `info` is not a plan mark. Unknown item marks are dropped
 and reported to the producer.
@@ -255,6 +255,17 @@ whole panel document to change them. A matching pair places its card under that 
 matching milestone alone places it under the milestone. A known milestone with an unknown deliverable
 keeps its console attached at milestone level. Only an absent or unknown milestone appears in
 **Off the plan**, and a console without a published panel is not assigned an invented plan position.
+
+A configured `roadmap.<name> = <path>` selects this format when the path has a `.json` extension
+(case-insensitive). All other extensions use Markdown task lists; content is never guessed, and an
+invalid `.json` file never falls back to Markdown. JSON files preserve every supported field above,
+including milestone and deliverable IDs, so panels can attach through `milestone` / `deliverable`.
+
+Files must be regular UTF-8 files of at most `MAX_BYTES` (256 KiB). A valid document remains usable
+when `Dropped` reports unsupported item marks: the file diagnostic names what was discarded.
+Invalid JSON, an invalid top-level document and oversized files show a file diagnostic instead of a
+plan. The same worker reloads both formats after saves, atomic replacement, deletion and reappearance.
+Published plans continue to override the configured file until `plan_retire`.
 
 ## Project plan channel
 
