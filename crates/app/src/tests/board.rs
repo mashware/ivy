@@ -1273,6 +1273,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)] // Exercises the Unix panel-control endpoint.
     fn published_project_plan_hides_file_until_retired(extension: &str) {
         use std::{fs, process::Command, time::Instant};
         let root = std::env::temp_dir().join(format!(
