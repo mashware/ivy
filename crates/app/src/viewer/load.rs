@@ -244,17 +244,20 @@ fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<P
     // The enforcement of what the bridge only advises, for an agent's open. A person's own open is
     // not walked (D121), so a refusal over a link tells the person reading it that open is theirs to
     // make; one over the path's text already says what to send instead, and is left at that.
-    if let Some(is_link) = links {
-        panel_control::image::no_link_on_the_way(path, is_link).map_err(
+    // An agent's path is opened in the walk's own spelling (D121), since the walk is only worth the
+    // entries it asked if they are the ones opened; a person's is opened as given.
+    let opened = match links {
+        Some(is_link) => panel_control::image::no_link_on_the_way(path, is_link).map_err(
             |refused| match refused {
                 panel_control::image::Refused::Link(why) => {
                     format!("{why}. Open it from Files to see it yourself.")
                 }
                 panel_control::image::Refused::Text(why) => why,
             },
-        )?;
-    }
-    let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
+        )?,
+        None => path.to_path_buf(),
+    };
+    let bytes = read_bounded(open_regular(&opened)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(unreadable)?;

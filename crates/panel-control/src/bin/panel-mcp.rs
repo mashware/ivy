@@ -726,8 +726,10 @@ fn image_to_open_with(
         return Err(format!("{path} {}", elsewhere.says()));
     }
     // Before the metadata below, which follows links: on Windows one can lead to another machine.
-    panel_control::image::no_link_on_the_way(&file, is_link)?;
-    let found = std::fs::metadata(&file).map_err(|why| format!("cannot open {path}: {why}"))?;
+    // The file is asked for in the walk's own spelling (D121): the walk is only worth the entries
+    // it asked if they are the ones this metadata and this read pass through.
+    let spelled = panel_control::image::no_link_on_the_way(&file, is_link)?;
+    let found = std::fs::metadata(&spelled).map_err(|why| format!("cannot open {path}: {why}"))?;
     if found.is_dir() {
         return Err(format!("{path} is a folder, not an image"));
     }
@@ -746,7 +748,7 @@ fn image_to_open_with(
     let mut head = Vec::with_capacity(PNG_SIGNATURE.len());
     std::io::Read::read_to_end(
         &mut std::io::Read::take(
-            std::fs::File::open(&file).map_err(|why| format!("cannot open {path}: {why}"))?,
+            std::fs::File::open(&spelled).map_err(|why| format!("cannot open {path}: {why}"))?,
             PNG_SIGNATURE.len() as u64,
         ),
         &mut head,
@@ -1834,9 +1836,12 @@ mod tests {
     fn a_link_on_the_way_refuses_the_bridge_before_it_asks_for_the_file() {
         let folder = std::env::temp_dir().join(format!("ivy-image-link-{}", std::process::id()));
         let file = folder.join("missing.png");
-        let said = image_to_open_with(file.to_str().unwrap(), |at: &std::path::Path| {
-            Ok(at == folder)
-        });
+        // The walk asks in its own spelling, which on Windows is the folder under `\\?\`.
+        let link = panel_control::image::one_spelling(&folder).unwrap();
+        let said = image_to_open_with(
+            file.to_str().unwrap(),
+            |at: &std::path::Path| Ok(at == link),
+        );
         assert_eq!(
             said,
             Err(format!(

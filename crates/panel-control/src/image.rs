@@ -3,7 +3,7 @@
 //! at once, and the window's read is the enforcement, so the two must not drift.
 
 use std::ffi::OsStr;
-use std::path::{Component, Path, Prefix};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 /// The largest image file the drawer reads.
 pub const MAX_BYTES: u64 = 32 * 1024 * 1024;
@@ -97,11 +97,12 @@ fn is_volume(component: &OsStr) -> bool {
 ///
 /// `is_link` answers for one entry without following it: [`refused_link`] in the bridge and the
 /// window, and a stand-in in the tests, so the walk and both callers are pinned where no entry is
-/// one.
+/// one. What is walked is [`one_spelling`]'s, and it is handed back because D121 has the open use
+/// that same spelling: the walk is only worth the entries it asks if they are the ones opened.
 pub fn no_link_on_the_way(
     path: &Path,
     mut is_link: impl FnMut(&Path) -> std::io::Result<bool>,
-) -> Result<(), Refused> {
+) -> Result<PathBuf, Refused> {
     for component in path.components() {
         let why = match component {
             Component::ParentDir => "has a «..» in it; give the path without one".to_owned(),
@@ -113,8 +114,9 @@ pub fn no_link_on_the_way(
         };
         return Err(Refused::Text(format!("{} {why}", path.display())));
     }
-    let mut walked = std::path::PathBuf::new();
-    for component in path.components() {
+    let spelled = one_spelling(path)?;
+    let mut walked = PathBuf::new();
+    for component in spelled.components() {
         walked.push(component);
         if matches!(component, Component::Prefix(_) | Component::RootDir) {
             continue;
@@ -127,7 +129,7 @@ pub fn no_link_on_the_way(
                     path.display()
                 )));
             }
-            Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(spelled),
             Err(why) => {
                 return Err(Refused::Link(format!(
                     "cannot tell whether {} passes through a link: {why}",
@@ -136,7 +138,70 @@ pub fn no_link_on_the_way(
             }
         }
     }
-    Ok(())
+    Ok(spelled)
+}
+
+/// The one spelling of an agent's `path` for the walk and for the open (D121). On Windows it is
+/// the path made whole by its text — `std::path::absolute`, which is Win32's GetFullPathNameW and
+/// asks no disk — and then written under `\\?\`, where Win32 rewrites nothing: the walk asks each
+/// entry as the end of a shorter path, and without the prefix Win32 reads some of those ends as
+/// other entries than the whole path passes through. A path that, once made whole, no longer
+/// starts with a drive or a volume GUID is refused here, as [`elsewhere`] refuses one in the
+/// agent's own text. Off Windows nothing rewrites a path's text, so it is the path as given.
+#[cfg(windows)]
+pub fn one_spelling(path: &Path) -> Result<PathBuf, Refused> {
+    let whole = std::path::absolute(path).map_err(|why| {
+        Refused::Text(format!(
+            "{} cannot be read as a Windows path: {why}",
+            path.display()
+        ))
+    })?;
+    let mut spelled = PathBuf::new();
+    for component in whole.components() {
+        let Component::Prefix(prefix) = component else {
+            spelled.push(component);
+            continue;
+        };
+        let verbatim = verbatim_prefix(prefix.kind()).map_err(|elsewhere| {
+            let which = match elsewhere {
+                Elsewhere::AnotherMachine => "is not on this machine",
+                Elsewhere::NotADrivePath => "is not a file on a drive",
+            };
+            Refused::Text(format!(
+                "{} is read by Windows as {}, which {which}",
+                path.display(),
+                whole.display()
+            ))
+        })?;
+        spelled.push(verbatim);
+    }
+    Ok(spelled)
+}
+
+/// See the Windows `one_spelling`: off it, the path as given.
+#[cfg(not(windows))]
+pub fn one_spelling(path: &Path) -> Result<PathBuf, Refused> {
+    Ok(path.to_path_buf())
+}
+
+/// The verbatim form of a prefix [`prefix_elsewhere`] lets through — a drive letter in either
+/// spelling becomes `\\?\C:`, a volume GUID stays `\\?\Volume{…}` — or why it is refused. Built
+/// from the prefix's parts rather than its text, so it is judged on every platform the way the
+/// allowlist is.
+#[cfg(any(windows, test))]
+fn verbatim_prefix(prefix: Prefix<'_>) -> Result<std::ffi::OsString, Elsewhere> {
+    if let Some(elsewhere) = prefix_elsewhere(prefix) {
+        return Err(elsewhere);
+    }
+    let mut verbatim = std::ffi::OsString::from(r"\\?\");
+    match prefix {
+        Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+            verbatim.push(format!("{}:", char::from(letter)));
+        }
+        Prefix::Verbatim(volume) => verbatim.push(volume),
+        _ => return Err(Elsewhere::NotADrivePath),
+    }
+    Ok(verbatim)
 }
 
 /// Why [`no_link_on_the_way`] refused a path, each holding the sentence the agent is told. The
@@ -282,6 +347,44 @@ mod tests {
         }
     }
 
+    /// **The one spelling's prefix, on every platform**: a drive in either spelling is written
+    /// under `\\?\` with its letter, a volume GUID keeps its name there, and every prefix the
+    /// allowlist refuses is refused with the same reason, so nothing outside it gets a spelling.
+    #[test]
+    fn a_drive_or_a_volume_prefix_is_spelled_verbatim_and_nothing_else_is_spelled() {
+        let name = OsStr::new;
+        let volume = "Volume{0c1a2b3c-0000-0000-0000-100000000000}";
+        for (prefix, spelled) in [
+            (Prefix::Disk(b'C'), r"\\?\C:".to_owned()),
+            (Prefix::Disk(b'd'), r"\\?\d:".to_owned()),
+            (Prefix::VerbatimDisk(b'Z'), r"\\?\Z:".to_owned()),
+            (Prefix::Verbatim(name(volume)), format!(r"\\?\{volume}")),
+        ] {
+            assert_eq!(
+                verbatim_prefix(prefix),
+                Ok(std::ffi::OsString::from(spelled)),
+                "{prefix:?}"
+            );
+        }
+        for (prefix, why) in [
+            (
+                Prefix::UNC(name("host"), name("share")),
+                Elsewhere::AnotherMachine,
+            ),
+            (
+                Prefix::VerbatimUNC(name("host"), name("share")),
+                Elsewhere::AnotherMachine,
+            ),
+            (Prefix::DeviceNS(name("COM9")), Elsewhere::NotADrivePath),
+            (
+                Prefix::Verbatim(name("GLOBALROOT")),
+                Elsewhere::NotADrivePath,
+            ),
+        ] {
+            assert_eq!(verbatim_prefix(prefix), Err(why), "{prefix:?}");
+        }
+    }
+
     /// The same forms as Windows parses them, the two that a refusal list let through included.
     #[cfg(windows)]
     #[test]
@@ -318,20 +421,24 @@ mod tests {
     type Answer = fn() -> std::io::Result<bool>;
 
     /// Walks `path` over a disk made of a table — what each entry answers, every other entry not
-    /// a link — and writes down each entry it was asked about, in order.
-    fn walk(
-        path: &str,
-        answers: &[(&str, Answer)],
-    ) -> (Result<(), Refused>, Vec<std::path::PathBuf>) {
+    /// a link — and writes down each entry it was asked about, in order. The table and what is
+    /// written down are in the walk's own spelling, so the same rows hold where Windows spells
+    /// `/home` as `\\?\C:\home`.
+    fn walk(path: &str, answers: &[(&str, Answer)]) -> (Result<PathBuf, Refused>, Vec<PathBuf>) {
         let mut asked = Vec::new();
         let said = no_link_on_the_way(Path::new(path), |at: &Path| {
             asked.push(at.to_path_buf());
             answers
                 .iter()
-                .find(|(entry, _)| Path::new(entry) == at)
+                .find(|(entry, _)| spelled(entry) == at)
                 .map_or(Ok(false), |(_, answer)| answer())
         });
         (said, asked)
+    }
+
+    /// `path` as the walk spells it.
+    fn spelled(path: &str) -> PathBuf {
+        one_spelling(Path::new(path)).unwrap()
     }
 
     fn link() -> std::io::Result<bool> {
@@ -349,15 +456,15 @@ mod tests {
         ))
     }
 
-    fn paths(entries: &[&str]) -> Vec<std::path::PathBuf> {
-        entries.iter().map(std::path::PathBuf::from).collect()
+    fn paths(entries: &[&str]) -> Vec<PathBuf> {
+        entries.iter().copied().map(spelled).collect()
     }
 
     /// Every entry is asked, from the root down, and the file last.
     #[test]
     fn a_path_with_no_link_is_asked_entry_by_entry_from_the_root() {
         let (said, asked) = walk("/home/me/a.png", &[]);
-        assert_eq!(said, Ok(()));
+        assert_eq!(said, Ok(spelled("/home/me/a.png")));
         assert_eq!(asked, paths(&["/home", "/home/me", "/home/me/a.png"]));
     }
 
@@ -475,7 +582,7 @@ mod tests {
         ] {
             let path = format!("/home/{name}/a.png");
             let (said, asked) = walk(&path, &[]);
-            assert_eq!(said, Ok(()), "{path}");
+            assert_eq!(said, Ok(spelled(&path)), "{path}");
             assert_eq!(
                 asked,
                 paths(&["/home", &format!("/home/{name}"), &path]),
@@ -522,10 +629,59 @@ mod tests {
     #[test]
     fn an_entry_that_is_not_there_is_left_to_the_open() {
         let (said, asked) = walk("/home/gone/a.png", &[("/home/gone", gone)]);
-        assert_eq!(said, Ok(()));
+        assert_eq!(said, Ok(spelled("/home/gone/a.png")));
         assert_eq!(asked, paths(&["/home", "/home/gone"]));
         let (said, _) = walk("/home/me/a.png", &[("/home/me/a.png", gone)]);
-        assert_eq!(said, Ok(()));
+        assert_eq!(said, Ok(spelled("/home/me/a.png")));
+    }
+
+    crate::windows_unix_omission!(
+        off_windows_the_one_spelling_is_the_path_as_given,
+        "unix-only: off Windows the spelling is the path as given; Windows has its own spelling witness"
+    );
+
+    /// Off Windows nothing rewrites a path's text, so the walk asks, and hands back to open, the
+    /// path exactly as the agent wrote it — a doubled or trailing separator included.
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_the_one_spelling_is_the_path_as_given() {
+        for path in ["/home/me/a.png", "/home//me/a.png", "/home/me/./a.png/"] {
+            // Compared as text: two paths compare equal by their components, which a doubled
+            // separator does not change.
+            let spelling = one_spelling(Path::new(path)).unwrap();
+            assert_eq!(spelling.as_os_str(), OsStr::new(path));
+        }
+    }
+
+    /// **On Windows the one spelling is the path made whole by its text and written under
+    /// `\\?\`**: forward slashes become separators, a verbatim drive or volume path is kept as
+    /// written, and every entry the walk asks is a shorter path in that same spelling — the one
+    /// the caller opens.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_one_spelling_is_the_whole_path_under_the_verbatim_prefix() {
+        let volume = r"\\?\Volume{0c1a2b3c-0000-0000-0000-100000000000}\a.png";
+        for (given, spelling) in [
+            (r"C:\shots\a.png", r"\\?\C:\shots\a.png"),
+            ("C:/shots/a.png", r"\\?\C:\shots\a.png"),
+            (r"\\?\C:\shots\a.png", r"\\?\C:\shots\a.png"),
+            (volume, volume),
+        ] {
+            // Compared as text, since two paths compare equal by their components.
+            let spelled = one_spelling(Path::new(given)).unwrap();
+            assert_eq!(spelled.as_os_str(), OsStr::new(spelling), "{given}");
+        }
+        let mut asked = Vec::new();
+        let said = no_link_on_the_way(Path::new("C:/shots/a.png"), |at: &Path| {
+            asked.push(at.to_path_buf());
+            Ok(false)
+        });
+        assert_eq!(said.unwrap().as_os_str(), OsStr::new(r"\\?\C:\shots\a.png"));
+        let asked: Vec<_> = asked.iter().map(|at| at.as_os_str()).collect();
+        assert_eq!(
+            asked,
+            [r"\\?\C:\shots", r"\\?\C:\shots\a.png"].map(OsStr::new)
+        );
     }
 
     /// **On a real Windows disk** a junction — which needs no privilege to make — and a symbolic
@@ -541,9 +697,13 @@ mod tests {
         let plain = folder.join("plain");
         std::fs::create_dir_all(&plain).unwrap();
         std::fs::write(plain.join("a.png"), b"x").unwrap();
+        // The temporary folder is on a drive, so its one spelling is the same text under `\\?\`.
         assert_eq!(
             no_link_on_the_way(&plain.join("a.png"), refused_link),
-            Ok(())
+            Ok(PathBuf::from(format!(
+                r"\\?\{}",
+                plain.join("a.png").display()
+            )))
         );
         let junction = folder.join("junction");
         let made = std::process::Command::new("cmd")

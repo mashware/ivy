@@ -1887,6 +1887,11 @@
   },
   {
     "binary": "panel-control/panel_control:lib",
+    "name": "image::tests::off_windows_the_one_spelling_is_the_path_as_given",
+    "reason": "unix-only: off Windows the spelling is the path as given; Windows has its own spelling witness"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
     "name": "listener::tests::a_connection_that_dies_releases_what_it_held",
     "reason": "unix-only: requires Unix-domain socket peer-disconnect handling"
   },
