@@ -416,6 +416,7 @@ struct ProxyStream {
     buffer: std::io::Cursor<Vec<u8>>,
     reader: Option<std::thread::JoinHandle<()>>,
     timeout: Duration,
+    received_bytes: u64,
 }
 impl ProxyStream {
     fn open(exe: &OsStr, socket: &str) -> io::Result<Self> {
@@ -455,6 +456,7 @@ impl ProxyStream {
             buffer: std::io::Cursor::new(Vec::new()),
             reader: Some(reader),
             timeout: Duration::from_secs(5),
+            received_bytes: 0,
         })
     }
 }
@@ -465,6 +467,7 @@ impl Read for ProxyStream {
         }
         let n = self.buffer.read(out)?;
         if n != 0 {
+            self.received_bytes = self.received_bytes.wrapping_add(n as u64);
             return Ok(n);
         }
         let rx = self
@@ -474,7 +477,9 @@ impl Read for ProxyStream {
         match rx.recv_timeout(self.timeout) {
             Ok(chunk) => {
                 self.buffer = std::io::Cursor::new(chunk);
-                self.buffer.read(out)
+                let n = self.buffer.read(out)?;
+                self.received_bytes = self.received_bytes.wrapping_add(n as u64);
+                Ok(n)
             }
             Err(mpsc::RecvTimeoutError::Timeout) => Err(io::ErrorKind::WouldBlock.into()),
             Err(mpsc::RecvTimeoutError::Disconnected) => Ok(0),
@@ -1073,6 +1078,45 @@ impl ConnectionHealth {
     }
 }
 
+// A frame can span several read timeouts. Its bytes are evidence of a live
+// transport even before the decoder can return a complete message or Pong.
+fn read_upstream(
+    upstream: &mut WebSocket<ProxyStream>,
+    health: &mut ConnectionHealth,
+    now: impl FnOnce() -> Instant,
+) -> tungstenite::Result<Message> {
+    let received_before = upstream.get_ref().received_bytes;
+    let incoming = upstream.read();
+    if incoming.is_ok() || upstream.get_ref().received_bytes != received_before {
+        health.heard(now());
+    }
+    incoming
+}
+
+// Registry/serde failures can include private record contents in Display.
+// Only these fixed transport descriptions may cross into the console diagnostic.
+fn interruption_reason(failure: &io::Error) -> &'static str {
+    const REASONS: [&str; 12] = [
+        "invalid official protocol message",
+        "official proxy disconnected",
+        "official server closed its connection",
+        "unsupported official protocol frame",
+        "official server stopped responding",
+        "invalid local protocol message",
+        "local request uses a reserved correlation ID",
+        "local client disconnected",
+        "unsupported local protocol frame",
+        "local protocol connection failed",
+        "protocol peer disconnected",
+        "route exit state unavailable",
+    ];
+    let description = failure.to_string();
+    REASONS
+        .into_iter()
+        .find(|reason| *reason == description)
+        .unwrap_or("panel routing or I/O operation failed")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn serve(
     listener: TcpListener,
@@ -1131,10 +1175,7 @@ fn serve(
             while !stop.load(Ordering::Acquire) {
                 // A continuous stream must still leave the user's input a turn.
                 for _ in 0..64 {
-                    let incoming = upstream.read();
-                    if incoming.is_ok() {
-                        health.heard(Instant::now());
-                    }
+                    let incoming = read_upstream(&mut upstream, &mut health, Instant::now);
                     match incoming {
                         Ok(Message::Text(text)) => {
                             let message: Value = serde_json::from_str(&text)
@@ -1203,7 +1244,11 @@ fn serve(
             Ok(())
         })();
         drop(upstream);
-        if result.is_err() {
+        if let Err(failure) = result {
+            eprintln!(
+                "ivy-codex: shared connection interrupted ({})",
+                interruption_reason(&failure)
+            );
             let _ = ws.close(None);
         }
         routing.reset_connection();
@@ -1235,6 +1280,173 @@ mod tests {
         assert_eq!(
             health.poll(now + Duration::from_secs(11)),
             HealthAction::None
+        );
+    }
+
+    // The proxy owns a ChildStdin; reuse this test executable rather than relying
+    // on a platform-specific shell or leaving a long-lived helper running.
+    fn framed_proxy() -> (mpsc::SyncSender<Vec<u8>>, WebSocket<ProxyStream>) {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--list")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        let (tx, rx) = mpsc::sync_channel(16);
+        let stream = ProxyStream {
+            child: Some(child),
+            input,
+            receiver: Some(rx),
+            buffer: std::io::Cursor::new(Vec::new()),
+            reader: None,
+            timeout: Duration::ZERO,
+            received_bytes: 0,
+        };
+        (
+            tx,
+            WebSocket::from_raw_socket(stream, tungstenite::protocol::Role::Client, None),
+        )
+    }
+
+    #[test]
+    fn an_incomplete_upstream_frame_stays_live_while_bytes_arrive() {
+        let (tx, mut upstream) = framed_proxy();
+        let start = Instant::now();
+        let mut health = ConnectionHealth::new(start);
+        let text = r#"{"id":1,"result":{"data":[],"nextCursor":null}}"#;
+        assert!(text.len() < 126);
+        let mut frame = vec![0x81, text.len() as u8];
+        frame.extend_from_slice(text.as_bytes());
+        for (index, chunk) in frame.chunks(3).enumerate() {
+            tx.send(chunk.to_vec()).unwrap();
+            let now = start + Duration::from_secs(index as u64);
+            let incoming = read_upstream(&mut upstream, &mut health, || now);
+            if (index + 1) * 3 >= frame.len() {
+                assert_eq!(incoming.unwrap(), Message::text(text));
+            } else {
+                assert!(
+                    matches!(incoming, Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock)
+                );
+            }
+            assert_eq!(
+                health.poll(now),
+                HealthAction::None,
+                "active frame expired at chunk {index}"
+            );
+        }
+        // Reading nothing must not keep a stalled partial or completed response alive.
+        let last = start + Duration::from_secs(((frame.len() - 1) / 3) as u64);
+        assert!(
+            read_upstream(&mut upstream, &mut health, || last + Duration::from_secs(5)).is_err()
+        );
+        assert_eq!(
+            health.poll(last + Duration::from_secs(5)),
+            HealthAction::Probe
+        );
+        assert!(
+            read_upstream(&mut upstream, &mut health, || last
+                + Duration::from_secs(10))
+            .is_err()
+        );
+        assert_eq!(
+            health.poll(last + Duration::from_secs(10)),
+            HealthAction::Expired
+        );
+    }
+
+    #[test]
+    fn progress_after_a_probe_cancels_expiry_but_empty_reads_do_not() {
+        let (tx, mut upstream) = framed_proxy();
+        let start = Instant::now();
+        let mut health = ConnectionHealth::new(start);
+        assert_eq!(
+            health.poll(start + Duration::from_secs(5)),
+            HealthAction::Probe
+        );
+        tx.send(vec![0x81, 20, b'a']).unwrap();
+        let at = start + Duration::from_secs(9);
+        assert!(read_upstream(&mut upstream, &mut health, || at).is_err());
+        assert_eq!(
+            health.poll(start + Duration::from_secs(10)),
+            HealthAction::None
+        );
+        assert!(
+            read_upstream(&mut upstream, &mut health, || start
+                + Duration::from_secs(14))
+            .is_err()
+        );
+        assert_eq!(
+            health.poll(start + Duration::from_secs(14)),
+            HealthAction::Probe
+        );
+        assert_eq!(
+            health.poll(start + Duration::from_secs(19)),
+            HealthAction::Expired
+        );
+    }
+
+    #[test]
+    fn buffered_frame_progress_cancels_expiry_without_another_pipe_chunk() {
+        let (tx, upstream) = framed_proxy();
+        // A small decoder buffer forces one pipe chunk to span two decoder
+        // calls: a complete first frame followed by part of the next frame.
+        let config = WebSocketConfig::default().read_buffer_size(8);
+        let mut upstream = WebSocket::from_raw_socket(
+            upstream.into_inner(),
+            tungstenite::protocol::Role::Client,
+            Some(config),
+        );
+        let start = Instant::now();
+        let mut health = ConnectionHealth::new(start);
+        let mut chunk = vec![0x81, 1, b'x', 0x81, 40];
+        chunk.extend_from_slice(b"partial payload");
+        tx.send(chunk).unwrap();
+        assert_eq!(
+            read_upstream(&mut upstream, &mut health, || start).unwrap(),
+            Message::text("x")
+        );
+        assert_eq!(
+            health.poll(start + Duration::from_secs(5)),
+            HealthAction::Probe
+        );
+        let at = start + Duration::from_secs(9);
+        assert!(matches!(read_upstream(&mut upstream, &mut health, || at),
+                Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock));
+        assert_eq!(
+            health.poll(start + Duration::from_secs(10)),
+            HealthAction::None
+        );
+        let idle = start + Duration::from_secs(14);
+        assert!(matches!(read_upstream(&mut upstream, &mut health, || idle),
+                Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock));
+        assert_eq!(health.poll(idle), HealthAction::Probe);
+        assert_eq!(
+            health.poll(start + Duration::from_secs(19)),
+            HealthAction::Expired
+        );
+    }
+
+    #[test]
+    fn interruption_diagnostics_keep_private_record_values_out_of_the_console() {
+        let malformed = serde_json::from_str::<crate::codex_route::Identity>(
+            r#"{"v":"PRIVATE_ROUTE_RECORD_SENTINEL"}"#,
+        )
+        .unwrap_err();
+        let failure: io::Error = malformed.into();
+        assert!(
+            failure
+                .to_string()
+                .contains("PRIVATE_ROUTE_RECORD_SENTINEL")
+        );
+        assert_eq!(
+            interruption_reason(&failure),
+            "panel routing or I/O operation failed"
+        );
+        assert_eq!(
+            interruption_reason(&error("official server stopped responding")),
+            "official server stopped responding"
         );
     }
 
