@@ -1,11 +1,11 @@
-//! Bounded, inert Markdown fallback for project roadmaps.
+//! Bounded, inert JSON and Markdown fallback for project roadmaps.
 //!
 //! Reading and Git identity resolution happen on a worker. The window only drains completed
 //! snapshots, so opening a large or temporarily missing file never blocks a frame.
 
 use eframe::egui;
 use panel_contract::{
-    Mark,
+    MAX_BYTES, Mark,
     plan::{Item, Milestone, Plan},
 };
 use std::{
@@ -15,8 +15,6 @@ use std::{
     sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
-
-const MAX_BYTES: u64 = 256 * 1024;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Snapshot {
@@ -205,14 +203,26 @@ fn load(name: &str, path: &Path) -> Snapshot {
         }
         let text =
             std::str::from_utf8(&bytes).map_err(|_| "roadmap file is not UTF-8".to_owned())?;
-        markdown_plan(text).ok_or_else(|| "roadmap file has no task items".to_owned())
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        {
+            panel_contract::plan::parse_document_noting(text)
+                .map(|(plan, dropped)| (plan, dropped.sentence()))
+                .map_err(|error| format!("roadmap JSON is invalid: {error}"))
+        } else {
+            markdown_plan(text)
+                .map(|plan| (plan, None))
+                .ok_or_else(|| "roadmap file has no task items".to_owned())
+        }
     })();
     match result {
-        Ok(plan) => Snapshot {
+        Ok((plan, diagnostic)) => Snapshot {
             name: name.to_owned(),
             identity,
             plan: Some(Arc::new(plan)),
-            error: None,
+            error: diagnostic,
             path: path.to_path_buf(),
         },
         Err(error) => Snapshot {
@@ -446,6 +456,53 @@ mod tests {
     }
 
     #[test]
+    fn json_extension_uses_the_plan_contract_and_retains_dropped_diagnostics() {
+        let dir = TempDir::new();
+        let path = dir.0.join("plan.JsOn");
+        let text = r#"{"title":"Release","source":"repo/plan.json","milestones":[{"id":"H3","title":"Build","done_when":"Delivered","depends_on":["H2"],"items":[{"id":"MT-16700","text":"Ship","mark":"current","ref":"MT-16700","link":"https://example.test/16700"},{"text":"Retained","mark":"future"}]}],"outside":["Review"]}"#;
+        fs::write(&path, text).unwrap();
+        let (expected, dropped) = panel_contract::plan::parse_document_noting(text).unwrap();
+        let snapshot = load("demo", &path);
+        assert_eq!(snapshot.plan.as_deref(), Some(&expected));
+        assert_eq!(snapshot.error, dropped.sentence());
+        assert!(snapshot.error.unwrap().contains("future"));
+
+        fs::write(&path, "{ invalid JSON\n- [ ] no Markdown fallback\n").unwrap();
+        let snapshot = load("demo", &path);
+        assert!(snapshot.plan.is_none());
+        assert!(snapshot.error.unwrap().contains("roadmap JSON is invalid"));
+
+        fs::write(&path, "[]").unwrap();
+        assert!(load("demo", &path).error.unwrap().contains("not an object"));
+        fs::write(&path, "{}").unwrap();
+        assert_eq!(load("demo", &path).plan.as_deref(), Some(&Plan::default()));
+    }
+
+    #[test]
+    fn json_size_boundary_and_markdown_extension_are_preserved() {
+        let dir = TempDir::new();
+        let path = dir.0.join("plan.json");
+        let mut exact = "{}".to_owned();
+        exact.push_str(&" ".repeat(MAX_BYTES as usize - exact.len()));
+        fs::write(&path, &exact).unwrap();
+        assert!(load("demo", &path).plan.is_some());
+        exact.push(' ');
+        fs::write(&path, exact).unwrap();
+        let snapshot = load("demo", &path);
+        assert!(snapshot.plan.is_none());
+        assert!(snapshot.error.unwrap().contains("exceeds"));
+
+        let markdown = dir.0.join("plan.md");
+        fs::write(&markdown, "{\n- [ ] Markdown task\n").unwrap();
+        let snapshot = load("demo", &markdown);
+        assert_eq!(
+            snapshot.plan.unwrap().milestones[0].items[0].text,
+            "Markdown task"
+        );
+        assert!(snapshot.error.is_none());
+    }
+
+    #[test]
     fn filesystem_event_storm_is_bounded_by_configured_files() {
         let first = PathBuf::from("/project/roadmap.md");
         let second = PathBuf::from("/other/roadmap.md");
@@ -485,10 +542,25 @@ mod tests {
 
     #[test]
     fn reader_reloads_atomic_replacement_deletion_and_reappearance() {
+        for extension in ["md", "json"] {
+            reloads_atomic_replacement_deletion_and_reappearance(extension);
+        }
+    }
+
+    fn reloads_atomic_replacement_deletion_and_reappearance(extension: &str) {
+        let content = |text: &str| {
+            if extension == "json" {
+                serde_json::json!({"milestones": [{"id": "H3", "title": "Build",
+                    "items": [{"id": "MT-16700", "text": text, "mark": "current"}]}]})
+                .to_string()
+            } else {
+                format!("# Roadmap\n- [ ] {text}\n")
+            }
+        };
         let dir = TempDir::new();
-        let path = dir.0.join("roadmap.md");
-        let replacement = dir.0.join("replacement.md");
-        fs::write(&path, "# First\n- [ ] alpha\n").unwrap();
+        let path = dir.0.join(format!("roadmap.{extension}"));
+        let replacement = dir.0.join(format!("replacement.{extension}"));
+        fs::write(&path, content("alpha")).unwrap();
         let mut config = BTreeMap::new();
         config.insert("demo".into(), path.clone());
         let ctx = egui::Context::default();
@@ -518,7 +590,7 @@ mod tests {
         };
         assert!(wait_for(&mut reader, Some("alpha"), false).plan.is_some());
 
-        fs::write(&replacement, "# Second\n- [ ] beta\n").unwrap();
+        fs::write(&replacement, content("beta")).unwrap();
         fs::rename(&replacement, &path).unwrap();
         assert!(wait_for(&mut reader, Some("beta"), false).plan.is_some());
 
@@ -530,7 +602,7 @@ mod tests {
                 .contains("unavailable")
         );
 
-        fs::write(&path, "# Third\n- [ ] gamma\n").unwrap();
+        fs::write(&path, content("gamma")).unwrap();
         assert!(wait_for(&mut reader, Some("gamma"), false).plan.is_some());
     }
 }

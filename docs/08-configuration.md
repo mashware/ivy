@@ -572,6 +572,25 @@ Hidden programs keep running. Right-clicking a header retains its console action
 
 ## Board
 
+Configure a repository's versioned plan with:
+
+```text
+roadmap.backend = /path/to/project/plan.json
+```
+
+A `.json` extension (case-insensitive) selects the [Project plan document](04-panel-contract.md#project-plan-document),
+the same JSON accepted by `plan_set`. Other extensions retain Markdown task lists; Ivy does not
+inspect content to guess the format. Use JSON to declare milestone and deliverable IDs, completion
+criteria, dependencies, marks, references, links, outside work and the plan source. A console publishing
+`milestone: "H3"` and `deliverable: "MT-16700"` attaches to that identified deliverable.
+
+Both formats reload automatically after saves, atomic replacement, deletion and reappearance.
+The file must be regular UTF-8 and at most 256 KiB. Invalid JSON and oversized or unavailable files
+show a roadmap diagnostic. Unsupported marks reported by the shared parser also show a diagnostic,
+while the valid remainder stays on the Board. A published plan hides the file until `plan_retire`;
+JSON files do not publish or persist a separate plan in Ivy's state. `roadmap.window` remains retired
+(D93); JSON uses the same current Board visibility as a published plan.
+
 The global **Board** control shows every console in every tab, including a console hidden by
 maximization or a folded information panel. The default shortcut is **Ctrl+Shift+O**:
 
