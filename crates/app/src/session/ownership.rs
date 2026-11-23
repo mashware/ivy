@@ -34,9 +34,10 @@ impl Ownership {
             if !name.starts_with("lease-") {
                 continue;
             }
+            // Unix probes need only read access, including for readable leases left by root.
             let file = OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(cfg!(not(unix)))
                 .open(entry.path())?;
             match try_lock(&file)? {
                 true => {
@@ -128,7 +129,8 @@ fn lock(file: &File, wait: bool) -> io::Result<()> {
 }
 #[cfg(unix)]
 fn try_lock(file: &File) -> io::Result<bool> {
-    set_lock(file, libc::F_WRLCK as libc::c_short, false)
+    // Every live owner holds an exclusive lock, so a read lock still detects it.
+    set_lock(file, libc::F_RDLCK as libc::c_short, false)
 }
 #[cfg(unix)]
 fn unlock(file: &File) -> io::Result<()> {
@@ -249,6 +251,13 @@ mod tests {
         output: BufReader<std::process::ChildStdout>,
     }
 
+    impl Drop for Window {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
     impl Window {
         fn spawn(directory: &Path) -> Self {
             let mut child = Command::new(std::env::current_exe().unwrap())
@@ -290,6 +299,84 @@ mod tests {
             self.child.kill().unwrap();
             self.child.wait().unwrap();
         }
+    }
+
+    crate::windows_unix_omission!(
+        readable_non_writable_stale_lease_does_not_block_startup,
+        "unix-only: POSIX permissions and process-owned record locks"
+    );
+
+    #[cfg(unix)]
+    #[test]
+    fn readable_non_writable_stale_lease_does_not_block_startup() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let directory = std::env::temp_dir().join(format!("ivy-stale-lease-{:?}", random));
+        let leases = directory.join("window-leases");
+        fs::create_dir_all(&leases).unwrap();
+        let stale = leases.join("lease-stale");
+        fs::write(&stale, b"").unwrap();
+        fs::set_permissions(&stale, fs::Permissions::from_mode(0o444)).unwrap();
+
+        let result = Ownership::acquire(&directory);
+        let removed = !stale.exists();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(result.unwrap().is_primary());
+        assert!(removed, "an unlocked obsolete lease must be cleaned up");
+    }
+
+    crate::windows_unix_omission!(
+        readable_non_writable_live_lease_is_preserved_until_owner_exits,
+        "unix-only: POSIX permissions and process-owned record locks"
+    );
+
+    #[cfg(unix)]
+    #[test]
+    fn readable_non_writable_live_lease_is_preserved_until_owner_exits() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let directory = std::env::temp_dir().join(format!("ivy-live-lease-{:?}", random));
+        fs::create_dir(&directory).unwrap();
+        let mut primary = Window::spawn(&directory);
+        primary.start();
+        assert!(primary.role());
+        let lease = fs::read_dir(directory.join("window-leases"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("lease-")
+            })
+            .unwrap();
+        fs::set_permissions(&lease, fs::Permissions::from_mode(0o444)).unwrap();
+
+        let mut secondary = Window::spawn(&directory);
+        secondary.start();
+        assert!(
+            !secondary.role(),
+            "a read-only lease still has a live exclusive owner"
+        );
+        assert!(lease.exists(), "a live lease must not be removed");
+        assert_eq!(
+            fs::metadata(&lease).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+        secondary.close();
+        primary.close();
+
+        let mut replacement = Window::spawn(&directory);
+        replacement.start();
+        assert!(replacement.role());
+        assert!(
+            !lease.exists(),
+            "the same lease becomes removable after its owner exits"
+        );
+        replacement.close();
+        fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]

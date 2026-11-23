@@ -9821,6 +9821,15 @@ processes for that ownership boundary. Secondary windows are intentionally trans
 delivery, approved explicitly before implementation. This replaces D16's last-writer-wins
 limitation without adding a workspace registry or selector.
 
+**Lease inspection amendment (#225).** On Unix, existing leases are opened read-only and probed
+with a nonblocking POSIX read lock. Every live owner still retains an exclusive write lock, so the
+probe preserves active leases while allowing a readable obsolete file owned by another user to be
+removed from the user's writable lease directory. Requiring write access to inspect an old file
+disabled both restoration and saving after a root-owned `0644` lease was left behind on macOS.
+No owner or permission is changed: unreadable leases and failed cleanup still refuse ownership.
+Discarded: deleting files after a permission error, which cannot establish whether a lease is live,
+and changing permissions automatically, which requires authority Ivy should not need.
+
 Directory recovery uses D78's local sources and precedence, reusing the ordinary-frame project
 observations instead of introducing a polling timer. A final observation before clean exit covers
 recent navigation. An explicitly remote or unusable report clears local eligibility. A temporarily
