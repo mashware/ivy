@@ -624,6 +624,16 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "session::ownership::tests::readable_non_writable_live_lease_is_preserved_until_owner_exits",
+    "reason": "unix-only: POSIX permissions and process-owned record locks"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "session::ownership::tests::readable_non_writable_stale_lease_does_not_block_startup",
+    "reason": "unix-only: POSIX permissions and process-owned record locks"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "settings::editor::tests::lowering_recovery_after_a_wrong_live_session_still_replaces_it_before_input",
     "reason": "unix-only: uses /bin/cat and a POSIX shell to verify keyboard and clipboard input after recovery"
   },
