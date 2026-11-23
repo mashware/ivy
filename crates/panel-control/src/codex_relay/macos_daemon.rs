@@ -151,11 +151,14 @@ fn executable_candidates(
     command: &Command,
     environment: &BTreeMap<OsString, OsString>,
 ) -> io::Result<Vec<PathBuf>> {
+    let program = Path::new(command.get_program());
+    if program.is_absolute() {
+        return Ok(vec![program.to_owned()]);
+    }
     let mut directory = std::env::current_dir()?;
     if let Some(cwd) = command.get_current_dir() {
         directory = directory.join(cwd);
     }
-    let program = Path::new(command.get_program());
     if program.as_os_str().as_bytes().contains(&b'/') {
         return Ok(vec![directory.join(program)]);
     }
