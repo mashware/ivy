@@ -10304,6 +10304,37 @@ process scans or per-frame inspection (unbounded or frame-blocking work without 
 
 ## D92 — Codex mobile and panel tools share one conversation owner
 
+**Amended 23 November 2026 — #224.** On macOS, the bounded official
+`app-server daemon start` launch disclaims Ivy's native process responsibility at exec.
+The reporter closed Ivy and confirmed that its main process had exited, while two
+official Codex daemon processes still reported Ivy's executable as their responsible
+path. The surviving MCP bridges instead reported ChatGPT. A daemon's responsible PID
+being itself after its original parent exits does not remove the cached application
+attribution, so PPID 1 or `setsid` does not establish an independent application lifetime.
+
+Only this persistent-service launch uses the native adapter. Argument/environment storage,
+PATH resolution and spawn attributes are prepared before fork; the final hook replaces
+the already-prepared child with `posix_spawn(POSIX_SPAWN_SETEXEC)`, retaining its PID,
+stdio, directory, signal setup and the existing timeout/reaping path. The dynamically
+resolved `responsibility_spawnattrs_setdisclaim` SPI follows LLVM's spawn-time interface;
+an unavailable capability or failed setup refuses the launch rather than silently
+claiming separation. Ordinary shells, remote TUIs, proxies and explicit admin commands
+retain their launch behavior. New permission requests belong to the resulting service's
+native identity; no permission is granted or authentication setting changed by Ivy.
+
+The official shared server remains the conversation owner. Attaching to an existing
+server does not repair its old attribution, restart it or stop other clients. A server
+already attributed to Ivy can retain the Dock entry until it is explicitly restarted.
+Native tests must observe effective responsibility through the actual launch path;
+cross-compilation does not prove the packaged Dock outcome or mobile interoperability.
+Those acceptance checks remain required on macOS.
+
+**Discarded:** killing all Codex daemons or bundled MCP helpers on exit (disrupts shared
+and external clients); adding `--no-daemon` (loses live mobile ownership); merely
+detaching the Unix session (does not clear native attribution); relocating the MCP
+bridge (the observed bridges belonged to ChatGPT); installing a new persistent launch
+service (introduces lifecycle and installation behavior beyond this fix).
+
 **Amended 19 November 2026 — #140.** Ordinary supported Codex starts on macOS now select the same authenticated shared relay as Linux. A fresh-window report showed the second console reading the first console's panel even with shell integration present: excluding macOS from the relay while executing Codex unchanged allowed the shared daemon's inherited identity to select the panel. Missing capabilities, failed shared setup and unverified route proofs retain the existing refusal path; Ivy never automatically adds `--no-daemon`. Explicit bypass invocations and ordinary direct panel producers retain their meaning. Shared-launch and refusal fixtures now run on macOS as well as Linux, with native arm64 and Intel panel-control tests required by the PR workflow. Native two-console and phone history/input interoperability remain separate acceptance checks; Linux fixtures and a native package build do not establish them.
 
 **Discarded for the macOS amendment:** retaining unverified ordinary-launch passthrough (reproduces cross-console publication); automatically selecting independent mode (loses live mobile input); treating all detached producers as unauthorized (changes D91's deliberate diagnostic-only boundary). Windows remains outside this relay's supported platforms because atomic route replacement is not implemented there.

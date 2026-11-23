@@ -22,6 +22,9 @@ use tungstenite::{Message, WebSocket, accept_hdr_with_config};
 const MAX_FRAME: usize = 64 << 20;
 const TOKEN_ENV: &str = "IVY_CODEX_RELAY_AUTH";
 
+#[cfg(target_os = "macos")]
+mod macos_daemon;
+
 #[cfg(unix)]
 static TERMINATING: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
@@ -202,6 +205,13 @@ fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
         }
         command.env_remove("PANEL_SERVER_PID");
     }
+    #[cfg(target_os = "macos")]
+    let mut child = if args == ["app-server", "daemon", "start"] {
+        macos_daemon::spawn(command)?
+    } else {
+        command.spawn()?
+    };
+    #[cfg(not(target_os = "macos"))]
     let mut child = command.spawn()?;
     let stdout = child
         .stdout
