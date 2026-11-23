@@ -1093,6 +1093,30 @@ fn read_upstream(
     incoming
 }
 
+// Registry/serde failures can include private record contents in Display.
+// Only these fixed transport descriptions may cross into the console diagnostic.
+fn interruption_reason(failure: &io::Error) -> &'static str {
+    const REASONS: [&str; 12] = [
+        "invalid official protocol message",
+        "official proxy disconnected",
+        "official server closed its connection",
+        "unsupported official protocol frame",
+        "official server stopped responding",
+        "invalid local protocol message",
+        "local request uses a reserved correlation ID",
+        "local client disconnected",
+        "unsupported local protocol frame",
+        "local protocol connection failed",
+        "protocol peer disconnected",
+        "route exit state unavailable",
+    ];
+    let description = failure.to_string();
+    REASONS
+        .into_iter()
+        .find(|reason| *reason == description)
+        .unwrap_or("panel routing or I/O operation failed")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn serve(
     listener: TcpListener,
@@ -1221,8 +1245,10 @@ fn serve(
         })();
         drop(upstream);
         if let Err(failure) = result {
-            // Failures here use fixed descriptions, never protocol payloads or tokens.
-            eprintln!("ivy-codex: shared connection interrupted ({failure})");
+            eprintln!(
+                "ivy-codex: shared connection interrupted ({})",
+                interruption_reason(&failure)
+            );
             let _ = ws.close(None);
         }
         routing.reset_connection();
@@ -1399,6 +1425,28 @@ mod tests {
         assert_eq!(
             health.poll(start + Duration::from_secs(19)),
             HealthAction::Expired
+        );
+    }
+
+    #[test]
+    fn interruption_diagnostics_keep_private_record_values_out_of_the_console() {
+        let malformed = serde_json::from_str::<crate::codex_route::Identity>(
+            r#"{"v":"PRIVATE_ROUTE_RECORD_SENTINEL"}"#,
+        )
+        .unwrap_err();
+        let failure: io::Error = malformed.into();
+        assert!(
+            failure
+                .to_string()
+                .contains("PRIVATE_ROUTE_RECORD_SENTINEL")
+        );
+        assert_eq!(
+            interruption_reason(&failure),
+            "panel routing or I/O operation failed"
+        );
+        assert_eq!(
+            interruption_reason(&error("official server stopped responding")),
+            "official server stopped responding"
         );
     }
 
