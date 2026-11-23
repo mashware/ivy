@@ -333,6 +333,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/src/codex_relay.rs"),
     ),
     (
+        "panel-control/src/codex_relay/macos_daemon.rs",
+        include_str!("../../panel-control/src/codex_relay/macos_daemon.rs"),
+    ),
+    (
         "panel-control/src/codex_route.rs",
         include_str!("../../panel-control/src/codex_route.rs"),
     ),
