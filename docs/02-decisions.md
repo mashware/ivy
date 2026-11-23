@@ -8945,6 +8945,14 @@ emitting `ResetTitle`; this change does not infer a reset from an unrelated even
 - Stripping client prefixes or guessing process lifecycle: a terminal title is the literal value the
   producer chose; transforming it would introduce client-specific semantics that the terminal lacks.
 
+**Amended for [#227](https://github.com/mashware/ivy/issues/227), 23 November 2026.**
+The header's folder/program fallback hid an AI-published title whenever the separate activity
+integration had no declaration, while Rename still showed that title. A usable published title
+therefore takes precedence over the folder/program fallback without requiring an activity signal.
+This includes shell-published titles: the terminal has no authenticated producer identity for OSC
+0/2. Requiring activity signals was discarded because naming and activity are independent;
+guessing the producer from title text or executable names would violate D6. Manual names still win.
+
 Title events are coalesced into one latest-update slot and consumed within the existing parser
 span. Name resolution belongs inside the existing chrome and Overview spans. There is no new pump,
 watcher or lower budget for hidden panes, and no new performance claim without valid measurement.
