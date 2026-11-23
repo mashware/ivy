@@ -2045,7 +2045,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            23,
+            24,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()

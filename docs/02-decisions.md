@@ -8945,6 +8945,14 @@ emitting `ResetTitle`; this change does not infer a reset from an unrelated even
 - Stripping client prefixes or guessing process lifecycle: a terminal title is the literal value the
   producer chose; transforming it would introduce client-specific semantics that the terminal lacks.
 
+**Amended for [#227](https://github.com/mashware/ivy/issues/227), 23 November 2026.**
+The header's folder/program fallback hid an AI-published title whenever the separate activity
+integration had no declaration, while Rename still showed that title. A usable published title
+therefore takes precedence over the folder/program fallback without requiring an activity signal.
+This includes shell-published titles: the terminal has no authenticated producer identity for OSC
+0/2. Requiring activity signals was discarded because naming and activity are independent;
+guessing the producer from title text or executable names would violate D6. Manual names still win.
+
 Title events are coalesced into one latest-update slot and consumed within the existing parser
 span. Name resolution belongs inside the existing chrome and Overview spans. There is no new pump,
 watcher or lower budget for hidden panes, and no new performance claim without valid measurement.
@@ -9821,6 +9829,15 @@ processes for that ownership boundary. Secondary windows are intentionally trans
 delivery, approved explicitly before implementation. This replaces D16's last-writer-wins
 limitation without adding a workspace registry or selector.
 
+**Lease inspection amendment (#225).** On Unix, existing leases are opened read-only and probed
+with a nonblocking POSIX read lock. Every live owner still retains an exclusive write lock, so the
+probe preserves active leases while allowing a readable obsolete file owned by another user to be
+removed from the user's writable lease directory. Requiring write access to inspect an old file
+disabled both restoration and saving after a root-owned `0644` lease was left behind on macOS.
+No owner or permission is changed: unreadable leases and failed cleanup still refuse ownership.
+Discarded: deleting files after a permission error, which cannot establish whether a lease is live,
+and changing permissions automatically, which requires authority Ivy should not need.
+
 Directory recovery uses D78's local sources and precedence, reusing the ordinary-frame project
 observations instead of introducing a polling timer. A final observation before clean exit covers
 recent navigation. An explicitly remote or unusable report clears local eligibility. A temporarily
@@ -10334,6 +10351,12 @@ and external clients); adding `--no-daemon` (loses live mobile ownership); merel
 detaching the Unix session (does not clear native attribution); relocating the MCP
 bridge (the observed bridges belonged to ChatGPT); installing a new persistent launch
 service (introduces lifecycle and installation behavior beyond this fix).
+
+**Amended 23 November 2026 — #223.** Relay health counts inbound byte progress, including an incomplete WebSocket frame that yields through read timeouts. Counting only complete messages falsely closed a valid slowly delivered MCP inventory response after the five-second probe deadline: a Pong cannot interrupt the bytes of an already-started frame. Idle connections still receive the five-second Ping probe, and an unanswered probe with no inbound progress still closes after five further seconds. A per-connection failure emits its fixed, payload-free reason before closing; conversation contents, protocol payloads and authentication tokens are absent.
+
+The unchanged relay reproduced the cutoff at 10.045 seconds with 100-byte writes every 500 ms; the same response sent immediately and a healthy twelve-second wait succeeded. Separately, actual Codex 0.171.0 reproduced both reported unavailable/read-only messages after an induced disconnect on a fresh main conversation: its server rejected reattachment because no rollout existed before the first turn. This establishes the portable failure paths, not native macOS incident identity. Byte-progress regression tests use a real decoder and virtual time; silence and route-proof semantics remain unchanged.
+
+**Discarded for the health amendment:** increasing or removing the deadline (hides a dead proxy); requiring a completed Pong while a frame is still arriving (the Pong cannot be decoded yet); automatic independent fallback (loses shared mobile control); changing Codex history or writer ownership in Ivy (those remain upstream).
 
 **Amended 19 November 2026 — #140.** Ordinary supported Codex starts on macOS now select the same authenticated shared relay as Linux. A fresh-window report showed the second console reading the first console's panel even with shell integration present: excluding macOS from the relay while executing Codex unchanged allowed the shared daemon's inherited identity to select the panel. Missing capabilities, failed shared setup and unverified route proofs retain the existing refusal path; Ivy never automatically adds `--no-daemon`. Explicit bypass invocations and ordinary direct panel producers retain their meaning. Shared-launch and refusal fixtures now run on macOS as well as Linux, with native arm64 and Intel panel-control tests required by the PR workflow. Native two-console and phone history/input interoperability remain separate acceptance checks; Linux fixtures and a native package build do not establish them.
 

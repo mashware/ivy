@@ -1268,6 +1268,13 @@ mod tests {
     #[test]
 
     fn published_project_plan_hides_roadmap_file_until_retired() {
+        for extension in ["md", "json"] {
+            published_project_plan_hides_file_until_retired(extension);
+        }
+    }
+
+    #[cfg(unix)] // Exercises the Unix panel-control endpoint.
+    fn published_project_plan_hides_file_until_retired(extension: &str) {
         use std::{fs, process::Command, time::Instant};
         let root = std::env::temp_dir().join(format!(
             "ivy-board-roadmap-precedence-{}-{}",
@@ -1283,8 +1290,13 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        let roadmap = root.join("roadmap.md");
-        fs::write(&roadmap, "# File roadmap\n- [ ] file only task\n").unwrap();
+        let roadmap = root.join(format!("roadmap.{extension}"));
+        let content = if extension == "json" {
+            r#"{"title":"File roadmap","source":"Versioned source","milestones":[{"id":"H3","title":"Build","items":[{"id":"MT-16700","text":"file only task","mark":"current"}]}]}"#
+        } else {
+            "# File roadmap\n- [ ] file only task\n"
+        };
+        fs::write(&roadmap, content).unwrap();
 
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1354,6 +1366,9 @@ mod tests {
                     &shapes,
                     &format!("from {}", roadmap.display())
                 ));
+                if extension == "json" {
+                    assert!(the_text_queued_up(&shapes, "Versioned source"));
+                }
                 assert!(!the_text_queued_up(&shapes, "published task"));
                 break;
             }
