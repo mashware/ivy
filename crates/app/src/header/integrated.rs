@@ -18,17 +18,16 @@ pub(crate) struct Strip {
     pub(crate) focused: bool,
 }
 
-/// What a console's header calls it: the name somebody gave it; the title an agent set; otherwise
-/// its foreground program — after its folder when no project names the place — rather than the
-/// shell's `user@host:path` title, which the owner found said nothing (17 November 2026).
+/// Manual names and published titles are independent of optional agent activity signals.
+/// Without either, the foreground program follows its folder when no project names the place.
 fn header_label(pane: &crate::Pane) -> std::borrow::Cow<'_, str> {
     let named = pane
         .label
         .as_deref()
         .is_some_and(|label| !label.trim().is_empty());
-    let agent = pane.signals.view(std::time::Instant::now()).is_some();
+    let titled = pane.screen.terminal_title().is_some();
     match &pane.program {
-        Some((folder, program)) if !named && !agent => {
+        Some((folder, program)) if !named && !titled => {
             let mut letters = program.chars();
             let program: String = letters
                 .next()
@@ -586,6 +585,51 @@ mod tests {
         pane.label = None;
         pane.program = None;
         assert_eq!(header_label(pane), crate::pane_view::display_label(pane));
+    }
+
+    #[test]
+    fn published_titles_are_painted_without_agent_activity_signals() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let pane = &mut *window.active_mut().panes_mut()[0];
+        pane.program = Some(("workspace".into(), "codex".into()));
+        assert!(pane.signals.view(std::time::Instant::now()).is_none());
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        let metrics = CellMetrics::of(8.0, 16.0);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 300.0));
+        let header = egui::Rect::from_min_size(rect.min, egui::vec2(900.0, 28.0));
+        for (report, manual, expected) in [
+            ("\x1b]2;Fix console titles\x07", None, "Fix console titles"),
+            ("\x1b]0;Review changes\x07", None, "Review changes"),
+            ("", Some("My console"), "My console"),
+            ("", None, "Review changes"),
+            ("\x1b]2;\x07", None, "workspace / Codex"),
+        ] {
+            pane.screen.advance(report.as_bytes());
+            pane.label = manual.map(str::to_owned);
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                paint_strip(
+                    ui,
+                    pane,
+                    &metrics,
+                    &Theme::default(),
+                    Strip {
+                        rect,
+                        header,
+                        headers: super::super::Headers::PAINTED.integrated(true),
+                        button: super::super::Button::in_a_tab_of(&[rect; 2]),
+                        integrated: true,
+                        maximized: None,
+                        now: std::time::SystemTime::now(),
+                        focused: true,
+                    },
+                );
+            });
+            output.textures_delta.clear();
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected
+                    && shape.clip_rect.intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            )), "the visible header must contain {expected:?}");
+        }
     }
 
     #[test]
