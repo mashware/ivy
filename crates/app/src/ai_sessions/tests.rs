@@ -4,6 +4,7 @@ use panel_contract::PanelDir;
 use panel_control::Channel;
 use panel_control::session::Client;
 use serde_json::{Value, json};
+use std::ffi::OsStr;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{Receiver, sync_channel};
@@ -138,6 +139,8 @@ impl Fixture {
         let cleanup = FixtureExecutable(executable.clone());
         let endpoint = directory.path().join(panel_contract::CONTROL_SOCKET);
         let mut directories = FixtureDirectories(Vec::new());
+        // Python colors tracebacks on a PTY; diagnostic fixtures need the same bytes on every terminal.
+        let environment = [("PYTHON_COLORS", Some(OsStr::new("0")))];
         let (pty, output) = if wrapped {
             for name in ["shell-cwd", "client-cwd", "closing-cwd"] {
                 let path = directory.path().join(name);
@@ -155,14 +158,15 @@ impl Fixture {
                     ROOT_SCRIPT,
                 ],
                 Size::default(),
-                &[],
+                &environment,
                 Some(&directories.0[0]),
             )
         } else {
-            Pty::spawn(
+            Pty::spawn_with_env(
                 executable.to_str().unwrap(),
                 &["-c", ROOT_SCRIPT, endpoint.to_str().unwrap()],
                 Size::default(),
+                &environment,
             )
         }
         .unwrap();
