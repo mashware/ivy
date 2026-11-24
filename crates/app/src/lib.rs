@@ -1915,6 +1915,8 @@ mod tests {
     mod settings_chrome;
     mod settings_editor;
     mod title_typography;
+    #[cfg(windows)]
+    mod windows_fixture;
 
     // **The tests reach further into the two modules than the code above does**, and this is
     // where that is said. They build tilings and weights directly to assert the arithmetic;
@@ -5711,23 +5713,25 @@ mod tests {
             b"{\"lines\":[\"written during the hold\"]}",
         )
         .expect("publish by file");
-        std::fs::File::open(
-            pane.panel
-                .as_ref()
-                .unwrap()
-                .path()
-                .join(panel_contract::PANEL_FILE),
-        )
-        .unwrap()
-        .set_modified(
-            pane.panel_state
-                .last_understood()
-                .unwrap()
-                .written_at
-                .unwrap()
-                + Duration::from_secs(1),
-        )
-        .unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(
+                pane.panel
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .join(panel_contract::PANEL_FILE),
+            )
+            .unwrap()
+            .set_modified(
+                pane.panel_state
+                    .last_understood()
+                    .unwrap()
+                    .written_at
+                    .unwrap()
+                    + Duration::from_secs(1),
+            )
+            .unwrap();
         pane.to_reread.raise();
         pane.refresh_its_panel(&egui::Context::default());
         assert!(
@@ -5784,7 +5788,9 @@ mod tests {
                     .path()
                     .join(panel_contract::PANEL_FILE);
                 std::fs::write(&path, r#"{"lines":["later file"]}"#).unwrap();
-                std::fs::File::open(&path)
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
                     .unwrap()
                     .set_modified(now + Duration::from_secs(2))
                     .unwrap();
@@ -6358,7 +6364,9 @@ mod tests {
                     .path()
                     .join(panel_contract::PANEL_FILE);
                 std::fs::write(&path, r#"{"lines":["later file"]}"#).unwrap();
-                std::fs::File::open(&path)
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
                     .unwrap()
                     .set_modified(now + Duration::from_secs(1))
                     .unwrap();
@@ -7156,32 +7164,7 @@ mod tests {
             .expect("could not open the pseudoterminal");
         #[cfg(windows)]
         let (pty, output) = {
-            let command = if let Some(seconds) = program.strip_prefix("sleep ") {
-                assert!(
-                    seconds.parse::<f64>().is_ok(),
-                    "invalid sleep fixture: {program}"
-                );
-                format!("Start-Sleep -Seconds {seconds}")
-            } else if program == "yes" {
-                // ConPTY renders screen changes rather than passing through each write. Repeating
-                // one identical line can leave its viewport unchanged after the bridge is dropped;
-                // the counter keeps the rendered output changing so delivery loss is observable.
-                "[long]$counter = 0; while ($true) { [Console]::WriteLine(('ivy-child' + '-ready ' + $counter)); $counter++ }".to_owned()
-            } else if program == "true" {
-                "exit 0".to_owned()
-            } else if let Some(text) = program.strip_prefix("printf ") {
-                let text = text
-                    .strip_prefix('\'')
-                    .and_then(|t| t.strip_suffix('\''))
-                    .unwrap_or(text);
-                let text = text
-                    .replace("\\n", "\n")
-                    .replace("\\r", "\r")
-                    .replace('\'', "''");
-                format!("[Console]::Write('{text}')")
-            } else {
-                panic!("unsupported Windows test fixture: {program}");
-            };
+            let command = windows_fixture::command(program);
             Pty::spawn(
                 "powershell.exe",
                 &[
@@ -7196,6 +7179,20 @@ mod tests {
             .expect("could not open the pseudoterminal")
         };
 
+        let screen = Screen::new(INITIAL_GRID);
+        #[cfg(windows)]
+        let screen = {
+            let mut screen = screen;
+            // These interaction fixtures need a known local directory. The system ConPTY host
+            // does not preserve OSC7; its transport has a separate bundled-host test in term-core.
+            // The child still changes directory, witnessed by its relative input file.
+            if let Some(folder) = windows_fixture::directory(program) {
+                let uri =
+                    url::Url::from_directory_path(folder).expect("absolute fixture directory");
+                screen.advance(format!("\x1b]7;{uri}\x07").as_bytes());
+            }
+            screen
+        };
         Pane {
             name,
             label: None,
@@ -7211,7 +7208,7 @@ mod tests {
             control: None,
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
-            screen: Screen::new(INITIAL_GRID),
+            screen,
             painted_console: None,
             timings: Timings::default(),
             pending_measurement: None,
@@ -17911,7 +17908,21 @@ mod tests {
     fn with_the_flag_raised_the_frame_reads_again() {
         let mut pane = pane_with_panel(r#"{"lines":["the first one"]}"#);
 
+        let path = pane
+            .panel
+            .as_ref()
+            .unwrap()
+            .path()
+            .join(panel_contract::PANEL_FILE);
+        // Distinct publications need distinct dates even on a coarse or cached filesystem clock.
+        let seen = std::fs::metadata(&path).unwrap().modified().unwrap();
         publish_at(&pane, r#"{"lines":["the second one"]}"#);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(seen + Duration::from_secs(1))
+            .unwrap();
         pane.to_reread.raise();
         one_frame_over(&mut pane);
 
@@ -26130,7 +26141,9 @@ mod tests {
             .expect("the pane has a directory")
             .path()
             .join(panel_contract::PANEL_FILE);
-        std::fs::File::open(&path)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
             .expect("open the panel")
             .set_modified(SystemTime::now() - std::time::Duration::from_secs(60 * 60))
             .expect("move the date backwards");
