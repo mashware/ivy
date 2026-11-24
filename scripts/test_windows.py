@@ -108,8 +108,10 @@ class WindowsPackageTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.binaries = self.root / 'binaries'
         self.binaries.mkdir()
-        (self.binaries / 'app.exe').write_bytes(pe(subsystem=2))
-        (self.binaries / 'panel-mcp.exe').write_bytes(pe(subsystem=3))
+        for name, subsystem in (('app.exe', 2), ('panel-mcp.exe', 3),
+                                ('ivy-session.exe', 3), ('ivy-codex.exe', 3)):
+            (self.binaries / name).write_bytes(pe(subsystem=subsystem,
+                                                 marker=name.encode('ascii')))
         (self.binaries / 'notices/fixture').mkdir(parents=True)
         (self.binaries / 'notices/fixture/LICENSE').write_bytes(b'original\r\n')
         self.payload = self.root / 'payload'
@@ -149,6 +151,8 @@ class WindowsPackageTests(unittest.TestCase):
     def test_stage_preserves_executables_and_notices(self):
         PACKAGE.stage(self.binaries, self.payload, '0.1.0-alpha.3', self.conpty, self.pin)
         for before, after in (('app.exe', 'Ivy.exe'), ('panel-mcp.exe', 'panel-mcp.exe'),
+                              ('ivy-session.exe', 'ivy-session.exe'),
+                              ('ivy-codex.exe', 'ivy-codex.exe'),
                               ('notices/fixture/LICENSE', 'licenses/cargo/fixture/LICENSE')):
             self.assertEqual((self.binaries / before).read_bytes(), (self.payload / after).read_bytes())
         self.assertEqual((self.payload / 'Ivy.ico').read_bytes()[:4], b'\0\0\1\0')
@@ -161,6 +165,8 @@ class WindowsPackageTests(unittest.TestCase):
     def test_rejects_wrong_or_malformed_subsystems(self):
         for name, value in (('app.exe', pe(subsystem=3)),
                             ('panel-mcp.exe', pe(subsystem=2)),
+                            ('ivy-session.exe', pe(subsystem=2)),
+                            ('ivy-codex.exe', pe(subsystem=2)),
                             ('app.exe', pe()[:200]),
                             ('app.exe', pe()[:152] + b'\x0b\x01' + pe()[154:])):
             with self.subTest(name=name, value=value[152:154]):
@@ -175,6 +181,33 @@ class WindowsPackageTests(unittest.TestCase):
                     path.write_bytes(original)
                     if self.payload.exists():
                         shutil.rmtree(self.payload)
+
+    def test_stage_preserves_the_complete_recovery_adapter_tree(self):
+        PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
+        source = SCRIPTS.parent / 'integrations/session-recovery'
+        installed = self.payload / 'session-recovery'
+        expected = {p.relative_to(source): p.read_bytes()
+                    for p in source.rglob('*') if p.is_file()}
+        self.assertIn(Path('README.md'), expected)
+        actual = {p.relative_to(installed): p.read_bytes()
+                  for p in installed.rglob('*') if p.is_file()}
+        self.assertEqual(actual, expected)
+
+    def test_rejects_each_missing_or_invalid_session_helper_before_staging(self):
+        for name in ('ivy-session.exe', 'ivy-codex.exe'):
+            with self.subTest(name=name):
+                path = self.binaries / name
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
+                self.assertFalse(self.payload.exists())
+                for invalid in (b'ELF', pe(0xaa64)):
+                    path.write_bytes(invalid)
+                    with self.assertRaises(ValueError):
+                        PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
+                    self.assertFalse(self.payload.exists())
+                path.write_bytes(original)
 
     def test_rejects_foreign_architecture_and_missing_pe(self):
         path = self.binaries / 'app.exe'

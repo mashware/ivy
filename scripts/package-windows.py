@@ -36,7 +36,8 @@ def stage(binaries, payload, version, pair, files=None):
         raise ValueError(f"unsupported release version: {version}")
     if payload.exists():
         raise ValueError(f"payload already exists: {payload}")
-    for name, subsystem in (("app.exe", 2), ("panel-mcp.exe", 3)):
+    for name, subsystem in (("app.exe", 2), ("panel-mcp.exe", 3),
+                            ("ivy-session.exe", 3), ("ivy-codex.exe", 3)):
         check_pe(binaries / name, subsystem)
     verified = conpty.verify(pair, files)
     notices = binaries / "notices"
@@ -45,6 +46,9 @@ def stage(binaries, payload, version, pair, files=None):
     payload.mkdir(parents=True)
     shutil.copyfile(binaries / "app.exe", payload / "Ivy.exe")
     shutil.copyfile(binaries / "panel-mcp.exe", payload / "panel-mcp.exe")
+    for name in ("ivy-session.exe", "ivy-codex.exe"):
+        shutil.copyfile(binaries / name, payload / name)
+    shutil.copytree(ROOT / "integrations/session-recovery", payload / "session-recovery")
     # Flat beside Ivy.exe: the library is found by name in the application directory, and it
     # starts the host beside itself (D112).
     # The bytes that were checked are the bytes written, so nothing can swap the pair in between.
