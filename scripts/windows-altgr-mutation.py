@@ -17,15 +17,19 @@ def main():
         raise SystemExit("Expected exactly one production Ctrl+Alt dispatch")
     try:
         path.write_bytes(original.replace(anchor, b"if false && altgr::consume(", 1))
-        result = subprocess.run(
-            ["cargo", "run", "--locked", "-p", "app", "--example", "windows_altgr"],
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=300,
-        )
-        (root / "windows-altgr-mutation.log").write_bytes(result.stdout)
-        if result.returncode == 0 or b"Spanish left Ctrl+Alt+2 terminal bytes" not in result.stdout:
+        # Keep partial output even if compilation or the native event loop times out.
+        with (root / "windows-altgr-mutation-build.log").open("wb") as log:
+            subprocess.run(
+                ["cargo", "build", "--locked", "-p", "app", "--example", "windows_altgr"],
+                cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=600, check=True,
+            )
+        executable = root / "target/debug/examples/windows_altgr.exe"
+        output = root / "windows-altgr-mutation.log"
+        with output.open("wb") as log:
+            result = subprocess.run(
+                [str(executable)], cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=40,
+            )
+        if result.returncode == 0 or b"Spanish left Ctrl+Alt+2 terminal bytes" not in output.read_bytes():
             raise SystemExit("Restored Ctrl suppression did not fail the native character assertion")
     finally:
         path.write_bytes(original)

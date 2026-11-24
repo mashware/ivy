@@ -181,6 +181,7 @@ mod native {
         deadline: Instant,
         observed: Vec<u8>,
         keys: usize,
+        failure: Option<String>,
     }
 
     impl Drop for Witness {
@@ -306,7 +307,16 @@ mod native {
                     "{} received no native target key press",
                     case.name
                 );
-                assert_eq!(self.observed, case.expected, "{} terminal bytes", case.name);
+                // An expected negative trial exits through the event loop, with its error
+                // reported afterwards rather than unwinding through a native callback.
+                if self.observed != case.expected {
+                    self.failure = Some(format!(
+                        "{} terminal bytes: expected {:?}, got {:?}",
+                        case.name, case.expected, self.observed
+                    ));
+                    event_loop.exit();
+                    return;
+                }
                 println!("PASS {} bytes={:?}", case.name, self.observed);
                 self.case += 1;
                 if self.case == CASES.len() {
@@ -338,8 +348,12 @@ mod native {
             deadline: now + Duration::from_secs(25),
             observed: Vec::new(),
             keys: 0,
+            failure: None,
         };
         EventLoop::new()?.run_app(&mut witness)?;
+        if let Some(failure) = witness.failure.take() {
+            return Err(std::io::Error::other(failure).into());
+        }
         assert_eq!(
             witness.case,
             CASES.len(),
