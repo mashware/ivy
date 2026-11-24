@@ -928,3 +928,28 @@ retain precedence. Shift movement moves the caret without selecting query text.
 
 The caret follows the application's existing cursor blink setting and idle/focus rules. Search
 options and the floating box's position are unchanged.
+
+## Board milestone reading
+
+**By milestone** shows every milestone in one compact strip and the relevant work in columns below.
+Active work starts expanded with its current/attached items and up to two following pending items;
+ready work starts collapsed. Click a header or its remaining count for all items and the closing
+criterion. Click a completed or later milestone in the strip to open it; click again or its close
+control to remove it. **Show all** exposes the full roadmap in order. Only the columns scroll
+horizontally when their minimum widths do not fit. Fourteen milestones fit the strip at 1440 points;
+labels truncate on smaller windows or larger plans, with full details on hover.
+
+The console filter hides cards only; it does not remove roadmap items or change milestone classes.
+**Claiming you** limits the columns to claiming work; Show all temporarily takes precedence over
+that column restriction. Tab visits the strip, columns/items and cards, arrows move within the
+focused area, and Enter/Space opens a strip milestone. Enter on a card goes to its console. Escape
+closes By milestone even while its filter is being edited. Opened milestones and expansion choices
+survive closing/reopening Board for the session; they reset on application restart.
+
+Console placement uses the producer's exact `milestone` and `deliverable` IDs. A known milestone
+with an unknown item retains the card at milestone level; absent/unknown milestone IDs remain Off
+the plan. Titles in different languages never establish identity. Compact milestone cards show the
+producer title and up to three literal body lines, prioritizing explicit wait/block marks, plus
+attention, freshness, branch and phase. The full panel remains in the console. A resolvable local
+roadmap source opens in the read-only document viewer; unavailable sources explain why on hover.
+No new configuration keys are introduced.

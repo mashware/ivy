@@ -10506,6 +10506,53 @@ preference, not the window's shape, and could not be written by hand); inferring
 (D6); painting the declared `attention` on the card while the columns follow the effective state
 (a card read «waiting» in the Working column).
 
+**Large-roadmap correction, 24 November 2026 — #235.** The supplied Board milestone specification
+and screenshot show why wrapping every milestone and every item stops locating live work, and why
+unbounded child cards can cross a neighbouring column. This replaces only the By milestone reader
+presentation above. By state and the saved arrangement preference remain.
+
+Every project plan has one equal-width, non-wrapping, non-scrolling milestone strip, a legend, then
+In progress, Ready to start, Off the plan and Opened by you groups. Completion is the literal done
+count equalling the item count, including 0/0. Otherwise a declared current item or an exact
+milestone/item console attachment activates it; an attached effective claim uses Wait > Block >
+Done. Partial progress alone is not activity. All dependencies done makes an inactive milestone
+ready; unknown dependency IDs and cycles are unmet and diagnosed once. No title, translation,
+branch or panel body establishes a console attachment or claim.
+
+Active columns show relevant items plus at most two following pending items; ready columns show
+one pending item. Headers and remaining-item summaries expose all items and the closing criterion.
+The strip reveals/expands existing columns, or explicitly opens done/later ones; a second click
+restores their default or removes an explicitly opened column. Show all displays the roadmap order
+and Off the plan last. It overrides the claiming-column restriction while enabled. Reader disclosure
+is per project for the app session; class changes clear temporary full expansion and retain explicit
+opens. An all-done message does not hide outside tasks or unmatched consoles.
+
+Expanded columns keep 240 points, collapsed ones 190, with a 20-point gap and an additional
+24-point group boundary. Expanded columns share surplus width, with card-bearing columns weighted
+1.2. When minima do not fit, only the column row scrolls horizontally. Both painted content and hits
+are clipped to their column and viewport. Item cards are indented 20 points; milestone-only cards
+remain above items, and Off the plan cards precede outside tasks. Plan-less projects use a responsive
+card grid capped at four columns. Text filtering affects cards only, after classification; Claiming
+you restricts columns while leaving the strip intact.
+
+The owner explicitly resolved three specification gaps: Tab traverses strip, columns/items and
+cards without adding the nonexistent next-claim shortcut; fourteen milestones at 1440 points is
+the overview witness, while physically insufficient widths/counts truncate labels with full hover
+text; compact cards show the title and at most three literal non-title producer lines, prioritizing
+explicit wait/block marks, rather than inventing universal Decision/Now/Next fields from arbitrary
+content. Those marks choose excerpt presentation only. Cards retain effective attention, freshness,
+branch, phase and warnings. Escape closes By milestone immediately, including while editing its
+filter; By state's existing two-step filter escape remains. A declared resolvable local roadmap
+source opens in the existing read-only document viewer; unknown sources report unavailability on
+hover. Old publication age is highlighted after 24 hours.
+
+Discarded: fuzzy matching translated task titles (ambiguous identity under D6); changing the public
+panel schema to force three labels (unnecessary for a reader arrangement); another strip scrollbar
+or wrapped strip (loses the overview); drawing the whole producer body in each milestone card
+(reintroduces the supplied crowding); a preliminary layout PR followed by a replacement (an extra
+serial delivery with no durable independent part). No native desktop or performance claim follows
+from synthetic geometry tests; existing Board spans account for the new work once.
+
 ## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
 
 **New signal, 15 November 2026 — #93.** The owner commissioned a redesign in Claude Design and asked
