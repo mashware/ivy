@@ -4,23 +4,55 @@ use eframe::egui::{self, Rect};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(in crate::board) enum Identity {
+    Declared(String),
+    Anonymous(usize, String),
+    Outside,
+}
+impl From<&str> for Identity {
+    fn from(value: &str) -> Self {
+        Self::Declared(value.into())
+    }
+}
+impl From<String> for Identity {
+    fn from(value: String) -> Self {
+        Self::Declared(value)
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::board) enum FocusZone {
+    Strip,
+    Columns,
+    #[default]
+    Cards,
+}
+impl FocusZone {
+    fn next(self, backward: bool) -> Self {
+        match (self, backward) {
+            (Self::Strip, false) | (Self::Cards, true) => Self::Columns,
+            (Self::Columns, false) | (Self::Strip, true) => Self::Cards,
+            _ => Self::Strip,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(in crate::board) struct Key {
     pub project: String,
-    pub milestone: String,
+    pub milestone: Identity,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::board) enum Action {
-    Strip(Key),
-    Toggle(Key),
-    Close(Key),
+    ToggleColumn(Key),
+    ToggleItems(Key),
+    CloseColumn(Key),
     ShowAll(bool),
 }
 #[derive(Default)]
 pub(super) struct Project {
-    pub(super) opened: HashSet<String>,
-    pub(super) full: HashSet<String>,
+    pub(super) opened: HashSet<Identity>,
+    pub(super) full: HashSet<Identity>,
     pub(super) show_all: bool,
-    classes: HashMap<String, Class>,
+    classes: HashMap<Identity, Class>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::board) enum Target {
@@ -37,7 +69,7 @@ pub(in crate::board) struct Reader {
     pub(super) reveal_focus: Option<Target>,
     pub(in crate::board) reveal: Option<Key>,
     pub(in crate::board) reveal_pane: Option<usize>,
-    pub(in crate::board) zone: u8,
+    pub(in crate::board) zone: FocusZone,
     pub(super) diagnostics: HashSet<(String, String)>,
     all: bool,
 }
@@ -48,11 +80,11 @@ impl Reader {
             ..Default::default()
         })
     }
-    pub(super) fn reconcile(&mut self, project: &str, classes: &[(String, Class)]) {
+    pub(super) fn reconcile(&mut self, project: &str, classes: &[(Identity, Class)]) {
         let reader = self.project(project);
         reader
             .full
-            .retain(|id| id == "@off" || classes.iter().any(|(key, _)| key == id));
+            .retain(|id| *id == Identity::Outside || classes.iter().any(|(key, _)| key == id));
         reader
             .opened
             .retain(|id| classes.iter().any(|(key, _)| key == id));
@@ -74,7 +106,7 @@ impl Reader {
                     p.show_all = *value;
                 }
             }
-            Action::Strip(key) => {
+            Action::ToggleColumn(key) => {
                 let p = self.project(&key.project);
                 let visible = p
                     .classes
@@ -95,13 +127,13 @@ impl Reader {
                 }
                 self.reveal = Some(key.clone());
             }
-            Action::Toggle(key) => {
+            Action::ToggleItems(key) => {
                 let p = self.project(&key.project);
                 if !p.full.remove(&key.milestone) {
                     p.full.insert(key.milestone.clone());
                 }
             }
-            Action::Close(key) => {
+            Action::CloseColumn(key) => {
                 let p = self.project(&key.project);
                 p.opened.remove(&key.milestone);
                 p.full.remove(&key.milestone);
@@ -114,11 +146,7 @@ impl Reader {
         shift: bool,
     ) -> (bool, Option<usize>) {
         if key == egui::Key::Tab {
-            self.zone = if shift {
-                (self.zone + 2) % 3
-            } else {
-                (self.zone + 1) % 3
-            };
+            self.zone = self.zone.next(shift);
             self.focus = self
                 .targets
                 .iter()
@@ -127,7 +155,7 @@ impl Reader {
             self.reveal_focus = self.focus.clone();
             return (true, None);
         }
-        if self.zone == 2 {
+        if self.zone == FocusZone::Cards {
             return (false, None);
         }
         let targets: Vec<_> = self
@@ -150,8 +178,8 @@ impl Reader {
             egui::Key::End => targets.len() - 1,
             egui::Key::Enter | egui::Key::Space => {
                 match &targets[index] {
-                    Target::Strip(k) => self.apply(&Action::Strip(k.clone())),
-                    Target::Header(k) => self.apply(&Action::Toggle(k.clone())),
+                    Target::Strip(k) => self.apply(&Action::ToggleColumn(k.clone())),
+                    Target::Header(k) => self.apply(&Action::ToggleItems(k.clone())),
                     Target::Card(pane) => return (true, Some(*pane)),
                     Target::Item(..) => {}
                 }
@@ -170,10 +198,10 @@ impl Reader {
         (true, None)
     }
 }
-fn zone(target: &Target) -> u8 {
+fn zone(target: &Target) -> FocusZone {
     match target {
-        Target::Strip(_) => 0,
-        _ => 1,
+        Target::Strip(_) => FocusZone::Strip,
+        _ => FocusZone::Columns,
     }
 }
 
@@ -187,7 +215,7 @@ impl Default for Reader {
             reveal_focus: None,
             reveal: None,
             reveal_pane: None,
-            zone: 2,
+            zone: FocusZone::Cards,
             diagnostics: HashSet::new(),
             all: false,
         }

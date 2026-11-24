@@ -317,7 +317,8 @@ pub(super) fn project_header(
                 "Local roadmap source is unavailable"
             }
         ));
-        return Some(source_rect);
+        let target = source_rect.intersect(ui.clip_rect());
+        return target.is_positive().then_some(target);
     }
     None
 }

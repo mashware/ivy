@@ -83,7 +83,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/board/milestones/compact.rs",
         include_str!("../src/board/milestones/compact.rs"),
-        0,
+        1,
     ),
     (
         "src/board/milestones/details.rs",
@@ -93,12 +93,12 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/board/milestones/projection.rs",
         include_str!("../src/board/milestones/projection.rs"),
-        0,
+        1,
     ),
     (
         "src/board/milestones/state.rs",
         include_str!("../src/board/milestones/state.rs"),
-        0,
+        1,
     ),
     (
         "src/board/milestones/strip.rs",

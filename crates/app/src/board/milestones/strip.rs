@@ -1,7 +1,7 @@
 use super::{
     progress,
     projection::{Class, Projection},
-    state::{Action, Key, Reader, Target},
+    state::{Action, Identity, Key, Reader, Target},
 };
 use crate::theme::Roles;
 use eframe::egui::{self, Color32, FontId, Rect, Stroke, pos2, vec2};
@@ -45,7 +45,8 @@ pub(super) fn key(project: &str, plan: &Plan, i: usize) -> Key {
         milestone: plan.milestones[i]
             .id
             .clone()
-            .unwrap_or_else(|| format!("#{i}:{}", plan.milestones[i].title)),
+            .map(Identity::Declared)
+            .unwrap_or_else(|| Identity::Anonymous(i, plan.milestones[i].title.clone())),
     }
 }
 
@@ -214,9 +215,10 @@ pub(super) fn paint(
         )
         .on_hover_text(hint)
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-        reader
-            .hits
-            .push((rect.intersect(ui.clip_rect()), Action::Strip(k.clone())));
+        reader.hits.push((
+            rect.intersect(ui.clip_rect()),
+            Action::ToggleColumn(k.clone()),
+        ));
         if reader.reveal_focus == Some(Target::Strip(k.clone())) {
             ui.scroll_to_rect(rect, None);
             reader.reveal_focus = None;

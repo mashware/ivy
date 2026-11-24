@@ -2,7 +2,7 @@
 use super::*;
 use super::{
     projection::{Class, Projection},
-    state::{Action, Key, Reader, Target},
+    state::{Action, Identity, Key, Reader, Target},
 };
 use crate::board::observation::Column;
 use std::sync::Arc;
@@ -120,21 +120,21 @@ fn strip_actions_show_all_class_changes_and_reopen_keep_reader_owned_choices() {
         milestone: "H6".into(),
     };
     reader.reconcile("p", &[("H6".into(), Class::Later)]);
-    reader.apply(&Action::Strip(key.clone()));
-    assert!(reader.project("p").opened.contains("H6"));
+    reader.apply(&Action::ToggleColumn(key.clone()));
+    assert!(reader.project("p").opened.contains(&Identity::from("H6")));
     reader.apply(&Action::ShowAll(true));
     reader.apply(&Action::ShowAll(false));
-    assert!(reader.project("p").opened.contains("H6"));
+    assert!(reader.project("p").opened.contains(&Identity::from("H6")));
     reader.reconcile("p", &[("H6".into(), Class::Done)]);
-    assert!(!reader.project("p").full.contains("H6"));
-    assert!(reader.project("p").opened.contains("H6"));
-    reader.apply(&Action::Close(key.clone()));
-    assert!(!reader.project("p").opened.contains("H6"));
+    assert!(!reader.project("p").full.contains(&Identity::from("H6")));
+    assert!(reader.project("p").opened.contains(&Identity::from("H6")));
+    reader.apply(&Action::CloseColumn(key.clone()));
+    assert!(!reader.project("p").opened.contains(&Identity::from("H6")));
     reader.reconcile("p", &[("H6".into(), Class::Ready)]);
-    reader.apply(&Action::Strip(key.clone()));
-    assert!(reader.project("p").full.contains("H6"));
-    reader.apply(&Action::Strip(key));
-    assert!(!reader.project("p").full.contains("H6"));
+    reader.apply(&Action::ToggleColumn(key.clone()));
+    assert!(reader.project("p").full.contains(&Identity::from("H6")));
+    reader.apply(&Action::ToggleColumn(key));
+    assert!(!reader.project("p").full.contains(&Identity::from("H6")));
 }
 #[test]
 fn compact_excerpt_is_literal_bounded_and_prioritizes_published_marks() {
@@ -258,7 +258,7 @@ fn fourteen_chips_stay_on_one_line_filters_do_not_change_strip_and_h6_opens() {
         section.roadmap.as_ref().unwrap().plan.as_ref().unwrap(),
         7,
     );
-    reader.apply(&Action::Strip(k.clone()));
+    reader.apply(&Action::ToggleColumn(k.clone()));
     let shapes = render(&ctx, &section, &mut reader, &Default::default());
     assert!(
         reader
@@ -289,7 +289,7 @@ fn keyboard_tab_arrows_and_activation_keep_stable_targets() {
     assert!(reader.keyboard(egui::Key::Tab, false).0);
     assert_eq!(reader.focus, Some(Target::Strip(k.clone())));
     reader.keyboard(egui::Key::Space, false);
-    assert!(reader.project("p").opened.contains("H6"));
+    assert!(reader.project("p").opened.contains(&Identity::from("H6")));
     reader.keyboard(egui::Key::Tab, false);
     reader.keyboard(egui::Key::ArrowDown, false);
     assert_eq!(reader.focus, Some(Target::Item(k, 0)));
@@ -339,7 +339,11 @@ fn capture_milestone_reference_when_requested() {
                         })
                         .collect::<Vec<_>>(),
                 );
-                reader.apply(&Action::Strip(strip::key(&project_key(&section), plan, 7)));
+                reader.apply(&Action::ToggleColumn(strip::key(
+                    &project_key(&section),
+                    plan,
+                    7,
+                )));
             }
             let mut textures = std::collections::HashMap::new();
             let mut meshes = Vec::new();
@@ -465,7 +469,7 @@ fn show_all_paints_the_entire_roadmap_then_restores_the_compact_groups() {
         r.targets
             .iter()
             .filter_map(|(t, _)| match t {
-                Target::Header(k) if k.milestone != "@off" => Some(k.milestone.clone()),
+                Target::Header(k) if k.milestone != Identity::Outside => Some(k.milestone.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -479,7 +483,7 @@ fn show_all_paints_the_entire_roadmap_then_restores_the_compact_groups() {
         fixture()
             .milestones
             .iter()
-            .map(|m| m.id.clone().unwrap())
+            .map(|m| Identity::Declared(m.id.clone().unwrap()))
             .collect::<Vec<_>>()
     );
     reader.apply(&Action::ShowAll(false));
@@ -506,7 +510,7 @@ fn outside_expansion_survives_projection_and_current_outside_items_are_visible()
         r.targets
             .iter()
             .filter_map(|(t, _)| match t {
-                Target::Item(k, i) if k.milestone == "@off" => Some(*i),
+                Target::Item(k, i) if k.milestone == Identity::Outside => Some(*i),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -514,9 +518,95 @@ fn outside_expansion_survives_projection_and_current_outside_items_are_visible()
     assert_eq!(outside(&reader), [4, 5]);
     let key = Key {
         project: project_key(&section),
-        milestone: "@off".into(),
+        milestone: Identity::Outside,
     };
-    reader.apply(&Action::Toggle(key));
+    reader.apply(&Action::ToggleItems(key));
     render(&ctx, &section, &mut reader, &Default::default());
     assert_eq!(outside(&reader), [0, 1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn a_completed_acyclic_prerequisite_of_a_cycle_does_not_block_its_dependents() {
+    let plan=panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"A","depends_on":["B"],"items":[{"text":"a"}]},{"id":"B","title":"B","depends_on":["A"],"items":[{"text":"b"}]},{"id":"C","title":"C","depends_on":["A"],"items":[{"text":"c","mark":"done"}]},{"id":"D","title":"D","depends_on":["C"],"items":[{"text":"d"}]}]}"#).unwrap().0;
+    let result = Projection::new(&plan, &place(&[], &plan), &column);
+    assert_eq!(
+        result.classes,
+        [Class::Later, Class::Later, Class::Done, Class::Ready]
+    );
+    assert!(result.missing[3].is_empty());
+}
+#[test]
+fn producer_ids_cannot_alias_anonymous_or_outside_reader_columns() {
+    let plan=panel_contract::plan::parse_document_noting(r##"{"milestones":[{"title":"Same title"},{"id":"#0:Same title","title":"Declared title"},{"id":"@off","title":"Named outside","items":[{"text":"named task","mark":"current"}]}],"outside":["one","two","three","four"]}"##).unwrap().0;
+    let section = section(Vec::new(), plan.clone());
+    let project = project_key(&section);
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    render(&ctx, &section, &mut reader, &Default::default());
+    let anonymous = strip::key(&project, &plan, 0);
+    let declared = strip::key(&project, &plan, 1);
+    reader.apply(&Action::ToggleColumn(anonymous.clone()));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert!(
+        reader
+            .targets
+            .iter()
+            .any(|(t, _)| *t == Target::Header(anonymous.clone()))
+    );
+    assert!(
+        !reader
+            .targets
+            .iter()
+            .any(|(t, _)| *t == Target::Header(declared.clone()))
+    );
+    reader.apply(&Action::ToggleItems(strip::key(&project, &plan, 2)));
+    render(&ctx, &section, &mut reader, &Default::default());
+    let outside = |r: &Reader| {
+        r.targets
+            .iter()
+            .filter(|(t, _)| matches!(t,Target::Item(k,_) if k.milestone==Identity::Outside))
+            .count()
+    };
+    assert_eq!(outside(&reader), 2);
+    reader.apply(&Action::ToggleItems(Key {
+        project,
+        milestone: Identity::Outside,
+    }));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(outside(&reader), 4);
+}
+#[test]
+fn roadmap_source_hits_are_limited_to_the_visible_header() {
+    let mut section = section(Vec::new(), fixture());
+    section.roadmap.as_mut().unwrap().path = Some(std::env::temp_dir().join("roadmap.md"));
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.set_width(700.0);
+        let start = ui.next_widget_position();
+        let clip = Rect::from_min_size(start, vec2(700.0, 14.0));
+        ui.set_clip_rect(clip);
+        let hit = project_header(
+            ui,
+            &section,
+            Claims::default(),
+            true,
+            &Roles::of(&crate::theme::Theme::default()),
+        )
+        .unwrap();
+        assert!(clip.contains_rect(hit));
+        assert!(!hit.contains(start + vec2(600.0, 28.0)));
+        assert!(
+            project_header(
+                ui,
+                &section,
+                Claims::default(),
+                true,
+                &Roles::of(&crate::theme::Theme::default())
+            )
+            .is_none()
+        );
+    })
+    .drop_without_applying_deltas();
 }

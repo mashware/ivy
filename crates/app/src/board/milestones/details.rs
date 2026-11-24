@@ -87,9 +87,10 @@ pub(super) fn header(
     if closable {
         let close = Rect::from_min_size(pos2(rect.right() - 18.0, rect.top()), vec2(18.0, 20.0));
         strip::text(ui, close, "×", FontId::proportional(13.0), roles.tx2, 1);
-        reader
-            .hits
-            .push((close.intersect(ui.clip_rect()), Action::Close(key.clone())));
+        reader.hits.push((
+            close.intersect(ui.clip_rect()),
+            Action::CloseColumn(key.clone()),
+        ));
     }
     let track = Rect::from_min_size(rect.min + vec2(0.0, 27.0), vec2(width, 3.0));
     ui.painter().rect_filled(track, 1.5, roles.line);
@@ -104,9 +105,10 @@ pub(super) fn header(
             },
         );
     }
-    reader
-        .hits
-        .push((rect.intersect(ui.clip_rect()), Action::Toggle(key.clone())));
+    reader.hits.push((
+        rect.intersect(ui.clip_rect()),
+        Action::ToggleItems(key.clone()),
+    ));
     reader.targets.push((Target::Header(key.clone()), rect));
     if reader.reveal_focus == Some(Target::Header(key.clone())) {
         ui.scroll_to_rect(rect, None);
@@ -308,8 +310,9 @@ pub(super) fn off_header(
         roles.tx,
         1,
     );
-    reader
-        .hits
-        .push((rect.intersect(ui.clip_rect()), Action::Toggle(key.clone())));
+    reader.hits.push((
+        rect.intersect(ui.clip_rect()),
+        Action::ToggleItems(key.clone()),
+    ));
     reader.targets.push((Target::Header(key.clone()), rect));
 }

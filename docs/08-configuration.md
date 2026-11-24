@@ -606,8 +606,8 @@ A bar across the top of the board carries **Board**, the window's console and pr
 buttons that choose the arrangement — **By state** and **By milestone** — the **All / Claiming you**
 narrowing, a field that filters consoles by console, tab or task name, and **Close**. **Claiming
 you** keeps the consoles waiting for you, stuck, or finished with nobody having looked; its count is
-taken over the whole window. Click the field to type in it; Enter or the first Escape leaves the
-field, and the next Escape closes the board. A query holds at most 256 characters. In a narrow
+taken over the whole window. Click the field to type in it; Enter leaves the field. In By state,
+the first Escape leaves the field and the next closes Board; in By milestone Escape closes it immediately. A query holds at most 256 characters. In a narrow
 window the bar stacks its controls on more rows. A key hint runs along the board's foot. Both
 arrangements stay; the last one chosen is remembered in the file and opens the next board — the
 first choice creates the file when there is none. Its value is `state` or `milestone`:
@@ -628,15 +628,13 @@ colour, its consoles and how many sit in each claiming column; its roadmap lives
 so a project known only by its roadmap file appears there and not here. Right-edge column badges count
 that project's consoles.
 
-**By milestone** lays each project's roadmap out as columns, one per milestone, with its
-deliverables, their progress and **after** the milestones it depends on, named by title. A
-console's card sits under the deliverable its panel declares (`milestone` and `deliverable`), at
-milestone level when the deliverable is not in the plan, and in **Off the plan** when it declares
-none or a milestone the plan lacks — nothing is guessed. A milestone's **Done when** criterion sits
-under its header, and the plan's work outside its milestones is listed at the top of **Off the
-plan**, above the consoles there. A project without a roadmap shows its
-cards in one row and says **no roadmap**; one whose roadmap cannot be read says why. Each project
-header shows its colour, how many consoles sit in each claiming column and its roadmap's source.
+**By milestone** shows one compact strip for the whole roadmap, then columns for active/claiming,
+ready, outside and explicitly opened work. Relevant items appear by default; headers and remaining
+counts expose the full milestone and its closing criterion. Cards use exact declared milestone/item
+IDs, with milestone-level fallback for an unknown item and Off the plan for an absent/unknown
+milestone. Off the plan consoles precede outside tasks. Plan-less projects use a responsive grid
+capped at four columns; unreadable plans state their error. The full reader rules are below under
+Board milestone reading.
 Every card opens with its state: the claim's pill and words for waiting, stuck and finished, the
 column's mark for working and idle, and the observed wait in minutes. A project with a configured
 roadmap file and no console keeps its columns there; a published plan shows while its project has a
@@ -644,15 +642,15 @@ console. Published plans override configured files as a
 whole; retirement reveals the file again. Plain-string plan items retain their text and count toward
 totals.
 
-A card uses the first producer title, the current phase and the available worktree branch. Its body
+Both card arrangements use the first producer title, phase and available worktree branch. In By state, the body
 retains native panel content, marks, references, styles, links and section summaries in Bellwether's
 monospaced presentation, with aligned references and independent reader controls. Long
-panels initially show eighteen source lines; **Show all** exposes the remainder. Finished and Idle
+panels initially show eighteen source lines; their **Show all** exposes the remainder. Finished and Idle
 cards start compact; **Show panel** opens them. Section-fold choices belong to the Board reader and
 survive producer republishes independently of the sidebar. Freshness and publication-origin notices
 remain visible. A console without a panel says **publishes nothing** and its card is dashed; an old
 state nobody refreshes is veiled. When none has published, the screen says **No task state has been
-published yet** and still includes every console; when the narrowing leaves nothing, it says so.
+published yet** and still includes every console. By state reports an empty narrowed result; By milestone retains the plan and its items while hiding filtered cards.
 
 State comes only from published attention and supported explicit client declarations. An explicit
 working signal suppresses a lingering panel wait; block and done retain priority, followed by an

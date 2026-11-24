@@ -51,7 +51,7 @@ impl Projection {
                 a == b
             })
             .collect();
-        let cycles = cycle_dependents(plan);
+        let cycles = cycle_members(plan);
         let mut diagnostics = Vec::new();
         let mut missing = Vec::new();
         let classes = plan
@@ -118,39 +118,77 @@ impl Projection {
     }
 }
 
-// Peel acyclic leaves once; remaining nodes are in a cycle or depend on one.
-fn cycle_dependents(plan: &Plan) -> Vec<bool> {
+// Strongly connected components distinguish cycle members from completed prerequisites that
+// merely point at a cycle. Both walks are iterative because published plans may be deep.
+fn cycle_members(plan: &Plan) -> Vec<bool> {
     let mut ids = std::collections::HashMap::new();
     for (i, m) in plan.milestones.iter().enumerate() {
         if let Some(id) = &m.id {
             ids.entry(id).or_insert(i);
         }
     }
-    let mut counts = vec![0; plan.milestones.len()];
-    let mut parents = vec![Vec::new(); counts.len()];
-    for (i, m) in plan.milestones.iter().enumerate() {
-        for id in &m.depends_on {
-            if let Some(&j) = ids.get(id) {
-                counts[i] += 1;
-                parents[j].push(i);
-            }
-        }
-    }
-    let mut leaves: Vec<_> = counts
+    let edges: Vec<Vec<usize>> = plan
+        .milestones
         .iter()
-        .enumerate()
-        .filter(|(_, n)| **n == 0)
-        .map(|(i, _)| i)
+        .map(|m| {
+            m.depends_on
+                .iter()
+                .filter_map(|id| ids.get(id).copied())
+                .collect()
+        })
         .collect();
-    while let Some(i) = leaves.pop() {
-        for &p in &parents[i] {
-            counts[p] -= 1;
-            if counts[p] == 0 {
-                leaves.push(p);
+    let mut reverse = vec![Vec::new(); edges.len()];
+    for (u, next) in edges.iter().enumerate() {
+        for &v in next {
+            reverse[v].push(u);
+        }
+    }
+    let mut seen = vec![false; edges.len()];
+    let mut order = Vec::new();
+    for root in 0..edges.len() {
+        let mut stack = vec![(root, false)];
+        while let Some((u, exit)) = stack.pop() {
+            if exit {
+                order.push(u);
+                continue;
+            }
+            if seen[u] {
+                continue;
+            }
+            seen[u] = true;
+            stack.push((u, true));
+            for &v in edges[u].iter().rev() {
+                if !seen[v] {
+                    stack.push((v, false));
+                }
             }
         }
     }
-    counts.into_iter().map(|n| n > 0).collect()
+    let mut assigned = vec![false; edges.len()];
+    let mut cyclic = vec![false; edges.len()];
+    for &root in order.iter().rev() {
+        if assigned[root] {
+            continue;
+        }
+        let mut stack = vec![root];
+        let mut component = Vec::new();
+        assigned[root] = true;
+        while let Some(u) = stack.pop() {
+            component.push(u);
+            for &v in &reverse[u] {
+                if !assigned[v] {
+                    assigned[v] = true;
+                    stack.push(v);
+                }
+            }
+        }
+        if component.len() > 1 || edges[root].contains(&root) {
+            for u in component {
+                cyclic[u] = true;
+            }
+        }
+    }
+    cyclic
 }
 
 pub(super) fn visible(m: &Milestone, attached: &[bool], full: bool, collapsed: bool) -> Vec<usize> {

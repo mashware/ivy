@@ -542,8 +542,10 @@ mod tests {
             .iter()
             .find_map(|(r, a)| match a {
                 super::super::cards::Command::Milestone(
-                    super::super::milestones::state::Action::Strip(k),
-                ) if k.milestone == "H6" => Some(r.center()),
+                    super::super::milestones::state::Action::ToggleColumn(k),
+                ) if k.milestone == super::super::milestones::state::Identity::from("H6") => {
+                    Some(r.center())
+                }
                 _ => None,
             })
             .unwrap();

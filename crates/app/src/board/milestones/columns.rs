@@ -1,7 +1,7 @@
 use super::{
     CardPainter,
     projection::{Class, Projection},
-    state::{Action, Key, Reader, Target},
+    state::{Action, Identity, Key, Reader, Target},
     strip,
 };
 use crate::{
@@ -99,7 +99,7 @@ pub(in crate::board) fn paint(
         specs.push(ColumnSpec {
             index: None,
             group: if show_all { 0 } else { 2 },
-            full: show_all || p.full.contains("@off"),
+            full: show_all || p.full.contains(&Identity::Outside),
             collapsed: false,
             card: !placed.off.is_empty(),
         });
@@ -162,7 +162,7 @@ pub(in crate::board) fn paint(
                         .map(|i| strip::key(&project, plan, i))
                         .unwrap_or_else(|| Key {
                             project: project.clone(),
-                            milestone: "@off".into(),
+                            milestone: Identity::Outside,
                         });
                     let response = ui.allocate_ui_with_layout(
                         vec2(*width, 0.0),
@@ -278,7 +278,7 @@ pub(in crate::board) fn paint(
                                     super::details::button(
                                         ui,
                                         &label,
-                                        Action::Toggle(k.clone()),
+                                        Action::ToggleItems(k.clone()),
                                         reader,
                                         roles,
                                     );
@@ -318,7 +318,7 @@ pub(in crate::board) fn paint(
                                         } else {
                                             format!("{} more ▾", plan.outside.len() - visible.len())
                                         },
-                                        Action::Toggle(k.clone()),
+                                        Action::ToggleItems(k.clone()),
                                         reader,
                                         roles,
                                     );
