@@ -196,7 +196,7 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
             .pane_called(name)
             .unwrap()
             .screen
-            .advance(format!("\x1b]7;file://{}\x07", cwd.display()).as_bytes());
+            .advance(format!("\x1b]7;{}\x07", url::Url::from_file_path(&cwd).unwrap()).as_bytes());
     }
     click_review(&mut window, &ctx, 1);
     assert_eq!(window.viewer.origin.as_ref().unwrap().pane, names[1]);
