@@ -226,6 +226,17 @@ pub(crate) fn paint_button_icon(
     crate::ui::icons::paint(p, c, icon, size, fg);
 }
 
+/// Opens the title bar's menu, or its connection guide through the guide's own door, for a test
+/// outside the title bar that needs one of them in front.
+#[cfg(test)]
+pub(crate) fn open_for_tests(window: &mut Window, ctx: &egui::Context, guide: bool) {
+    if guide {
+        connection::open(window, ctx, false);
+    } else {
+        window.chrome.menu = true;
+    }
+}
+
 /// Whether the title bar holds a modal surface — its menu or a dialog — that dims the consoles.
 pub(crate) fn is_modal(window: &Window, ctx: &egui::Context) -> bool {
     window.chrome.menu || window.chrome.guide_blocked(ctx)

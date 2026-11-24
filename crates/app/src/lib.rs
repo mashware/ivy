@@ -6918,6 +6918,100 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
+    /// **An agent's image goes to the console whose endpoint asked, and to no other** (D121): the
+    /// window's drain answers with the sentence the agent reads, the console that asked holds the
+    /// image, and the one beside it still has none.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        let asking = window.active().panes()[1].name;
+        let beside = window.active().panes()[0].name;
+        attach_a_channel(&mut window, asking);
+        // A folder only this process names, so no other run's file is what the worker reads.
+        let path = std::env::temp_dir()
+            .join(format!("ivy-agent-image-{}", std::process::id()))
+            .join("shot.png");
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            asking,
+            7,
+            panel_control::What::ImageOpen { path: path.clone() },
+        );
+        assert!(
+            matches!(&answer, panel_control::Answer::Text(said) if said.starts_with("opened")),
+            "{answer:?}"
+        );
+        let active = window.active;
+        window.tabs[active].focus = asking;
+        assert_eq!(crate::viewer::shown_image(&window), Some((asking, path)));
+        window.tabs[active].focus = beside;
+        assert_eq!(
+            crate::viewer::shown_image(&window),
+            None,
+            "it reached another console"
+        );
+    }
+
+    crate::windows_unix_omission!(
+        an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    /// **An agent's image shown in the console being typed into loses no keystroke** (D121): the
+    /// request is answered by the real frame's drain, after that frame's keys, the drawer opens on
+    /// the Image tab, and the key typed in that frame and the one typed in the next both reach the
+    /// console.
+    #[test]
+    #[cfg(unix)]
+    fn an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        let typing = window.active().focus;
+        attach_a_channel(&mut window, typing);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 800.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let (answering, answer) = std::sync::mpsc::sync_channel(1);
+        window
+            .pane_called(typing)
+            .and_then(|pane| pane.control.as_mut())
+            .expect("that console keeps its channel")
+            .push_for_the_tests(panel_control::Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
+                connection: 7,
+                what: panel_control::What::ImageOpen {
+                    // A folder only this process names, so no other run's file is read.
+                    path: std::env::temp_dir()
+                        .join(format!("ivy-agent-image-{}", std::process::id()))
+                        .join("shot.png"),
+                },
+                answer: answering,
+                #[cfg(windows)]
+                release: None,
+            });
+        let typed = |window: &mut Window| window.pane_called(typing).unwrap().keystrokes.clone();
+        one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("a".into())]);
+        assert!(
+            matches!(answer.try_recv(), Ok(panel_control::Answer::Text(said)) if said == "opened and shown in the drawer of this console, which the person is working in; if the drawer cannot show it, it says why there"),
+            "the drain of this frame did not show it"
+        );
+        assert_eq!(sidebar::active(&window), Some(sidebar::Tool::Image));
+        assert_eq!(
+            typed(&mut window),
+            b"a",
+            "the key of the drain's frame was lost"
+        );
+        one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("b".into())]);
+        assert_eq!(typed(&mut window), b"b", "the drawer took the next key");
+    }
+
+    crate::windows_unix_omission!(
+        an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
     /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
     /// close would pass the refusal tests and close nothing.

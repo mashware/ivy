@@ -1,9 +1,10 @@
-//! The drawer's image: a PNG or JPEG a console printed, or Files opened, one per console and shown
-//! in the drawer's image tab while that console has the focus (D72). It is decoded once per open
+//! The drawer's image: a PNG or JPEG a console printed, Files opened or the console's agent opened
+//! (D121), one per console and shown in the drawer's image tab while that console has the focus
+//! (D72). It is decoded once per open
 //! and never refreshed, so a program that overwrites the same screenshot name does not change what
 //! is on screen.
 use super::Source;
-use super::load::{Job, Picture};
+use super::load::{IsLink, Job, Picture};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,11 +50,23 @@ pub(crate) struct Slot {
     /// this console's image or its empty Image tab: the image may be closed by then, and the next
     /// one opened clears the notice it would have gone to.
     unshown: Option<String>,
+    /// An agent opened this image and the drawer has not painted it, or its refusal, since: the
+    /// console's tab card and header mark it (D121). «Loading…» is not seeing it.
+    unseen: bool,
+}
+
+impl Console {
+    /// Whether this console holds an image its agent opened that nobody has seen yet.
+    pub(crate) fn unseen(&self) -> bool {
+        self.slot.unseen
+    }
 }
 
 /// What the drawer keeps across consoles: one pointer, one Send at a time, one count of openings.
 #[derive(Default)]
 pub(crate) struct Viewer {
+    /// How an agent's open asks each entry of its path whether it is a link (D121).
+    links: Links,
     /// The button whose drag pans the image, latched when it went down.
     panning: Option<egui::PointerButton>,
     /// The frame an image was last painted in, and which opening it was: a pan or a stroke begun
@@ -65,10 +78,30 @@ pub(crate) struct Viewer {
     opened: u64,
 }
 
+/// The platform's reader, or a test's.
+struct Links(IsLink);
+
+/// Who named the path an image is opened from: an agent's open is walked for links before the
+/// worker reads it, and a person's own is not (D121).
+pub(super) enum Opener {
+    Agent,
+    Person,
+}
+
+impl Default for Links {
+    fn default() -> Self {
+        Self(panel_control::image::refused_link)
+    }
+}
+
 struct Opened {
     id: u64,
     origin: Source,
     path: PathBuf,
+    /// The reader every decode of the path is walked with, for an agent's open, and `None` for a
+    /// person's, which is not walked: one field, so the two cannot disagree (see [`Opener`]). On
+    /// Windows the reader refuses a path through a link, and elsewhere it refuses none (D121).
+    walk: Option<IsLink>,
     load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
@@ -97,11 +130,23 @@ enum Gpu {
 }
 
 impl Viewer {
-    /// Replaces the image `slot` held with `path`, read from `origin`'s console.
-    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf) {
-        self.panning = None;
+    /// Replaces the image `slot` held with `path`, read from `origin`'s console. A pan latched on
+    /// another console's image is that image's, and an agent may open into a console the person is
+    /// not looking at, so only a pan on the image being replaced is let go. `opener` says who named
+    /// the path, which is what decides whether its decode is walked.
+    pub(super) fn open(&mut self, slot: &mut Slot, origin: Source, path: PathBuf, opener: Opener) {
+        if self
+            .painted
+            .is_some_and(|(_, opening)| slot.document() == Some(opening))
+        {
+            self.panning = None;
+        }
         self.opened += 1;
-        slot.open(self.opened, origin, path);
+        let walk = match opener {
+            Opener::Agent => Some(self.links.0),
+            Opener::Person => None,
+        };
+        slot.open(self.opened, origin, path, walk);
     }
 
     /// Whether a Send is between its click and its Enter.
@@ -118,8 +163,9 @@ impl Viewer {
 
 impl Slot {
     /// Replaces the image with `path`, opened as `id`. A relative path is one whose console's
-    /// directory is unknown: it is refused and says so.
-    fn open(&mut self, id: u64, origin: Source, path: PathBuf) {
+    /// directory is unknown: it is refused and says so. `walk` is what [`Opened`] keeps of who
+    /// opened it.
+    fn open(&mut self, id: u64, origin: Source, path: PathBuf, walk: Option<IsLink>) {
         self.clear();
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
@@ -130,6 +176,7 @@ impl Slot {
             id,
             origin,
             path,
+            walk,
             load,
             scale: None,
             offset: egui::Vec2::ZERO,
@@ -139,8 +186,12 @@ impl Slot {
     }
 
     /// Forgets the image and what was said about it, keeping an unfinished decode's handle.
-    pub(super) fn clear(&mut self) {
+    /// Answers whether it took down the «new image» mark: the tab card and the header painted it
+    /// earlier in the frame, so `close_tab` asks for the next one when it did, as `mark_seen` does.
+    /// `open` discards the answer: it puts another image in the slot rather than taking one down.
+    pub(super) fn clear(&mut self) -> bool {
         self.notice = None;
+        let was_unseen = std::mem::take(&mut self.unseen);
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -149,6 +200,7 @@ impl Slot {
         {
             self.abandoned = Some((path, job));
         }
+        was_unseen
     }
 
     /// What a slot with no image has to say: its notice, with what a cancelled Send's worker left
@@ -163,6 +215,11 @@ impl Slot {
         if let Some(said) = self.unshown.take() {
             send::join(&mut self.notice, said);
         }
+    }
+
+    /// Marks the image as one the person has not seen: an agent opened it.
+    pub(super) fn mark_unseen(&mut self) {
+        self.unseen = true;
     }
 
     /// Whether there is an image to paint.
@@ -271,7 +328,7 @@ impl Slot {
                 Some((busy, _)) => Load::Failed(format!("Still reading {}…", busy.display())),
                 None => {
                     let side = ctx.input(|i| i.max_texture_side);
-                    match Job::image(document.path.clone(), side, ctx.clone()) {
+                    match Job::image(document.path.clone(), side, document.walk, ctx.clone()) {
                         Ok(job) => Load::Decoding(job),
                         Err(why) => Load::Failed(why),
                     }
@@ -333,6 +390,9 @@ impl Viewer {
             }
         }
         let Some(size) = slot.size() else {
+            if slot.message().is_some() {
+                mark_seen(&mut slot.unseen, ui);
+            }
             let message = slot.message();
             egui::Frame::new()
                 .inner_margin(14)
@@ -423,6 +483,7 @@ impl Viewer {
         }
         // Only a frame that paints the image may keep a pan latched.
         self.painted = Some((frame, *id));
+        mark_seen(&mut slot.unseen, ui);
         // A menu or popup open above the image takes the pointer, and with it the wheel and a press.
         // egui's own hover test is not used: it reaches a few points into a popup's border. The
         // view tested is this frame's, but `layer_id_at` knows every area, the drawer's own among
@@ -508,6 +569,16 @@ impl Viewer {
             ui.input(|i| marks.gesture(i, stroke, placement));
         }
         marks.paint(&ui.painter().with_clip_rect(view), placement);
+    }
+}
+
+/// The image or its refusal was painted: the person has seen it. Not on egui's sizing pass, whose
+/// shapes are thrown away: the drawer's first frame on a tab of the other bank is one. The tab card
+/// and the header are painted before the drawer in a frame, so the frame after this is asked for,
+/// or their marks would stay up on a window at rest.
+fn mark_seen(unseen: &mut bool, ui: &egui::Ui) {
+    if !ui.is_sizing_pass() && std::mem::take(unseen) {
+        ui.ctx().request_repaint();
     }
 }
 
@@ -628,7 +699,7 @@ mod tests {
         write_png(&path, 40, 20);
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(1, source(), path.clone());
+        viewer.open(1, source(), path.clone(), None);
         let started = Instant::now();
         while !viewer.loaded() {
             viewer.poll(&ctx);
@@ -1225,9 +1296,12 @@ mod tests {
     /// An image holding `original`, decoded and not yet shown.
     fn ready(original: image::RgbaImage) -> Alone {
         let mut alone = Alone::default();
-        alone
-            .image
-            .open(&mut alone.slot, source(), PathBuf::from("/shot.png"));
+        alone.image.open(
+            &mut alone.slot,
+            source(),
+            PathBuf::from("/shot.png"),
+            Opener::Person,
+        );
         alone.slot.document.as_mut().unwrap().load = Load::Ready {
             original: Arc::new(original),
             gpu: Gpu::Waiting(egui::ColorImage::filled([4, 2], egui::Color32::RED)),
@@ -1279,7 +1353,7 @@ mod tests {
     fn a_relative_path_says_why_and_reads_nothing() {
         let ctx = egui::Context::default();
         let mut viewer = Slot::default();
-        viewer.open(1, source(), PathBuf::from("shot.png"));
+        viewer.open(1, source(), PathBuf::from("shot.png"), None);
         viewer.poll(&ctx);
         assert!(!viewer.loaded());
         assert!(matches!(
@@ -2480,9 +2554,8 @@ mod tests {
     }
 
     /// On a console with no image the image tab stays selected and says how to open one with
-    /// Ctrl+click, named after that console and not as unavailable; the drawer neither closes nor
-    /// switches, so no console's grid changes. The agent's own way in is not named until the agent
-    /// has a tool that opens one.
+    /// Ctrl+click or by its agent, named after that console and not as unavailable; the drawer
+    /// neither closes nor switches, so no console's grid changes.
     #[test]
     fn a_console_with_no_image_keeps_the_tab_and_says_how_to_open_one() {
         use crate::sidebar::{Tool, active};
@@ -2510,7 +2583,7 @@ mod tests {
         };
         let how = format!(
             "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a \
-             screenshot and press Paste screenshot or {chord} here."
+             screenshot and press Paste screenshot or {chord} here. Its agent can open one too."
         );
         assert!(said.contains(&how), "{said:?}");
         assert!(
@@ -3003,9 +3076,12 @@ mod tests {
             rect
         };
         let mut viewer = Alone::default();
-        viewer
-            .image
-            .open(&mut viewer.slot, source(), PathBuf::from("/shot.png"));
+        viewer.image.open(
+            &mut viewer.slot,
+            source(),
+            PathBuf::from("/shot.png"),
+            Opener::Person,
+        );
         let at = egui::pos2(150.0, 50.0);
         // Loading, then decoded: no pass before this one painted the image.
         assert_eq!(run(&mut viewer, vec![egui::Event::PointerMoved(at)]), None);
@@ -4797,7 +4873,7 @@ mod tests {
             label: "bash".into(),
             cwd: None,
         };
-        slot.open(1, source, PathBuf::from("/a.png"));
+        slot.open(1, source, PathBuf::from("/a.png"), None);
         slot.sent();
         assert_eq!(slot.notice.as_deref(), Some("Sent to bash."));
         slot.add("Send or clear the marks.");
@@ -6025,5 +6101,913 @@ mod tests {
         let notice = slot(&window).notice.clone().unwrap_or_default();
         assert!(notice.contains("The screenshot was saved to"), "{notice}");
         assert_eq!(marks_of(&window).general, "keep");
+    }
+
+    /// One pass in which the agent of the console `pane` opens `path` where the frame's drain does:
+    /// after the keys of the pass were routed.
+    fn agent_pass(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        pane: usize,
+        path: &Path,
+    ) -> (
+        Result<&'static str, String>,
+        Vec<egui::epaint::ClippedShape>,
+    ) {
+        agent_pass_on(window, ctx, area(), events, pane, path)
+    }
+
+    /// [`agent_pass`] in a window of the size `screen`.
+    fn agent_pass_on(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        screen: egui::Rect,
+        events: Vec<egui::Event>,
+        pane: usize,
+        path: &Path,
+    ) -> (
+        Result<&'static str, String>,
+        Vec<egui::epaint::ClippedShape>,
+    ) {
+        let metrics =
+            crate::painter::CellMetrics::measure(ctx, egui::FontId::monospace(window.font_size));
+        let mut frame = eframe::Frame::_new_kittest();
+        eframe::App::logic(window, ctx, &mut frame);
+        let mut answer = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                max_texture_side: Some(MAX_SIDE),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                eframe::App::ui(window, ui, &mut frame);
+                let room = crate::viewer::Room {
+                    ctx: ui.ctx(),
+                    whole_window: screen,
+                    metrics: &metrics,
+                };
+                answer = Some(crate::viewer::open_for_an_agent(
+                    window,
+                    pane,
+                    path.to_owned(),
+                    &room,
+                ));
+            },
+        );
+        output.textures_delta.clear();
+        (answer.expect("the pass ran"), output.shapes)
+    }
+
+    /// What the keys of the last pass sent to the console `pane`.
+    fn typed(window: &crate::Window, pane: usize) -> Vec<u8> {
+        let pane = window.all_panes().find(|p| p.name == pane).unwrap();
+        pane.keystrokes.clone()
+    }
+
+    /// Paints until the drawer paints an image, under a hang guard.
+    fn until_an_image(window: &mut crate::Window, ctx: &egui::Context) -> egui::Rect {
+        let started = Instant::now();
+        loop {
+            if let Some(rect) = image_rect(&painted(window, ctx, vec![])) {
+                return rect;
+            }
+            assert!(started.elapsed() < Duration::from_secs(30));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// An agent's image in the console the person is typing into opens the drawer on it, from a
+    /// closed drawer or from the Changes tab, and the keys stay with the console: what is typed in
+    /// the pass of the open and in the next reaches the program.
+    #[test]
+    fn an_agents_image_in_the_console_being_typed_into_opens_the_drawer_and_leaves_the_keys() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        for from_changes in [false, true] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let typing = window.active().focus;
+            if from_changes {
+                crate::viewer::open_diff_for_pane(&mut window, typing);
+                painted(&mut window, &ctx, vec![]);
+                assert_eq!(active(&window), Some(Tool::Git));
+                // The person went back to typing in the console, as a click on it does.
+                crate::viewer::blur(&mut window);
+            }
+            let (answer, _) = agent_pass(
+                &mut window,
+                &ctx,
+                vec![egui::Event::Text("a".into())],
+                typing,
+                &path,
+            );
+            // The contract's sentence word for word (docs/04): an answer given before the decode
+            // says where a file that cannot be shown is explained.
+            assert_eq!(
+                answer,
+                Ok(
+                    "opened and shown in the drawer of this console, which the person is working \
+                     in; if the drawer cannot show it, it says why there"
+                )
+            );
+            assert_eq!(typed(&window, typing), b"a");
+            assert_eq!(active(&window), Some(Tool::Image));
+            painted(&mut window, &ctx, vec![egui::Event::Text("b".into())]);
+            assert_eq!(
+                typed(&window, typing),
+                b"b",
+                "the drawer took the keys (from Changes: {from_changes})"
+            );
+            assert_eq!(
+                until_an_image(&mut window, &ctx).size(),
+                egui::vec2(64.0, 32.0)
+            );
+        }
+    }
+
+    /// Document yields to an agent's image only while its drawer is not maximized; otherwise
+    /// the image stays marked until the person selects Image and its texture is painted.
+    #[test]
+    fn an_agents_image_switches_document_only_when_it_is_not_maximized() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        for maximized in [false, true] {
+            let mut window =
+                crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            window.chrome.enable();
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let typing = window.active().focus;
+            assert!(crate::viewer::open_document_target(
+                &mut window,
+                typing,
+                guide.clone(),
+                None
+            ));
+            painted(&mut window, &ctx, vec![]);
+            assert_eq!(active(&window), Some(Tool::Document));
+            crate::viewer::blur(&mut window);
+            if maximized {
+                crate::sidebar::toggle_maximize(&mut window);
+            }
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], typing, &path);
+            assert_eq!(
+                answer,
+                Ok(if maximized {
+                    crate::viewer::origin::MARKED_FOR_THE_PERSON
+                } else {
+                    crate::viewer::origin::SHOWN_TO_THE_PERSON
+                })
+            );
+            assert_eq!(window.active().focus, typing);
+            assert_eq!(window.sidebar.maximized, maximized);
+            assert!(
+                !window.viewer.keyboard,
+                "the drawer took the console's keys"
+            );
+            if maximized {
+                assert_eq!(active(&window), Some(Tool::Document));
+                // Once the maximized surface is put away, Document still has not shown the image.
+                crate::sidebar::toggle_maximize(&mut window);
+                let marked = (vec!["Terminal 1".to_owned()], vec![typing]);
+                for _ in 0..3 {
+                    let shapes = painted(&mut window, &ctx, vec![]);
+                    assert_eq!(active(&window), Some(Tool::Document));
+                    assert_eq!(new_image_marks(&window, &shapes), marked);
+                }
+                crate::sidebar::toggle(&mut window, Tool::Image, &ctx);
+            }
+            assert_eq!(active(&window), Some(Tool::Image));
+            assert_eq!(
+                until_an_image(&mut window, &ctx).size(),
+                egui::vec2(64.0, 32.0)
+            );
+            let shapes = painted(&mut window, &ctx, vec![]);
+            assert_eq!(new_image_marks(&window, &shapes), (vec![], vec![]));
+        }
+    }
+
+    /// An agent's image in a console the person is not working in moves nothing: not the drawer,
+    /// not the tab it is on, not the focus, not the tab on show, and no console's grid.
+    #[test]
+    fn an_agents_image_in_a_console_nobody_is_looking_at_moves_nothing() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let mut window =
+            crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let beside = window.tabs[0].panes()[1].name;
+        let behind = window.tabs[1].panes()[0].name;
+        assert_ne!(focused, beside);
+        let grids =
+            |window: &crate::Window| window.all_panes().map(|p| p.measured).collect::<Vec<_>>();
+        let before = grids(&window);
+        for pane in [beside, behind] {
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], pane, &path);
+            // The contract's sentence word for word (docs/04).
+            assert_eq!(
+                answer,
+                Ok(
+                    "opened; the person is not looking at this console's drawer, so its tab and \
+                     header mark a new image until they do; if the drawer cannot show it, it says \
+                     why there"
+                )
+            );
+            assert_eq!(active(&window), None, "the drawer opened");
+            assert_eq!((window.active, window.active().focus), (0, focused));
+        }
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(grids(&window), before);
+        crate::viewer::open_diff_for_pane(&mut window, focused);
+        painted(&mut window, &ctx, vec![]);
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], beside, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+        assert_eq!(
+            active(&window),
+            Some(Tool::Git),
+            "the Changes tab was switched"
+        );
+    }
+
+    /// In the console the person is working in, an agent's image still moves nothing while
+    /// something else holds the screen or the keys: the Board, a maximized drawer, the drawer
+    /// holding the keys, Files holding them, the Settings editor, a console's own menu, the title
+    /// bar's menu or its connection guide.
+    #[test]
+    fn an_agents_image_never_covers_what_the_person_is_reading_or_typing_into() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        type Surface = fn(&mut crate::Window, &egui::Context, usize);
+        let surfaces: [(&str, Surface); 8] = [
+            ("the Board", |window, _, _| {
+                crate::sidebar::select(window, Tool::Board)
+            }),
+            ("a maximized drawer", |window, _, pane| {
+                crate::viewer::open_diff_for_pane(window, pane);
+                crate::sidebar::toggle_maximize(window);
+                // Not holding the keys, so the maximized drawer alone is what is covered.
+                crate::viewer::blur(window);
+            }),
+            ("the drawer holding the keys", |window, _, pane| {
+                crate::viewer::open_diff_for_pane(window, pane);
+                window.viewer.keyboard = true;
+            }),
+            ("Files holding the keys", |window, _, _| {
+                crate::sidebar::select(window, Tool::Files)
+            }),
+            ("the Settings editor", |window, _, _| {
+                window.settings_editor = crate::settings::editor::Editor::resolved(
+                    crate::settings::Entry::Measuring,
+                    Some("closed"),
+                );
+                window.settings_editor.open_from_chrome();
+            }),
+            ("a console's menu", |window, _, pane| {
+                let tab = window.active().name;
+                window
+                    .pane_view
+                    .open_menu(tab, pane, false, egui::pos2(200.0, 150.0));
+            }),
+            ("the title bar's menu", |window, ctx, _| {
+                crate::chrome::open_for_tests(window, ctx, false)
+            }),
+            ("the connection guide", |window, ctx, _| {
+                crate::chrome::open_for_tests(window, ctx, true)
+            }),
+        ];
+        for (surface, open) in surfaces {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let focused = window.active().focus;
+            open(&mut window, &ctx, focused);
+            let shown = (
+                active(&window),
+                window.sidebar.maximized,
+                crate::sidebar::files_visible(&window),
+            );
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+            assert_eq!(
+                answer,
+                Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON),
+                "{surface}"
+            );
+            assert_eq!(
+                (
+                    active(&window),
+                    window.sidebar.maximized,
+                    crate::sidebar::files_visible(&window),
+                ),
+                shown,
+                "{surface} was moved"
+            );
+        }
+    }
+
+    /// In a window too short for the drawer, an agent's image in the console being typed into moves
+    /// nothing — not a closed drawer, not the Changes tab the person had on — and the agent is told
+    /// the person is not looking.
+    #[test]
+    fn an_agents_image_in_a_window_too_short_for_the_drawer_moves_nothing() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        for from_changes in [false, true] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            let focused = window.active().focus;
+            crate::viewer::open_diff_for_pane(&mut window, focused);
+            crate::viewer::blur(&mut window);
+            // The tallest window of these whose drawer gets no dock, read off the partition the
+            // frame made.
+            let short = (100..700)
+                .step_by(20)
+                .rev()
+                .map(|h| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, h as f32)))
+                .find(|&screen| {
+                    pass_on(&mut window, &ctx, screen, vec![], |_| {});
+                    window.sidebar.last_dock.is_none()
+                })
+                .expect("no height leaves the drawer without a dock");
+            if !from_changes {
+                crate::sidebar::close(&mut window, &ctx);
+            }
+            pass_on(&mut window, &ctx, short, vec![], |_| {});
+            let drawer = |window: &crate::Window| {
+                (active(window), window.viewer.open, window.viewer_other.open)
+            };
+            let before = drawer(&window);
+            assert_eq!(before.0, from_changes.then_some(Tool::Git));
+            let (answer, _) = agent_pass_on(&mut window, &ctx, short, vec![], focused, &path);
+            assert_eq!(
+                answer,
+                Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON),
+                "from Changes: {from_changes}"
+            );
+            assert_eq!(drawer(&window), before, "from Changes: {from_changes}");
+        }
+    }
+
+    /// With the Image tab already selected for that console, a window too short for the drawer
+    /// still keeps the image out of sight: the agent is told the person is not looking, and the
+    /// mark stays up.
+    #[test]
+    fn an_agents_image_on_an_image_tab_with_no_room_is_not_shown() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let first = folder.0.join("first.png");
+        write_png(&first, 64, 32);
+        let second = folder.0.join("second.png");
+        write_png(&second, 32, 16);
+        let (mut window, ctx, _) = window_with_image(&first);
+        assert_eq!(active(&window), Some(Tool::Image));
+        let focused = window.active().focus;
+        let short = (100..700)
+            .step_by(20)
+            .rev()
+            .map(|h| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, h as f32)))
+            .find(|&screen| {
+                pass_on(&mut window, &ctx, screen, vec![], |_| {});
+                window.sidebar.last_dock.is_none()
+            })
+            .expect("no height leaves the drawer without a dock");
+        let (answer, _) = agent_pass_on(&mut window, &ctx, short, vec![], focused, &second);
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+        assert_eq!(active(&window), Some(Tool::Image));
+        pass_on(&mut window, &ctx, short, vec![], |_| {});
+        assert!(
+            slot(&window).unseen,
+            "a drawer with no room took the mark down"
+        );
+    }
+
+    /// Unsent marks refuse an agent's image in their own console, with the sentence the agent
+    /// reads and with the image and its marks still painted; another console's open, the agent's
+    /// or the person's, is not theirs to refuse.
+    #[test]
+    fn unsent_marks_refuse_an_agents_image_only_in_their_own_console() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let marked = window.active().panes()[1].name;
+        let beside = window.active().panes()[0].name;
+        marks_mut(&mut window).general = "unsent".into();
+        let before = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], marked, &other);
+        assert_eq!(
+            answer,
+            Err(crate::viewer::origin::MARKS_NOT_SENT.to_owned())
+        );
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(same_place(image_rect(&shapes).unwrap(), before));
+        assert!(texts(&shapes, area()).iter().any(|t| t.contains("unsent")));
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], beside, &other);
+        assert!(answer.is_ok(), "{answer:?}");
+        crate::viewer::open_image_target(&mut window, beside, other.clone()).unwrap();
+        assert_eq!(
+            until_an_image(&mut window, &ctx).size(),
+            egui::vec2(64.0, 32.0)
+        );
+    }
+
+    /// The bytes decide the format: a `.png` holding text that reaches the window — the bridge
+    /// refuses it, but a hand-written line skips the bridge (D121) — is opened, and the drawer says
+    /// why it cannot be shown.
+    #[test]
+    fn an_agents_file_that_is_not_an_image_is_opened_and_says_why_in_the_drawer() {
+        let folder = Folder::new();
+        let path = folder.0.join("notes.png");
+        std::fs::write(&path, "not an image at all").unwrap();
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        wait_for_text(&mut window, &ctx, "This file is not a PNG or JPEG image");
+    }
+
+    /// Paints until the image of the console `name` is decoded or refused, under a hang guard.
+    fn decoded_or_why(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        name: usize,
+    ) -> Result<(), String> {
+        let started = Instant::now();
+        loop {
+            painted(window, ctx, vec![]);
+            let slot = slot_called(window, name);
+            if slot.loaded() {
+                return Ok(());
+            }
+            if let Some(why) = slot.message() {
+                return Err(why.to_owned());
+            }
+            assert!(started.elapsed() < Duration::from_secs(30));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// **An agent's image is refused through a link, and the person's own open of the same file is
+    /// not** (D121). The window is handed a reader for which every entry is one, so the test holds
+    /// on every platform — off Windows the real reader calls nothing a link: what is pinned is that
+    /// the agent's open reaches the worker's walk and the person's does not.
+    #[test]
+    fn an_agents_image_through_a_link_is_refused_and_the_persons_own_open_is_not() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        let every_entry_a_link: IsLink = |_| Ok(true);
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.image.links = Links(every_entry_a_link);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        assert_eq!(
+            decoded_or_why(&mut window, &ctx, focused),
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one. Open it from \
+                 Files to see it yourself.",
+                path.display()
+            ))
+        );
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.image.links = Links(every_entry_a_link);
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        crate::viewer::open_image_target(&mut window, name, path.clone()).unwrap();
+        assert_eq!(decoded_or_why(&mut window, &ctx, name), Ok(()));
+    }
+
+    /// **On a real Windows disk, the window's own reader refuses an agent's image through a
+    /// junction** — which needs no privilege to make — and lets the same PNG by its own folder
+    /// through (D121). Nothing is handed in: what is pinned is the reader the window is built with,
+    /// which the portable test above replaces.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_an_agents_image_through_a_junction_is_refused_by_the_window() {
+        let folder = Folder::new();
+        let plain = folder.0.join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let direct = plain.join("shot.png");
+        write_png(&direct, 64, 32);
+        let junction = folder.0.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let through = junction.join("shot.png");
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &direct);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        assert_eq!(decoded_or_why(&mut window, &ctx, focused), Ok(()));
+
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        painted(&mut window, &ctx, vec![]);
+        let focused = window.active().focus;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &through);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        assert_eq!(
+            decoded_or_why(&mut window, &ctx, focused),
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one. Open it from \
+                 Files to see it yourself.",
+                through.display()
+            ))
+        );
+    }
+
+    /// Where the «new image» glyph was painted: the labels of the tab cards it sits on, and the
+    /// consoles of the tab on show whose header it sits in.
+    fn new_image_marks(
+        window: &crate::Window,
+        shapes: &[egui::epaint::ClippedShape],
+    ) -> (Vec<String>, Vec<usize>) {
+        fn walk(
+            shape: &egui::Shape,
+            glyphs: &mut Vec<egui::Rect>,
+            labels: &mut Vec<(String, egui::Pos2)>,
+        ) {
+            if let Some((glyph, _, rect)) = crate::ui::icons::painted_icon(shape) {
+                if glyph == egui_phosphor::regular::FILE_IMAGE {
+                    glyphs.push(rect);
+                }
+                return;
+            }
+            match shape {
+                egui::Shape::Text(text) if text.galley.text().starts_with("Terminal ") => {
+                    labels.push((text.galley.text().to_owned(), text.pos));
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, glyphs, labels);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let (mut glyphs, mut labels) = (Vec::new(), Vec::new());
+        for clipped in shapes {
+            walk(&clipped.shape, &mut glyphs, &mut labels);
+        }
+        let panes: Vec<_> = window
+            .active()
+            .panes()
+            .into_iter()
+            .filter_map(|pane| Some((pane.name, pane.painted_console.as_ref()?.area)))
+            .collect();
+        let tops = panes
+            .iter()
+            .map(|(_, area)| area.top())
+            .fold(f32::MAX, f32::min);
+        let (mut cards, mut headers) = (Vec::new(), Vec::new());
+        for glyph in glyphs {
+            let at = glyph.center();
+            if let Some((name, _)) = panes.iter().find(|(_, area)| {
+                area.x_range().contains(at.x) && at.y < area.top() && at.y > area.top() - 40.0
+            }) {
+                headers.push(*name);
+            } else if at.y < tops - 40.0 {
+                // The card is the one whose label starts nearest on the glyph's left.
+                let card = labels
+                    .iter()
+                    .filter(|(_, pos)| pos.x <= at.x && (pos.y - at.y).abs() < 20.0)
+                    .max_by(|a, b| a.1.x.total_cmp(&b.1.x));
+                cards.push(card.map_or_else(|| "no card".to_owned(), |(label, _)| label.clone()));
+            }
+        }
+        cards.sort();
+        headers.sort();
+        (cards, headers)
+    }
+
+    /// An agent's image in a console the person is not looking at marks that console's header and
+    /// its tab's card, and nothing else; the marks stay through a focus change, a closed drawer,
+    /// the Changes tab and «Loading…», and go on the frame the drawer paints the image or why it
+    /// cannot.
+    #[test]
+    fn a_new_image_is_marked_on_its_tab_and_header_until_the_drawer_paints_it() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let mut window =
+            crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        // Every real window runs the integrated chrome, the only one with these headers.
+        window.chrome.enable();
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        painted(&mut window, &ctx, vec![]);
+        let typing = window.active().focus;
+        let other = window.tabs[0].panes()[1].name;
+        assert_ne!(typing, other);
+        let marks = |window: &mut crate::Window| {
+            let shapes = painted(window, &ctx, vec![]);
+            new_image_marks(window, &shapes)
+        };
+        assert_eq!(marks(&mut window), (vec![], vec![]));
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+        let marked = (vec!["Terminal 1".to_owned()], vec![other]);
+        assert_eq!(marks(&mut window), marked);
+        // The person moves to that console; the drawer stays closed, then shows Changes.
+        window.tabs[0].focus = other;
+        for _ in 0..3 {
+            assert_eq!(
+                marks(&mut window),
+                marked,
+                "a focus change took the mark down"
+            );
+        }
+        crate::viewer::open_diff_for_pane(&mut window, other);
+        for _ in 0..3 {
+            assert_eq!(
+                marks(&mut window),
+                marked,
+                "the Changes tab took the mark down"
+            );
+        }
+        // The Image tab with the image still loading is not seeing it.
+        crate::sidebar::toggle(&mut window, Tool::Image, &ctx);
+        assert_eq!(active(&window), Some(Tool::Image));
+        let stalled = slot_mut(&mut window).stall();
+        // The drawer's first frame on a tab of the other bank is egui's sizing pass, painted blank.
+        painted(&mut window, &ctx, vec![]);
+        for _ in 0..3 {
+            let shapes = painted(&mut window, &ctx, vec![]);
+            let dock = window.sidebar.last_dock.unwrap();
+            assert!(texts(&shapes, dock).iter().any(|t| t == "Loading…"));
+            assert_eq!(
+                new_image_marks(&window, &shapes),
+                marked,
+                "«Loading…» took it down"
+            );
+        }
+        // Why it cannot be shown, once painted, is seeing it.
+        drop(stalled);
+        let started = Instant::now();
+        while slot(&window).message().is_none() {
+            painted(&mut window, &ctx, vec![]);
+            assert!(started.elapsed() < Duration::from_secs(30));
+        }
+        assert_eq!(
+            marks(&mut window),
+            (vec![], vec![]),
+            "a painted refusal left the mark"
+        );
+        // Opened again by the agent, beside a drawer that already shows that console: the frame
+        // that paints the image takes the mark down. That it also asks for the next frame is
+        // pinned by `taking_the_mark_down_asks_for_the_next_frame`, where nothing else in the
+        // frame asks for one; here the image's first paint does.
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON));
+        until_an_image(&mut window, &ctx);
+        assert_eq!(marks(&mut window), (vec![], vec![]));
+    }
+
+    /// An image in a console of a tab not on show marks that tab's card, and no header of the tab
+    /// on show.
+    #[test]
+    fn a_new_image_behind_another_tab_marks_that_tabs_card() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let mut window =
+            crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        let behind = window.tabs[1].panes()[0].name;
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], behind, &path);
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert_eq!(
+            new_image_marks(&window, &shapes),
+            (vec!["Terminal 2".to_owned()], vec![])
+        );
+    }
+
+    /// The drawer's first frame on the Image tab after Changes is egui's sizing pass, whose shapes
+    /// are thrown away: a refusal laid out there was not seen, and the mark stays for the frame
+    /// that paints it.
+    #[test]
+    fn a_frame_nobody_sees_does_not_take_the_mark_down() {
+        use crate::sidebar::Tool;
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        painted(&mut window, &ctx, vec![]);
+        let other = window.tabs[0].panes()[1].name;
+        // Refused the moment it is opened, so its refusal is ready for the first frame.
+        let (answer, _) = agent_pass(&mut window, &ctx, vec![], other, Path::new("relative.png"));
+        assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+        window.tabs[0].focus = other;
+        crate::viewer::open_diff_for_pane(&mut window, other);
+        painted(&mut window, &ctx, vec![]);
+        crate::sidebar::toggle(&mut window, Tool::Image, &ctx);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert_eq!(new_image_marks(&window, &shapes).1, vec![other]);
+        let dock = window.sidebar.last_dock.unwrap();
+        let output = pass(&mut window, &ctx, vec![]);
+        assert!(
+            texts(&output.shapes, dock)
+                .iter()
+                .any(|t| t.contains("working directory")),
+            "the refusal was not painted"
+        );
+        // The header is painted before the drawer: the frame that first shows the refusal still
+        // carries the mark, and the next one carries none. The request for that next frame is
+        // pinned by `taking_the_mark_down_asks_for_the_next_frame`: in this window something
+        // else in the same frames asks for one too, so no assertion here could tell.
+        assert_eq!(
+            new_image_marks(&window, &output.shapes).1,
+            vec![other],
+            "a blank frame took it down"
+        );
+        let output = pass(&mut window, &ctx, vec![]);
+        assert_eq!(new_image_marks(&window, &output.shapes), (vec![], vec![]));
+    }
+
+    /// The frame that takes the mark down asks for the next one, where the tab card and the header,
+    /// painted before the drawer, show it gone; a window at rest would otherwise keep it up. Shown
+    /// alone, so nothing else in the frame asks for one.
+    #[test]
+    fn taking_the_mark_down_asks_for_the_next_frame() {
+        let mut alone = Alone::default();
+        // A relative path is refused the moment it is opened: the refusal is what is painted.
+        alone.image.open(
+            &mut alone.slot,
+            source(),
+            PathBuf::from("relative.png"),
+            Opener::Person,
+        );
+        let ctx = egui::Context::default();
+        let frame = |alone: &mut Alone| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area()),
+                    ..Default::default()
+                },
+                |ui| alone.show(ui, crate::theme::Theme::default(), false),
+            );
+            output.textures_delta.clear();
+            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+        // Settled: a frame with nothing new asks for none.
+        for _ in 0..3 {
+            frame(&mut alone);
+        }
+        assert_ne!(frame(&mut alone), Duration::ZERO, "never at rest");
+        alone.slot.mark_unseen();
+        assert_eq!(frame(&mut alone), Duration::ZERO);
+        assert!(!alone.slot.unseen);
+    }
+
+    /// Closing a marked image with the Image tab's × takes the mark down and asks for the next
+    /// frame, where the tab card and the header, painted before the drawer, show it gone. The
+    /// control is the same close of an image nobody marked, which asks for none.
+    #[test]
+    fn closing_a_marked_image_asks_for_the_next_frame() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        for marked in [true, false] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let focused = window.active().focus;
+            // The drawer holds the keys on Changes, so the agent's image is marked and not shown.
+            crate::viewer::open_diff_for_pane(&mut window, focused);
+            window.viewer.keyboard = true;
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], focused, &path);
+            assert_eq!(answer, Ok(crate::viewer::origin::MARKED_FOR_THE_PERSON));
+            slot_mut(&mut window).unseen = marked;
+            let delay = |output: &egui::FullOutput| {
+                output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+            };
+            // Settled: a frame with nothing new asks for none, so what the close's frame asks for
+            // is the close's own.
+            let started = Instant::now();
+            while delay(&pass(&mut window, &ctx, vec![])).is_zero() {
+                assert!(started.elapsed() < Duration::from_secs(30), "never at rest");
+            }
+            assert_eq!(active(&window), Some(Tool::Git));
+            // Where the strip's × closes it: inside the frame, after the bar and the headers.
+            let mut frame = eframe::Frame::_new_kittest();
+            eframe::App::logic(&mut window, &ctx, &mut frame);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area()),
+                    max_texture_side: Some(MAX_SIDE),
+                    ..Default::default()
+                },
+                |ui| {
+                    eframe::App::ui(&mut window, ui, &mut frame);
+                    crate::viewer::origin::close_tab(&mut window, Tool::Image, ui.ctx());
+                },
+            );
+            output.textures_delta.clear();
+            assert!(!slot(&window).shown() && !slot(&window).unseen);
+            assert_eq!(delay(&output).is_zero(), marked, "marked: {marked}");
+        }
+    }
+
+    /// An agent opening an image in another console leaves a pan the person is making on the image
+    /// they are looking at: it keeps moving with the pointer.
+    #[test]
+    fn an_agents_image_elsewhere_does_not_drop_a_pan_in_progress() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let other = window.active().panes()[0].name;
+        assert_ne!(window.active().focus, other);
+        let small = folder.0.join("small.png");
+        write_png(&small, 64, 32);
+        let at = start_middle_drag(&mut window, &ctx);
+        let before = settle(&mut window, &ctx);
+        let (answer, _) = agent_pass(
+            &mut window,
+            &ctx,
+            vec![egui::Event::PointerMoved(at)],
+            other,
+            &small,
+        );
+        assert!(answer.is_ok(), "{answer:?}");
+        let by = egui::vec2(-30.0, -45.0);
+        travel(&mut window, &ctx, at, by);
+        let after = settle(&mut window, &ctx);
+        assert!(
+            (after.min - (before.min + by)).length() < 0.5,
+            "the pan stopped: {before:?} -> {after:?}"
+        );
+    }
+
+    /// Where the Image tab already shows the console, an agent's next image takes the place of the
+    /// last with nothing moved: the drawer keeps the keys it holds, maximized or not, and the reply
+    /// says the person sees it.
+    #[test]
+    fn an_agents_image_in_the_image_tab_on_show_takes_the_place_of_the_last() {
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 300, 100);
+        let next = folder.0.join("next.png");
+        write_png(&next, 64, 32);
+        for maximized in [false, true] {
+            let (mut window, ctx, _) = window_with_image(&path);
+            let shown = window.active().focus;
+            if maximized {
+                crate::sidebar::toggle_maximize(&mut window);
+                painted(&mut window, &ctx, vec![]);
+            }
+            assert!(
+                window.viewer.keyboard,
+                "the premise: the drawer holds the keys"
+            );
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], shown, &next);
+            assert_eq!(
+                answer,
+                Ok(crate::viewer::origin::SHOWN_TO_THE_PERSON),
+                "maximized: {maximized}"
+            );
+            assert_eq!(window.sidebar.maximized, maximized);
+            painted(&mut window, &ctx, vec![egui::Event::Text("x".into())]);
+            assert!(typed(&window, shown).is_empty(), "the keys left the drawer");
+            assert_eq!(
+                until_an_image(&mut window, &ctx).size(),
+                egui::vec2(64.0, 32.0)
+            );
+        }
     }
 }

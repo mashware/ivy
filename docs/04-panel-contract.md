@@ -460,8 +460,13 @@ is that **a channel has somebody to tell** what that tolerance dropped — see
 ← {"ok":true,"text":"..."}
 → {"tool":"split_close","pane":"<opaque handle>"}
 ← {"ok":true}
+→ {"tool":"image_open","path":"/home/me/shots/login.png"}
+← {"ok":true,"text":"opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there"}
 ← {"ok":false,"error":"..."}
 ```
+
+On Windows the path is written with its drive, `"C:\\Users\\me\\shots\\login.png"`: `/home/…` has
+no drive there and is relative.
 
 ### What fell away is said
 
@@ -725,6 +730,60 @@ only verbs that name another pane:
   button does not revoke it**: that is the application writing on the person's behalf, not the person
   taking the console back. This is an **application** boundary and not a confidentiality one: the
   program `split_open` launched keeps reading whatever the person types afterwards.
+
+### `image_open`
+
+It shows an image to the person in the drawer of **the console whose endpoint asked** — it names no
+pane, and a `pane` sent beside it reaches nothing (**D121**). Each console holds one image, and this
+replaces it.
+
+- **`path` is absolute and on this machine.** A relative path is refused — there is no directory it
+  could honestly be read from — and on Windows anything but a drive letter or a volume GUID
+  (`C:\…`, `\\?\C:\…`, `\\?\Volume{…}\…`) is refused too: a share, a device or another name in
+  the object namespace (`\\host\share\…`, `\\?\UNC\…`, `\\?\GLOBALROOT\…`, `\\.\…`). A mapped
+  drive letter passes, because it is the user's own mapping. No extension is asked for: the file's
+  bytes decide whether it is a PNG or a JPEG. `panel-mcp` refuses one that is neither (below); a
+  hand-written line that skips it is opened, and the drawer says the file is not a PNG or JPEG
+  image. The line's own bound is the only bound on the path's length.
+- **On Windows no link is passed through.** If the file, or any folder on its way, is a symbolic
+  link, a junction or another reparse point that names a path, the open is refused with `<path>
+  passes through a link, and an agent's image is not opened through one`, and a folder or file that
+  cannot be looked at, other than one that is not there, refuses it with `cannot tell whether
+  <path> passes through a link: <error>`. Where a link leads is never read. `panel-mcp` refuses
+  before it asks for the file, and the window refuses again before its worker reads, where the
+  refusal is painted in the drawer followed by `Open it from Files to see it yourself.` A person's
+  own open of the same file is not refused, and other platforms refuse no link (**D121**).
+- **One Windows spelling for checks and read.** Before disk access, the bridge and the window's
+  image worker each make the agent's path absolute by text and rebuild it under `\\?\`, allowing
+  only a drive or volume-GUID prefix. Every entry checked for links and the file read use that
+  same spelling, so Windows does not reinterpret a partial path differently from the whole one
+  (**D121**). A `..` is resolved before the walk; dots, spaces and device names follow Windows'
+  interpretation once. A resulting device/share prefix refuses with `<path> is read by Windows
+  as <whole>, which is not a file on a drive` / `which is not on this machine`; failure to make
+  the path absolute refuses with `<path> cannot be read as a Windows path: <error>`. These text
+  refusals are painted alone, without `Open it from Files`. Linux and macOS keep the agent's
+  path as given, including `..` and names Windows would rewrite. The path on the wire stays the
+  original absolute path; a person's own open is unchanged.
+- **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
+  person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
+  image — it opened on it, or its Image tab was already on show for that console — and `opened; the
+  person is not looking at this console's drawer, so its tab and header mark a new image until they
+  do; if the drawer cannot show it, it says why there` everywhere else, a window too short for the
+  drawer included. The keyboard never moves. The answer comes before the file is decoded, and a
+  truncated or corrupt PNG or JPEG begins like a whole one, so both sentences say where such a file
+  is explained instead of promising the picture.
+- **It is refused** while that console's image carries marks the person has not sent (`the image open
+  in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the
+  marks, then call image_open again`) and when the console that asked is gone. Malformed lines say
+  `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
+  not absolute`, `an image_open's "path" is not on this machine` (a share) or `an image_open's
+  "path" is not a drive path; give it as C:\…` (any other refused prefix, a local device path such
+  as `\\.\C:\…` included), and the connection lives on.
+- **`panel-mcp` checks the file first**, in its own process, which is not always the
+  agent's: a missing file, a folder, something that is not a regular file, a
+  file over 32 MiB and a file whose first bytes are neither a PNG's signature nor a JPEG's
+  `FF D8 FF` (`<path> is not a PNG or JPEG image`, a file too short to say included) are refused
+  before the window is asked. Those checks are a courtesy; the window's read is the enforcement.
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport

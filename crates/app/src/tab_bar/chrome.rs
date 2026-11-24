@@ -80,6 +80,18 @@ pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics)
     geometry
 }
 
+/// Whether the drawer, opened on `tool`, would get a dock in the window's `area` — the same
+/// partition [`geometry`] makes, asked before anything is switched.
+pub(crate) fn drawer_has_room(
+    window: &Window,
+    area: egui::Rect,
+    metrics: &CellMetrics,
+    tool: crate::sidebar::Tool,
+) -> bool {
+    let consoles = raw_geometry(window, area, metrics).consoles;
+    crate::sidebar::drawer_has_room(window, consoles, metrics, tool)
+}
+
 /// Frame layout work has its own named span and is discounted exactly once.
 pub(crate) fn partition(
     window: &mut Window,

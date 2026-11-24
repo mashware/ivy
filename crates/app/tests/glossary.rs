@@ -263,6 +263,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/closing.rs",
     "app/src/control.rs",
     "app/src/control/retiring.rs",
+    "app/src/control/handles.rs",
     "app/src/panel/document.rs",
     "app/src/panel/driving.rs",
     "app/src/panel/pane.rs",
@@ -556,6 +557,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/closing.rs", "app"),
     ("app/src/control.rs", "app"),
     ("app/src/control/retiring.rs", "app"),
+    ("app/src/control/handles.rs", "app"),
     ("app/src/panel/document.rs", "app"),
     ("app/src/panel/driving.rs", "app"),
     ("app/src/panel/pane.rs", "app"),
@@ -1604,6 +1606,8 @@ const NOT_OURS: &[&str] = &[
     "split_open",
     "split_read",
     "split_close",
+    // The image verb (D121), a name on the same wire.
+    "image_open",
     // **And the read verb, which is a name on the wire and nowhere else.** Its two siblings are
     // functions of the channel's crate —`panel_set` and `panel_patch` both have one, because each
     // has an envelope to read— and this one takes no arguments at all, so there is nothing for a

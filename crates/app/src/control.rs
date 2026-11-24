@@ -31,6 +31,7 @@ use crate::{Pane, Window};
 
 mod applying;
 mod channel;
+mod handles;
 mod retiring;
 pub(crate) use channel::control_hwnd;
 pub(crate) use channel::open_with_authority;
@@ -556,7 +557,8 @@ struct OnScreen<'a> {
 }
 
 impl Window {
-    /// Answers what the open connections left for the tree: opening, reading and closing consoles.
+    /// Answers what the open connections left for the window: opening, reading and closing consoles,
+    /// and showing an agent's image in its own console's slot.
     ///
     /// **It runs in the interface pass**, which is where the geometry a split needs exists, and it
     /// drains a queue the panes filled while they were painted — so a request lands in the frame
@@ -671,78 +673,6 @@ impl Window {
             .record(handle.clone(), origin, connection, name);
         Ok(Some(handle))
     }
-
-    /// The console a handle names, **if this connection opened it and the person has not taken it
-    /// over**, with the refusal as the caller is to read it.
-    ///
-    /// **One place resolves a handle**, so reading and closing cannot drift into answering
-    /// differently about the same console: a revoked handle answers with the reason and not with a
-    /// bare error (**AC15**), which is what lets an agent tell «the person took it» from «you never
-    /// had it».
-    fn a_console_this_connection_owns(
-        &mut self,
-        origin: usize,
-        connection: u64,
-        handle: &str,
-    ) -> Result<usize, String> {
-        let pane_name = self
-            .opened_by_agents
-            .reachable(origin, connection, handle)?;
-        let Some(pane) = self.all_panes().find(|pane| pane.name == pane_name) else {
-            return Err("that console is gone".to_owned());
-        };
-        match &pane.taken_over {
-            Some(why) => Err(why.clone()),
-            None => Ok(pane_name),
-        }
-    }
-
-    /// What a console this connection opened is showing.
-    fn reading_for_a_connection(
-        &mut self,
-        origin: usize,
-        connection: u64,
-        handle: &str,
-        scrollback: bool,
-    ) -> Answer {
-        let pane_name = match self.a_console_this_connection_owns(origin, connection, handle) {
-            Ok(name) => name,
-            Err(why) => return Answer::Refused(why),
-        };
-        let Some(pane) = self.all_panes().find(|pane| pane.name == pane_name) else {
-            return Answer::Refused("that console is gone".to_owned());
-        };
-        // **The visible screen unless the scrollback was asked for**, which is the contract's default
-        // and not a policy: the small read is what an agent usually wants, and the whole history is a
-        // lot of bytes to hand over by accident.
-        let text = if scrollback {
-            pane.screen.scrollback_text()
-        } else {
-            pane.screen.to_text()
-        };
-        Answer::Text(text)
-    }
-
-    /// Closes a console this connection opened.
-    fn closing_for_a_connection(
-        &mut self,
-        origin: usize,
-        connection: u64,
-        handle: &str,
-        ctx: &egui::Context,
-    ) -> Answer {
-        let pane_name = match self.a_console_this_connection_owns(origin, connection, handle) {
-            Ok(name) => name,
-            Err(why) => return Answer::Refused(why),
-        };
-        match self.close_a_pane_called(pane_name, ctx) {
-            Ok(()) => {
-                self.opened_by_agents.forget(pane_name);
-                Answer::Taken
-            }
-            Err(why) => Answer::Refused(why),
-        }
-    }
 }
 
 fn answer_windows_requests(
@@ -803,12 +733,27 @@ fn answer_windows_requests(
                     },
                 )
                 .map_or_else(Answer::Refused, Answer::Opened),
-            What::Read { pane, scrollback } => {
-                window.reading_for_a_connection(origin, delivery.connection, &pane, scrollback)
-            }
+            What::Read { pane, scrollback } => handles::reading_for_a_connection(
+                window,
+                origin,
+                delivery.connection,
+                &pane,
+                scrollback,
+            ),
             What::Close { pane } => {
-                window.closing_for_a_connection(origin, delivery.connection, &pane, ctx)
+                handles::closing_for_a_connection(window, origin, delivery.connection, &pane, ctx)
             }
+            What::ImageOpen { path } => crate::viewer::open_for_an_agent(
+                window,
+                origin,
+                path,
+                &crate::viewer::Room {
+                    ctx,
+                    whole_window,
+                    metrics,
+                },
+            )
+            .map_or_else(Answer::Refused, |said| Answer::Text(said.to_owned())),
             What::Retire => window.retiring_for_a_connection(origin, delivery.connection, ctx),
             // **A closed connection takes its handles with it**, which is what D44 promises and
             // what keeps the map bounded: an agent that opens consoles and dies must not leave
@@ -1760,6 +1705,46 @@ mod tests {
         );
     }
 
+    /// **An `image_open` waits for the window and wakes it**, as the `split_*` verbs do: the window
+    /// is what holds the console's image, and a request queued during painting with no wake would
+    /// be answered by no pass at all, its caller told after five seconds that the window did not
+    /// answer (D121).
+    #[test]
+    fn an_image_open_waits_for_the_window_and_wakes_it() {
+        use std::io::Write;
+
+        let mut pane = a_driven_pane();
+        let mut client = panel_control::endpoint::connect(pane.dir.path(), pane.dir.id())
+            .expect("connect to the pane");
+        let path = std::env::temp_dir().join("shot.png");
+        let line = serde_json::json!({"tool": "image_open", "path": path.to_str().unwrap()});
+        writeln!(client, "{line}").expect("ask for an image");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pane.woken.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let after_arrival = pane.woken.load(Ordering::Relaxed);
+        assert!(after_arrival > 0, "the request never arrived at the pane");
+
+        pane.control.apply(
+            &mut pane.state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
+
+        assert!(
+            pane.woken.load(Ordering::Relaxed) > after_arrival,
+            "an image_open that waits for the window did not wake it"
+        );
+        let waiting = pane.control.take_waiting_on_the_window();
+        assert!(
+            matches!(&waiting[..], [delivery] if matches!(&delivery.what, What::ImageOpen { path: p } if *p == path)),
+            "the request did not reach the window's queue"
+        );
+        assert!(pane.state.held_by().is_none(), "an image touched the panel");
+    }
+
     /// One producer that stays connected and does what the test asks, **one verb at a time**.
     ///
     /// **The sequence is what these tests are about**, which is why neither `Publishing` nor `Asking`
@@ -2307,6 +2292,10 @@ mod tests {
     );
     crate::windows_unix_omission!(
         a_request_that_waits_for_the_window_wakes_it,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        an_image_open_waits_for_the_window_and_wakes_it,
         "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
     );
     crate::windows_unix_omission!(

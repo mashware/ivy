@@ -245,7 +245,9 @@ pub(crate) fn open_image_target(
     let Some(slot) = super::image::slot_of(&mut window.tabs, pane) else {
         return Err(NotOpened::Gone);
     };
-    window.image.open(slot, source, path);
+    window
+        .image
+        .open(slot, source, path, super::image::Opener::Person);
     show_image(window);
     if let Some(ctx) = window.viewer.context.clone()
         && let Some(slot) = super::image::slot_of(&mut window.tabs, pane)
@@ -253,6 +255,103 @@ pub(crate) fn open_image_target(
         slot.poll(&ctx);
     }
     Ok(())
+}
+
+/// What an agent's open answers when the drawer shows the image: it opened on it, or its Image
+/// tab was already on show for that console (D121). The answer comes before the worker has
+/// decoded the file, and a truncated or corrupt PNG or JPEG begins like a whole one, so it says
+/// where a file that cannot be shown is explained instead of promising pixels (owner, D121).
+pub(crate) const SHOWN_TO_THE_PERSON: &str = "opened and shown in the drawer of this console, which the person is working in; if the drawer cannot show it, it says why there";
+
+/// What an agent's open answers when nothing moved and the mark says it (D121). Its last clause
+/// is the one `SHOWN_TO_THE_PERSON` ends with, for the same reason.
+pub(crate) const MARKED_FOR_THE_PERSON: &str = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there";
+
+/// Why an agent's open was refused over the person's unsent marks, worded for the agent.
+pub(crate) const MARKS_NOT_SENT: &str = "the image open in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the marks, then call image_open again";
+
+/// The drawer's geometry, for telling whether an opened drawer has room in this frame.
+pub(crate) struct Room<'a> {
+    pub(crate) ctx: &'a eframe::egui::Context,
+    pub(crate) whole_window: eframe::egui::Rect,
+    pub(crate) metrics: &'a crate::painter::CellMetrics,
+}
+
+/// Opens `path` in the slot of the console `pane`, for that console's own agent (D121).
+///
+/// The person is not moved: where the Image tab already shows that console the new image simply
+/// takes its place, and otherwise the drawer opens on it only where the person is working in that
+/// console and nothing else holds the screen or the keys. The keyboard stays where it was. Refused
+/// over that console's unsent marks, with nothing shown and nothing said in the drawer, because the
+/// agent is the one asking. The file itself is not read here: the worker that decodes it walks the
+/// path first and, on Windows, refuses a path through a link, then opens the spelling it walked —
+/// a walk a person's own open is spared (D121).
+pub(crate) fn open_for_an_agent(
+    window: &mut Window,
+    pane: usize,
+    path: PathBuf,
+    room: &Room<'_>,
+) -> Result<&'static str, String> {
+    let gone = || "the console that asked is gone".to_owned();
+    let source = source(window, pane).ok_or_else(gone)?;
+    let slot = super::image::slot_of(&mut window.tabs, pane).ok_or_else(gone)?;
+    if slot.has_marks() {
+        return Err(MARKS_NOT_SENT.to_owned());
+    }
+    window
+        .image
+        .open(slot, source, path, super::image::Opener::Agent);
+    // Set even where the drawer shows it at once: one rule, and the frame that paints it takes
+    // the mark down.
+    slot.mark_unseen();
+    if !in_front(window, pane, room.ctx) {
+        return Ok(MARKED_FOR_THE_PERSON);
+    }
+    // The Image tab on show already shows this console's image: nothing has to move for the new
+    // one to be seen, the keys and a maximized drawer included.
+    if !showing_image(window) {
+        // Room is asked before switching: a window too short for the drawer keeps the consoles
+        // whole, and switching anyway would replace the person's Document or Changes for nothing.
+        let room_for_it =
+            crate::tab_bar::drawer_has_room(window, room.whole_window, room.metrics, Tool::Image);
+        if !free_to_switch(window) || !room_for_it {
+            return Ok(MARKED_FOR_THE_PERSON);
+        }
+        super::select_state(window, true);
+        crate::sidebar::select(window, Tool::Image);
+        window.viewer.open = true;
+    }
+    room.ctx.request_repaint();
+    // Selected is not shown: an Image tab that was already selected in a window too short for the
+    // drawer is still out of sight.
+    let geometry = crate::tab_bar::geometry(window, room.whole_window, room.metrics);
+    Ok(if geometry.dock.is_some() {
+        SHOWN_TO_THE_PERSON
+    } else {
+        MARKED_FOR_THE_PERSON
+    })
+}
+
+/// Whether the console `pane` is the focused one of the tab on show, with nothing over the drawer
+/// that would hide it. The title bar's modals are asked through `chrome::is_modal`, the same rule
+/// that dims the consoles, so its menu counts as well as its dialogs.
+fn in_front(window: &Window, pane: usize, ctx: &eframe::egui::Context) -> bool {
+    let tab = window.active();
+    tab.focus == pane
+        && tab.panes().iter().any(|p| p.name == pane)
+        && !window.settings_editor.is_open()
+        && !window.pane_view.is_modal()
+        && !crate::chrome::is_modal(window, ctx)
+}
+
+/// Whether the drawer may be switched to the Image tab: switching takes away what the Board or a
+/// maximized drawer shows, and the keys from the drawer or Files if they hold them (D121).
+fn free_to_switch(window: &Window) -> bool {
+    !matches!(crate::sidebar::active(window), Some(Tool::Board))
+        && !window.sidebar.maximized
+        && !window.viewer.keyboard
+        && !window.viewer_other.keyboard
+        && !window.explorer.holds_keys()
 }
 
 /// Gives the console `pane` the keys, showing its tab: the image tab shows the focused console's.
@@ -285,8 +384,10 @@ pub(super) fn close_tab(window: &mut Window, closed: Tool, ctx: &eframe::egui::C
         if keeps_marks(window, focus) {
             return;
         }
-        if let Some(slot) = super::image::slot_of(&mut window.tabs, focus) {
-            slot.clear();
+        if let Some(slot) = super::image::slot_of(&mut window.tabs, focus)
+            && slot.clear()
+        {
+            ctx.request_repaint();
         }
     } else {
         let markdown = closed == Tool::Document;

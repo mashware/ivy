@@ -234,6 +234,11 @@ impl Explorer {
         self.visible
     }
 
+    /// Whether Files has the keyboard: its search or its tree takes what the person types.
+    pub(crate) fn holds_keys(&self) -> bool {
+        self.keyboard
+    }
+
     fn hide(&mut self) {
         self.visible = false;
         self.keyboard = false;

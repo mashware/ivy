@@ -742,6 +742,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/control/retiring.rs",
         include_str!("../src/control/retiring.rs"),
     ),
+    (
+        "src/control/handles.rs",
+        include_str!("../src/control/handles.rs"),
+    ),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     (
         "src/injected/links.rs",
@@ -894,7 +898,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "impl Window",
-        1459,
+        1402,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
          2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \
@@ -902,7 +906,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          declared hole, the report's `search:` field and the tally's seed when a window opens; \
          handing each painting's cost over sits in `impl eframe::App`, which this count does not \
          read — **and paid five**: finding a console by name moved to `Tab`, and walking every \
-         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680. The common initial-state constructor now lives in opening::initial_window as a free function, leaving1620 with the ligature preference and report hook. Local Markdown link routing and gesture cleanup now use free functions, leaving1617. Session saving delegates to a free function, and policy synchronization and restoration add two lines, leaving 1594. The clipboard integration moves the stateless primary-press reader to a free function; the combined measured total is 1588. Agent-signal integration delegates control application and pane pumping to free functions in their owning modules; after integrating startup recovery and clipboard changes, the measured total was 1572. Project-plan routing moves the window request drain to its owning free function; the measured total is 1517. Board observation and panel deadline scheduling now share a free function; the measured total is 1499. Shared explorer routing registers tab hit targets before blocking console interactions and moves their dispatch into tab_bar, leaving1479. Integrating shared post-removal normalization leaves1475; shared tab feedback remains in the free dispatcher. Shared tool publication now uses a free report helper, leaving1470. Async launch accounting moves size negotiation to opening.rs, leaving1459.",
+         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680. The common initial-state constructor now lives in opening::initial_window as a free function, leaving1620 with the ligature preference and report hook. Local Markdown link routing and gesture cleanup now use free functions, leaving1617. Session saving delegates to a free function, and policy synchronization and restoration add two lines, leaving 1594. The clipboard integration moves the stateless primary-press reader to a free function; the combined measured total is 1588. Agent-signal integration delegates control application and pane pumping to free functions in their owning modules; after integrating startup recovery and clipboard changes, the measured total was 1572. Project-plan routing moves the window request drain to its owning free function; the measured total is 1517. Board observation and panel deadline scheduling now share a free function; the measured total is 1499. Shared explorer routing registers tab hit targets before blocking console interactions and moves their dispatch into tab_bar, leaving1479. Integrating shared post-removal normalization leaves1475; shared tab feedback remains in the free dispatcher. Shared tool publication now uses a free report helper, leaving1470. Async launch accounting moves size negotiation to opening.rs, leaving1459. Reading and closing a console by its handle became free functions of control/handles.rs, leaving 1402; the image verb's arm in control.rs sits outside this type.",
     ),
     (
         "impl Pane",

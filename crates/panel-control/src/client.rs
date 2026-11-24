@@ -292,6 +292,20 @@ impl Producer {
         self.ask(serde_json::json!({"tool": "split_close", "pane": pane}))
     }
 
+    /// Shows the image at `path` in the drawer of this pane's own console (D121).
+    ///
+    /// A path that is not UTF-8 is refused here rather than sent changed: JSON cannot carry it,
+    /// and a lossy copy would name another file.
+    pub fn open_an_image(&mut self, path: &std::path::Path) -> io::Result<Answered> {
+        let Some(path) = path.to_str() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is not UTF-8 text", path.display()),
+            ));
+        };
+        self.ask(serde_json::json!({"tool": "image_open", "path": path}))
+    }
+
     /// Writes one request line and reads its answer, **the one place that talks to the socket**.
     ///
     /// `Value`'s `Display` is the compact form, so a request can never carry a newline and break the
@@ -771,6 +785,52 @@ mod tests {
         );
         assert_eq!(producer.close_a_pane("h-1").expect("close"), Answered::Ok);
 
+        window.join().expect("the window thread finished");
+    }
+
+    crate::windows_unix_omission!(
+        an_image_open_travels_with_its_path_and_its_text_comes_back,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    /// **`image_open` has a client half, and the window's sentence comes back as text.** The
+    /// window here answers by hand; what is asserted is the path the window was handed, a refusal
+    /// worded by the window, and a malformed line the connection outlives.
+    #[cfg(unix)]
+    #[test]
+    fn an_image_open_travels_with_its_path_and_its_text_comes_back() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+        let shot = std::env::temp_dir().join("shot.png");
+        let sent = shot.clone();
+        let window = std::thread::spawn(move || {
+            for answer in [
+                Answer::Text("opened".to_owned()),
+                Answer::Refused("marks".to_owned()),
+            ] {
+                let open = inbox
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("the open");
+                let What::ImageOpen { path } = open.what else {
+                    panic!("the window was handed something else");
+                };
+                assert_eq!(path, sent);
+                let _ = open.answer.send(answer);
+            }
+        });
+        assert_eq!(
+            producer.open_an_image(&shot).expect("open"),
+            Answered::Text("opened".to_owned())
+        );
+        assert_eq!(
+            producer
+                .open_an_image(std::path::Path::new("relative.png"))
+                .expect("a refusal is an answer"),
+            Answered::Failed("an image_open's \"path\" is not absolute".to_owned())
+        );
+        assert_eq!(
+            producer.open_an_image(&shot).expect("open again"),
+            Answered::Failed("marks".to_owned())
+        );
         window.join().expect("the window thread finished");
     }
 
