@@ -69,6 +69,23 @@ jobs:
       - name: Check Windows launch helper contracts
         shell: pwsh
         run: ./packaging/windows/test-launch-contract.ps1
+      - name: Prove Ctrl+Alt text with native Spanish and US keyboards
+        shell: pwsh
+        env:
+          IVY_DISPOSABLE_RUNNER: 'yes'
+        run: |
+          cargo run --locked -p app --example windows_altgr 2>&1 | Tee-Object windows-altgr.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path windows-altgr.log -SimpleMatch 'PASS all 10 native keyboard cases')) {
+            throw 'The native keyboard witness did not finish every case.'
+          }
+      - name: Keep native Ctrl+Alt evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-altgr-evidence
+          path: windows-altgr.log
+          if-no-files-found: warn
       - name: Check native full-queue reader completion before the workspace
         shell: pwsh
         run: |

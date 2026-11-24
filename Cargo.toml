@@ -36,6 +36,7 @@ eframe = { version = "0.36", default-features = false, features = [
 # copy under `vendor/` changes one `return` into a conditional one — and, since #274, keeps Shift out
 # of the Ctrl+X that `is_cut_command` claims, so the close chord arrives as a key — and, since D115,
 # drops the Windows Shift+Delete and Ctrl+Insert arms and narrows Shift+Insert to Shift alone;
+# D122 also gives a real Windows Ctrl+Alt character precedence over shortcuts;
 # everything else is the published 0.36.1, byte for byte.
 #
 # **Why a copy in the tree and not a fork on a server:** F2.7 is the first build on macOS and Windows,
