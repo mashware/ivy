@@ -1,7 +1,8 @@
 //! Where the section headers and the cards go: a pure function of how many cards each section holds
 //! and of the width, so painting, scrolling to the selection and arrow keys read one geometry.
+use eframe::egui::{Rect, Vec2};
 #[cfg(test)]
-use eframe::egui::{Rect, pos2, vec2};
+use eframe::egui::{pos2, vec2};
 
 #[cfg(test)]
 pub(super) const GAP: f32 = 10.0;
@@ -189,4 +190,28 @@ mod tests {
         assert_eq!(vertical(&grid, 0, false), 0, "no row above");
         assert_eq!(vertical(&grid, 3, true), 3, "no row below");
     }
+}
+
+#[derive(Clone)]
+pub(super) struct Geometry {
+    pub(super) viewport: Rect,
+    pub(super) offset: Vec2,
+    pub(super) next_offset: Vec2,
+    pub(super) cards: Vec<(usize, Rect)>,
+}
+
+pub(super) fn reveal_offset(geometry: &Geometry, pane: usize, offset: Vec2) -> Vec2 {
+    let Some((_, previous)) = geometry.cards.iter().find(|(id, _)| *id == pane) else {
+        return offset;
+    };
+    let rect = previous.translate(geometry.offset - offset);
+    let mut result = offset;
+    for axis in 0..2 {
+        if rect.min[axis] < geometry.viewport.min[axis] {
+            result[axis] += rect.min[axis] - geometry.viewport.min[axis];
+        } else if rect.max[axis] > geometry.viewport.max[axis] {
+            result[axis] += rect.max[axis] - geometry.viewport.max[axis];
+        }
+    }
+    result.max(Vec2::ZERO)
 }

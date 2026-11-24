@@ -76,6 +76,41 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/board/milestones/columns.rs",
+        include_str!("../src/board/milestones/columns.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/compact.rs",
+        include_str!("../src/board/milestones/compact.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/details.rs",
+        include_str!("../src/board/milestones/details.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/projection.rs",
+        include_str!("../src/board/milestones/projection.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/state.rs",
+        include_str!("../src/board/milestones/state.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/strip.rs",
+        include_str!("../src/board/milestones/strip.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/tests.rs",
+        include_str!("../src/board/milestones/tests.rs"),
+        0,
+    ),
+    (
         "src/launch/tests.rs",
         include_str!("../src/launch/tests.rs"),
         0,

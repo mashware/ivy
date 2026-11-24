@@ -178,6 +178,9 @@ pub(crate) fn suspend(window: &mut crate::Window) {
 /// Runs only after active and background panel refresh, preserving normal PTY geometry.
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::Rect) {
     observe(window, ui.ctx());
+    if let Some((pane, path)) = window.board.surface.document_to_open.take() {
+        crate::viewer::open_document_target(window, pane, path, None);
+    }
     if !window.board.enabled || !window.board.open {
         return;
     }
@@ -256,10 +259,12 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
             .count(),
         claiming,
     };
-    filter::apply(&mut sections, &window.board.filter, |entry| {
-        let signal = signals.get(&entry.pane).copied();
-        observation::classify(entry.snapshot.document.as_deref(), signal, wall)
-    });
+    if window.board.arrangement == filter::Arrangement::ByState {
+        filter::apply(&mut sections, &window.board.filter, |entry| {
+            let signal = signals.get(&entry.pane).copied();
+            observation::classify(entry.snapshot.document.as_deref(), signal, wall)
+        });
+    }
     let panes: Vec<usize> = sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -279,7 +284,12 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
     view::paint(window, ui, area, &sections, &signals, wall, totals);
-    if let Some(target) = window.board.activate.take() {
+    if let Some(target) = window
+        .board
+        .activate
+        .take()
+        .filter(|target| window.board.order.iter().any(|slot| slot.pane == *target))
+    {
         activate(window, ui.ctx(), target);
     }
     window.board.timing.record_work(started.elapsed());

@@ -1583,10 +1583,10 @@ mod tests {
         let first_column = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "H2 · Design" => Some(t.pos.x),
+                egui::Shape::Text(t) if t.galley.text() == "H3 · Build" => Some(t.pos.x),
                 _ => None,
             })
-            .expect("the first milestone's header is painted");
+            .expect("the active milestone column header is painted");
         assert!(
             first_column >= board_left + 16.0,
             "the first milestone column touches the edge: {first_column} from {board_left}"
@@ -1911,5 +1911,41 @@ mod tests {
         let _ = std::fs::remove_file(&fixed);
         assert!(written.contains("board.arrangement = state"), "{written:?}");
         assert!(the_text_queued_up(&shapes, crate::board::HINT));
+    }
+    crate::windows_unix_omission!(
+        milestone_filter_cannot_activate_a_hidden_console,
+        "unix-only: creates POSIX shell consoles to exercise Board focus"
+    );
+    #[cfg(unix)]
+    #[test]
+    fn milestone_filter_cannot_activate_a_hidden_console() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let focus = window.active().focus;
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let toggle = text_point(&shapes, "By milestone").unwrap();
+        frame(&mut window, &ctx, click_at(toggle));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(window.board.card_rect(focus).is_some());
+        let field = text_point(&shapes, "Filter consoles").unwrap();
+        frame(&mut window, &ctx, click_at(field));
+        frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Text(
+                "unmatchable console filter witness".into(),
+            )],
+        );
+        frame(&mut window, &ctx, vec![]);
+        assert!(window.board.card_rect(focus).is_none());
+        assert_eq!(window.board.selected(), None);
+        frame(&mut window, &ctx, vec![key(egui::Key::Enter)]);
+        frame(&mut window, &ctx, vec![]);
+        frame(&mut window, &ctx, vec![key(egui::Key::Enter)]);
+        assert!(window.board.is_open());
+        assert_eq!(window.active().focus, focus);
     }
 }

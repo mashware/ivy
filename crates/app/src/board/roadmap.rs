@@ -12,6 +12,8 @@ pub(super) struct Resolved {
     pub(super) plan: Option<Arc<Plan>>,
     pub(super) source: String,
     pub(super) error: Option<String>,
+    pub(super) published_at: Option<SystemTime>,
+    pub(super) path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,6 +45,21 @@ pub(super) fn placement(panel: Option<&Panel>, plan: &Plan) -> Placement {
             .position(|i| i.id.as_ref() == Some(id))
             .map_or(Placement::Milestone(m), |i| Placement::Item(m, i)),
     }
+}
+
+fn source_path(section: &Section, plan: &Plan) -> Option<std::path::PathBuf> {
+    let source = std::path::Path::new(plan.source.as_deref()?);
+    if source.is_absolute() {
+        return Some(source.into());
+    }
+    if plan.source.as_deref()?.contains("://") {
+        return None;
+    }
+    let crate::project::Key::Repository(common) = section.key.as_ref()? else {
+        return None;
+    };
+    (common.file_name().is_some_and(|name| name == ".git"))
+        .then(|| common.parent().unwrap_or(common).join(source))
 }
 
 pub(super) fn published_source(published: &super::plans::Published, now: SystemTime) -> String {
@@ -112,6 +129,8 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
             Some(Resolved {
                 plan: Some(Arc::new(published.plan.clone())),
                 source: published_source(&published, now),
+                published_at: Some(published.published_at),
+                path: source_path(section, &published.plan),
                 error: None,
             })
         } else {
@@ -132,6 +151,8 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
                         Some(source) => format!("from {} | {source}", file.path.display()),
                         None => format!("from {}", file.path.display()),
                     },
+                    published_at: None,
+                    path: Some(file.path.clone()),
                     error: file.error.clone(),
                 })
         };
@@ -288,6 +309,8 @@ mod tests {
                 plan: Some(file_plan.clone()),
                 source: format!("from {}", path.display()),
                 error: Some(diagnostic.clone()),
+                published_at: None,
+                path: Some(path.clone()),
             }),
             ink: None,
         };
