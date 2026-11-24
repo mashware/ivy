@@ -1241,6 +1241,10 @@ const MODULES: &[(&str, &str)] = &[
         "app/examples/fonts.rs",
         include_str!("../examples/fonts.rs"),
     ),
+    (
+        "app/examples/windows_altgr.rs",
+        include_str!("../examples/windows_altgr.rs"),
+    ),
     ("app/examples/leak.rs", include_str!("../examples/leak.rs")),
     (
         "app/examples/screen_demo.rs",
@@ -1260,6 +1264,10 @@ const MODULES: &[(&str, &str)] = &[
     ("app/tests/prose.rs", include_str!("prose.rs")),
     ("app/tests/shape.rs", include_str!("shape.rs")),
     ("app/tests/vendor_patch.rs", include_str!("vendor_patch.rs")),
+    (
+        "app/tests/windows_altgr.rs",
+        include_str!("windows_altgr.rs"),
+    ),
     ("app/tests/waits.rs", include_str!("waits.rs")),
     ("app/tests/common/mod.rs", include_str!("common/mod.rs")),
     (
