@@ -7139,6 +7139,60 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
+    // Directly seeded UI screens must not race with ConPTY startup or later child output.
+    // Keep the real bridge alive so the child's reader is neither disconnected nor abandoned.
+    #[must_use]
+    pub(crate) struct IsolatedOutput {
+        _sources: Vec<(PtyOutput, std::sync::mpsc::Sender<Vec<u8>>)>,
+    }
+
+    pub(crate) fn isolate_output(window: &mut Window) -> IsolatedOutput {
+        let mut sources = Vec::new();
+        for tab in &mut window.tabs {
+            for pane in tab.panes_mut() {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let live = std::mem::replace(&mut pane.pty_output, PtyOutput::new(receiver, || {}));
+                sources.push((live, sender));
+            }
+        }
+        IsolatedOutput { _sources: sources }
+    }
+
+    #[test]
+    fn seeded_ui_fixture_keeps_pending_program_output_away_from_its_selection() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        let area = area_of(800.0);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.screen.advance(b"\x1b[2J\x1b[Hfixture\x1b[?25l");
+        pane.screen.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
+        });
+        pane.screen.extend_selection(Cell {
+            row: 0,
+            col: 6,
+            half: Half::Right,
+        });
+        assert_eq!(pane.screen.selected_text().as_deref(), Some("fixture"));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let live_output = std::mem::replace(
+            &mut pane.pty_output,
+            PtyOutput::seeded(receiver, b"\x1b[2J\x1b[H\x1b[?25h".to_vec(), || {}),
+        );
+        let _live_output = (sender, live_output);
+        let _output = isolate_output(&mut window);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        assert_eq!(
+            window.active().panes()[0].screen.selected_text().as_deref(),
+            Some("fixture"),
+            "unrelated program output changed a directly seeded UI fixture"
+        );
+    }
+
     /// Builds a pane with a program inside, with no interface framework in the way.
     ///
     /// The two halves of the frame tested here —pumping and resizing— do not touch the desktop
@@ -10197,6 +10251,7 @@ mod tests {
         let ctx = egui::Context::default();
         let area = area_of(800.0);
         let mut window = window_with("sleep 30", "sleep 30");
+        let _output = isolate_output(&mut window);
         let pane = &mut window.active_mut().panes_mut()[0];
         pane.screen.advance(b"https://example.test/painted");
         one_frame_in(&mut window, &ctx, area, Vec::new());

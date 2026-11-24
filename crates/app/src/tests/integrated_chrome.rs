@@ -4493,10 +4493,11 @@ mod tests {
         search_navigation_edits_the_query_without_reaching_the_program,
         "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
     );
-    fn search_blink_fixture() -> (Window, egui::Context) {
+    fn search_blink_fixture() -> (Window, egui::Context, crate::tests::IsolatedOutput) {
         let ctx = egui::Context::default();
         crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
+        let output = isolate_output(&mut window);
         for pane in window.active_mut().panes_mut() {
             // The field must be the only possible source of a blink deadline.
             pane.screen.advance(b"\x1b[?25l");
@@ -4506,7 +4507,7 @@ mod tests {
         let at = control(&window, &ctx, area, 0, 137.5);
         frame(&mut window, &ctx, area, click_at(at));
         assert!(window.active().panes()[0].search.is_open());
-        (window, ctx)
+        (window, ctx, output)
     }
 
     fn search_blink_delay(
@@ -4543,7 +4544,7 @@ mod tests {
 
     #[test]
     fn search_blink_deadline_covers_both_halves_and_disarms_when_closed() {
-        let (mut window, ctx) = search_blink_fixture();
+        let (mut window, ctx, _output) = search_blink_fixture();
         for millis in [100, 700, 1300] {
             let delay = search_blink_delay(
                 &mut window,
@@ -4589,7 +4590,7 @@ mod tests {
 
     #[test]
     fn search_blink_deadlines_follow_focus_enabled_state_and_the_measurement_ceiling() {
-        let (mut window, ctx) = search_blink_fixture();
+        let (mut window, ctx, _output) = search_blink_fixture();
         let age = Duration::from_millis(700);
         let active = search_blink_delay(&mut window, &ctx, age, true, false);
         assert!(window.blink.painted && !active.is_zero() && active <= Duration::from_millis(600));
