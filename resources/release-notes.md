@@ -1,6 +1,13 @@
-# Ivy 0.1.0-alpha.15
+# Ivy 0.1.0-alpha.16
 
 ## New in this alpha
+
+- Saved layouts restore even when an obsolete session-ownership file was left by another account.
+- Configured project roadmaps can be JSON documents as well as Markdown files.
+- Codex responses stay connected while an active MCP request is still streaming.
+- Console headers keep their title when an agent does not publish activity signals.
+
+## Previously in 0.1.0-alpha.15
 
 - Screenshots printed in a console open in the drawer, with zoom and pan. Each console keeps its own screenshot in an Image tab, and you can paste one from the clipboard into it.
 - Annotate a screenshot in the drawer and send it to its console. The annotation drawer stays usable when short, undoes one note at a time and offers a way out of a stuck send.
@@ -150,12 +157,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.15_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha15-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.15-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.15-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.15-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.16_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha16-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.16-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.16-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.16-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.15/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.16/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
