@@ -1851,50 +1851,53 @@ mod tests {
         );
     }
 
-    /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses the path
-    /// before the bridge asks anything** (D121), each with its own sentence: no entry is asked
-    /// whether it is a link, and the file, which does not exist, is never asked for — a bridge that
-    /// asked would answer «cannot open …» instead.
+    #[cfg(windows)]
     #[test]
-    fn a_name_the_walk_cannot_ask_refuses_the_bridge_before_anything_is_asked() {
-        let folder = std::env::temp_dir().join(format!("ivy-image-shape-{}", std::process::id()));
-        for (name, why) in [
-            ("..", "has a «..» in it; give the path without one".to_owned()),
-            (
-                "...",
-                "has «...» in it, a name made only of dots; give the path without it".to_owned(),
-            ),
-            (
-                "x.",
-                "has «x.» in it, a name that ends in a dot or a space, which Windows drops; give a \
-                 path whose names do not end in one"
-                    .to_owned(),
-            ),
-            (
-                "COM9",
-                "has «COM9» in it, which Windows reads as a device; give the path without it"
-                    .to_owned(),
-            ),
+    #[ignore = "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"]
+    fn off_windows_an_image_under_a_name_windows_would_rewrite_passes_the_bridge() {}
+
+    /// **Off Windows an image under any name a file can have passes the bridge** (D121): a `..`, a
+    /// name ending in a dot, one made only of dots and a DOS device name are walked as written,
+    /// the file last among the entries asked, and the agent's own path is what goes on.
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_an_image_under_a_name_windows_would_rewrite_passes_the_bridge() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        for name in ["x.", "...", "COM9", "sub"] {
+            std::fs::create_dir_all(folder.join(name)).unwrap();
+        }
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        for file in [
+            folder.join("x.").join("a.png"),
+            folder.join("...").join("a.png"),
+            folder.join("COM9").join("aux.png"),
+            folder.join("sub").join("..").join("con.png"),
         ] {
-            let file = folder.join(name).join("missing.png");
+            std::fs::write(&file, &png).unwrap();
             let mut asked = Vec::new();
             let said = image_to_open_with(file.to_str().unwrap(), |at: &std::path::Path| {
                 asked.push(at.to_path_buf());
                 Ok(false)
             });
-            assert_eq!(said, Err(format!("{} {why}", file.display())), "{name}");
-            assert_eq!(asked, Vec::<std::path::PathBuf>::new(), "{name}");
+            assert_eq!(said, Ok(file.clone()), "{}", file.display());
+            assert_eq!(asked.last(), Some(&file), "{}", file.display());
         }
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
-    /// **On a real Windows disk, a junction named with a trailing dot is refused by the bridge**,
-    /// given plainly or verbatim: asked as the end of a path, Win32 would read `x.` as `x`, which is
-    /// not there, while the open passes through the junction. It is made through `\\?\`, the only
-    /// spelling that keeps the dot, and the test first checks the junction is there under that name,
-    /// so a setup that lost the dot cannot pass for a refusal.
+    /// **On a real Windows disk, a junction named with a trailing dot is never opened through by
+    /// the bridge** (D121). Given verbatim, the one spelling keeps the dot, so the walk asks the
+    /// junction itself and refuses it. Given plainly, the spelling is whatever Win32 makes of the
+    /// text — `x` without its dot, which is not there, so the read fails; or the junction, refused —
+    /// and either way the walk and the read name the same entries. It is made through `\\?\`, the
+    /// only spelling that keeps the dot, and the test first checks the junction is there under that
+    /// name, so a setup that lost the dot cannot pass for a refusal.
     #[cfg(windows)]
     #[test]
-    fn an_image_through_a_junction_named_with_a_trailing_dot_is_refused_by_the_bridge_on_windows() {
+    fn an_image_through_a_junction_named_with_a_trailing_dot_is_not_opened_by_the_bridge_on_windows()
+     {
         let folder = std::env::temp_dir().join(format!("ivy-image-dot-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         let plain = folder.join("plain");
@@ -1918,14 +1921,23 @@ mod tests {
             "{} is not a junction",
             junction.display()
         );
-        let ends = "a name that ends in a dot or a space, which Windows drops; give a path whose \
-                    names do not end in one";
-        for through in [folder.join("x.").join("a.png"), junction.join("a.png")] {
-            assert_eq!(
-                image_to_open(through.to_str().unwrap()),
-                Err(format!("{} has «x.» in it, {ends}", through.display()))
-            );
-        }
+        let link = |through: &std::path::Path| {
+            format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                through.display()
+            )
+        };
+        let verbatim = junction.join("a.png");
+        assert_eq!(
+            image_to_open(verbatim.to_str().unwrap()),
+            Err(link(&verbatim))
+        );
+        let plain = folder.join("x.").join("a.png");
+        let said = image_to_open(plain.to_str().unwrap()).unwrap_err();
+        assert!(
+            said.starts_with(&format!("cannot open {}: ", plain.display())) || said == link(&plain),
+            "{said}"
+        );
         // Removed by the name that keeps the dot: a plain one would name `x`, and leave the junction.
         std::fs::remove_dir(&junction).unwrap();
         let _ = std::fs::remove_dir_all(&folder);

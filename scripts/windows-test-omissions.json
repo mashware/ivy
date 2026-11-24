@@ -1,6 +1,11 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "viewer::load::tests::off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened",
+    "reason": "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "agent_setup::tests::refuses_symlink_destination",
     "reason": "unix-only: requires Unix symlinks to plant a competing destination"
   },
@@ -1732,6 +1737,11 @@
   },
   {
     "binary": "panel-control/panel-mcp:bin",
+    "name": "tests::off_windows_an_image_under_a_name_windows_would_rewrite_passes_the_bridge",
+    "reason": "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
+  },
+  {
+    "binary": "panel-control/panel-mcp:bin",
     "name": "tests::idle_revocation_disconnects_the_producer_without_another_tool_call",
     "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
   },
@@ -1889,6 +1899,11 @@
     "binary": "panel-control/panel_control:lib",
     "name": "image::tests::off_windows_the_one_spelling_is_the_path_as_given",
     "reason": "unix-only: off Windows the spelling is the path as given; Windows has its own spelling witness"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "image::tests::off_windows_a_name_windows_would_rewrite_is_walked_as_written",
+    "reason": "unix-only: off Windows no name is rewritten; Windows has its own spelling witness"
   },
   {
     "binary": "panel-control/panel_control:lib",

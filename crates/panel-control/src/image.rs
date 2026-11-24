@@ -86,14 +86,12 @@ fn is_volume(component: &OsStr) -> bool {
 /// link, so nothing is asked through one.
 ///
 /// **The walk has to ask the entries the open passes through**, and Win32 rewrites some names by
-/// the text, without asking the disk. So a path that holds one is refused, on every platform,
-/// before anything is asked (D121): a `..`, which is collapsed, so in `C:\repo\gone\..\shots\a.png`
-/// the open reaches `C:\repo\shots` past an entry the walk stopped at because it is not there; and
-/// the names [`misread_name`] refuses, which Win32 rewrites only as the last segment of a path —
-/// how the walk asks each entry — while the open passes through them as written. Without those, an
-/// entry that is not there stops the walk without a refusal, since the open that follows has to
-/// pass through that same entry and fails; any other error refuses, because the walk can no longer
-/// tell what is there.
+/// the text, without asking the disk: a `..` is collapsed, and a name that ends a path loses a
+/// trailing dot or space, or is read as a device. So both walk and open take [`one_spelling`]'s
+/// path, where Windows has already done those rewrites once and is told to do no more (D121). An
+/// entry that is not there then stops the walk without a refusal, since the open that follows
+/// passes through that same entry and fails; any other error refuses, because the walk can no
+/// longer tell what is there.
 ///
 /// `is_link` answers for one entry without following it: [`refused_link`] in the bridge and the
 /// window, and a stand-in in the tests, so the walk and both callers are pinned where no entry is
@@ -103,17 +101,6 @@ pub fn no_link_on_the_way(
     path: &Path,
     mut is_link: impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Result<PathBuf, Refused> {
-    for component in path.components() {
-        let why = match component {
-            Component::ParentDir => "has a «..» in it; give the path without one".to_owned(),
-            Component::Normal(name) => match misread_name(name) {
-                Some(why) => why,
-                None => continue,
-            },
-            _ => continue,
-        };
-        return Err(Refused::Text(format!("{} {why}", path.display())));
-    }
     let spelled = one_spelling(path)?;
     let mut walked = PathBuf::new();
     for component in spelled.components() {
@@ -208,8 +195,8 @@ fn verbatim_prefix(prefix: Prefix<'_>) -> Result<std::ffi::OsString, Elsewhere> 
 /// kind is kept because the window words the two apart for the person reading its drawer (D121).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
-    /// By the path's text, before anything is asked: a `..` or a name Win32 rewrites. The sentence
-    /// already says what to send instead.
+    /// By the path's text, before anything is asked: on Windows, a path that cannot be made whole,
+    /// or that once made whole no longer starts with a drive or a volume GUID.
     Text(String),
     /// A link on the way, or an entry the walk could not ask whether it is one.
     Link(String),
@@ -220,56 +207,6 @@ impl From<Refused> for String {
         match refused {
             Refused::Text(why) | Refused::Link(why) => why,
         }
-    }
-}
-
-/// Why one name on an agent's path is one Win32 reads as another entry when it ends a path, as
-/// the agent is told it, or `None` (D121, review round 5). A name made only of dots, or ending in a
-/// dot or a space, loses those as the last segment — `x.` is asked as `x`, `...` as the folder
-/// it sits in — and a reserved device name is asked as the device, «COM9» as «\\.\COM9». The
-/// order is the sentence's: `...` is told it is only dots, and `CON.` that it ends in a dot.
-///
-/// The bytes are read, not the text, so a name that is not UTF-8 is still judged: the ASCII
-/// bytes and the superscript digits keep their encoding in both platforms' forms.
-fn misread_name(name: &OsStr) -> Option<String> {
-    let bytes = name.as_encoded_bytes();
-    let shown = String::from_utf8_lossy(bytes);
-    if bytes.iter().all(|&b| b == b'.') {
-        return Some(format!(
-            "has «{shown}» in it, a name made only of dots; give the path without it"
-        ));
-    }
-    if matches!(bytes.last(), Some(b'.' | b' ')) {
-        return Some(format!(
-            "has «{shown}» in it, a name that ends in a dot or a space, which Windows drops; \
-             give a path whose names do not end in one"
-        ));
-    }
-    if names_a_device(bytes) {
-        return Some(format!(
-            "has «{shown}» in it, which Windows reads as a device; give the path without it"
-        ));
-    }
-    None
-}
-
-/// Whether `name` is a reserved DOS device name, with or without an extension, in any case: what
-/// comes before its first dot (or a colon), with the spaces before that dot dropped as Win32 drops
-/// them.
-fn names_a_device(name: &[u8]) -> bool {
-    let stem = name
-        .split(|&b| b == b'.' || b == b':')
-        .next()
-        .unwrap_or(name);
-    let end = stem.iter().rposition(|&b| b != b' ').map_or(0, |at| at + 1);
-    let stem = stem[..end].to_ascii_uppercase();
-    match stem.as_slice() {
-        b"CON" | b"PRN" | b"AUX" | b"NUL" => true,
-        [b'C', b'O', b'M', digit @ ..] | [b'L', b'P', b'T', digit @ ..] => {
-            // 0–9, or the superscripts ¹ ² ³ (U+00B9, U+00B2, U+00B3) in UTF-8.
-            matches!(digit, [b'0'..=b'9'] | [0xC2, 0xB9 | 0xB2 | 0xB3])
-        }
-        _ => false,
     }
 }
 
@@ -436,7 +373,9 @@ mod tests {
         (said, asked)
     }
 
-    /// `path` as the walk spells it.
+    /// `path` as the walk spells it. Each entry of a table is spelled on its own, as the end of a
+    /// path, so on Windows a name Win32 rewrites there is kept out of the portable tables: the
+    /// Windows test of those names compares against the spelling of the whole path instead.
     fn spelled(path: &str) -> PathBuf {
         one_spelling(Path::new(path)).unwrap()
     }
@@ -504,128 +443,102 @@ mod tests {
         assert_eq!(asked, paths(&["/home", "/home/me"]));
     }
 
-    /// **A `..` anywhere refuses the path before any entry is asked**: Windows collapses it by the
-    /// text, so a missing entry before it would end the walk while the open reaches the link after
-    /// it. Here `/home/gone` is not there and `/home/me` is a link.
-    #[test]
-    fn a_path_with_a_parent_step_is_refused_before_anything_is_asked() {
-        for path in [
-            "/home/gone/../me/a.png",
-            "/home/me/a.png/..",
-            "/../home/me/a.png",
-        ] {
-            let (said, asked) = walk(path, &[("/home/gone", gone), ("/home/me", link)]);
-            assert_eq!(
-                said,
-                Err(Refused::Text(format!(
-                    "{path} has a «..» in it; give the path without one"
-                ))),
-                "{path}"
-            );
-            assert_eq!(asked, paths(&[]), "{path}");
-        }
-    }
+    crate::windows_unix_omission!(
+        off_windows_a_name_windows_would_rewrite_is_walked_as_written,
+        "unix-only: off Windows no name is rewritten; Windows has its own spelling witness"
+    );
 
-    /// **A name Win32 reads as another entry at the end of a path refuses the path before any
-    /// entry is asked**, on every platform, wherever it sits: the walk asks each entry as the end
-    /// of a path, so it would ask another entry than the open passes through. Each row's name is
-    /// a folder on the way and, in a second path, the file; the sentence says which kind it is.
+    /// **Off Windows nothing rewrites a path's text, so no name in it is refused** (D121): a `..`,
+    /// a name ending in a dot, one made only of dots, and a DOS device name are walked entry by
+    /// entry as written, and the path comes back as given. Each row's `/home/gone` is not there, so
+    /// a row whose `..` is walked stops there, as the open after it fails there too.
+    #[cfg(not(windows))]
     #[test]
-    fn a_name_windows_reads_as_another_entry_is_refused_before_anything_is_asked() {
-        let dots = "a name made only of dots; give the path without it";
-        let ends = "a name that ends in a dot or a space, which Windows drops; give a path whose \
-                    names do not end in one";
-        let device = "which Windows reads as a device; give the path without it";
-        for (name, why) in [
-            ("...", dots),
-            ("....", dots),
-            ("x.", ends),
-            ("x ", ends),
-            ("a.png.", ends),
-            ("..x.", ends),
-            // Both a device and ending in a dot: the dot is what the sentence names.
-            ("CON.", ends),
-            ("CON", device),
-            ("con", device),
-            ("Aux.png", device),
-            ("NUL.tar.gz", device),
-            ("prn", device),
-            ("con .txt", device),
-            ("COM0", device),
-            ("com9", device),
-            ("LPT0", device),
-            ("lpt9.png", device),
-            ("COM¹", device),
-            ("LPT²", device),
-            ("com³.png", device),
-            ("COM1:x", device),
-        ] {
-            for path in [format!("/home/{name}/a.png"), format!("/home/me/{name}")] {
-                let (said, asked) = walk(&path, &[("/home/me", link)]);
-                assert_eq!(
-                    said,
-                    Err(Refused::Text(format!("{path} has «{name}» in it, {why}"))),
-                    "{path}"
-                );
-                assert_eq!(asked, paths(&[]), "{path}");
-            }
-        }
-    }
-
-    /// **A name that only looks like one of those is walked as any other**: a device name is a
-    /// whole stem, and dots or spaces anywhere but at the end change nothing Win32 reads.
-    #[test]
-    fn a_name_that_only_looks_like_one_windows_rewrites_is_walked() {
-        for name in [
-            "CONSOLE", "COM10", "COM", "LPT", "NULL", "a.NUL", ".CON", "COM⁴", "COM¹0", ".hidden",
-            "a..b", " a", "x .png", "AUXX.png",
-        ] {
-            let path = format!("/home/{name}/a.png");
-            let (said, asked) = walk(&path, &[]);
-            assert_eq!(said, Ok(spelled(&path)), "{path}");
-            assert_eq!(
-                asked,
-                paths(&["/home", &format!("/home/{name}"), &path]),
-                "{path}"
-            );
-        }
-    }
-
-    /// A name that is not text is still judged by its bytes: one that ends in a dot is refused,
-    /// with what is not text shown replaced. Each platform spells such a name its own way — a
-    /// byte that is not UTF-8, a lone surrogate — so only the sentence around it is compared.
-    #[test]
-    fn a_name_that_is_not_text_is_still_judged() {
-        #[cfg(unix)]
-        let name: std::ffi::OsString =
-            <OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"\xFFx.").to_owned();
-        #[cfg(windows)]
-        let name: std::ffi::OsString = std::os::windows::ffi::OsStringExt::from_wide(&[
-            0xD800,
-            u16::from(b'x'),
-            u16::from(b'.'),
-        ]);
-        assert!(name.to_str().is_none());
-        let path = Path::new("/home").join(&name);
-        let Err(Refused::Text(said)) = no_link_on_the_way(&path, |_| panic!("nothing is asked"))
-        else {
-            panic!("a name ending in a dot is refused by its text");
-        };
-        assert!(
-            said.starts_with(&format!("{} has «\u{FFFD}", path.display())),
-            "{said}"
-        );
-        assert!(
-            said.ends_with(
-                "x.» in it, a name that ends in a dot or a space, which Windows drops; give a \
-                 path whose names do not end in one"
+    fn off_windows_a_name_windows_would_rewrite_is_walked_as_written() {
+        for (path, asked_up_to) in [
+            ("/home/gone/../me/a.png", &["/home", "/home/gone"][..]),
+            (
+                "/home/me/../a.png",
+                &["/home", "/home/me", "/home/me/..", "/home/me/../a.png"][..],
             ),
-            "{said}"
-        );
+            (
+                "/home/x./a.png",
+                &["/home", "/home/x.", "/home/x./a.png"][..],
+            ),
+            (
+                "/home/.../a.png",
+                &["/home", "/home/...", "/home/.../a.png"][..],
+            ),
+            (
+                "/home/x /a.png",
+                &["/home", "/home/x ", "/home/x /a.png"][..],
+            ),
+            (
+                "/home/COM9/aux.png",
+                &["/home", "/home/COM9", "/home/COM9/aux.png"][..],
+            ),
+            (
+                "/home/me/con.png",
+                &["/home", "/home/me", "/home/me/con.png"][..],
+            ),
+        ] {
+            let (said, asked) = walk(path, &[("/home/gone", gone)]);
+            assert_eq!(said, Ok(PathBuf::from(path)), "{path}");
+            assert_eq!(asked, paths(asked_up_to), "{path}");
+        }
     }
 
-    /// Without a `..`, an entry that is not there leaves the path to the open, which has to pass
-    /// through it and fails, and nothing under it is asked.
+    /// **On Windows a name Win32 rewrites is walked in the one spelling, and that spelling is what
+    /// comes back to be opened**: every entry asked is the spelling cut short, under `\\?\`, so
+    /// no entry is asked by a name Win32 would read as another. Where the rewrite is certain the
+    /// spelling is pinned; for the rest only that walk and open agree. A device name at the end is
+    /// either read as the device — refused, as not a file on a drive — or, where Windows no longer
+    /// does that behind a folder, walked like any other name.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_walk_asks_the_one_spelling_of_a_name_win32_rewrites() {
+        for (given, pinned) in [
+            (r"C:\shots\gone\..\a.png", Some(r"\\?\C:\shots\a.png")),
+            (r"C:\shots\a.png.", Some(r"\\?\C:\shots\a.png")),
+            (r"C:\shots\a.png ", Some(r"\\?\C:\shots\a.png")),
+            (r"C:\shots\x.\a.png", None),
+            (r"C:\shots\...\a.png", None),
+            (r"C:\shots\COM9", None),
+        ] {
+            let mut asked = Vec::new();
+            let said = no_link_on_the_way(Path::new(given), |at: &Path| {
+                asked.push(at.to_path_buf());
+                Ok(false)
+            });
+            let spelled = match said {
+                Ok(spelled) => spelled,
+                Err(Refused::Text(why)) if given.ends_with("COM9") => {
+                    assert!(why.ends_with("which is not a file on a drive"), "{why}");
+                    assert_eq!(asked, Vec::<PathBuf>::new(), "{given}");
+                    continue;
+                }
+                Err(why) => panic!("{given}: {why:?}"),
+            };
+            let text = spelled.as_os_str().to_str().unwrap();
+            assert!(text.starts_with(r"\\?\C:\shots"), "{given}: {text}");
+            if let Some(pinned) = pinned {
+                assert_eq!(text, pinned, "{given}");
+            }
+            let mut cut = PathBuf::new();
+            let mut cuts = Vec::new();
+            for component in spelled.components() {
+                cut.push(component);
+                if !matches!(component, Component::Prefix(_) | Component::RootDir) {
+                    cuts.push(cut.as_os_str().to_owned());
+                }
+            }
+            let asked: Vec<_> = asked.iter().map(|at| at.as_os_str().to_owned()).collect();
+            assert_eq!(asked, cuts, "{given}");
+        }
+    }
+
+    /// An entry that is not there leaves the path to the open, which has to pass through it and
+    /// fails, and nothing under it is asked.
     #[test]
     fn an_entry_that_is_not_there_is_left_to_the_open() {
         let (said, asked) = walk("/home/gone/a.png", &[("/home/gone", gone)]);

@@ -243,7 +243,8 @@ fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<P
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
     // The enforcement of what the bridge only advises, for an agent's open. A person's own open is
     // not walked (D121), so a refusal over a link tells the person reading it that open is theirs to
-    // make; one over the path's text already says what to send instead, and is left at that.
+    // make; one over the path's text — what Windows made of it is no file on a drive — is left at
+    // that.
     // An agent's path is opened in the walk's own spelling (D121), since the walk is only worth the
     // entries it asked if they are the ones opened; a person's is opened as given.
     let opened = match links {
@@ -967,39 +968,45 @@ mod tests {
         );
     }
 
-    /// **A `..`, or a name Windows reads as another entry at the end of a path, refuses an agent's
-    /// image before anything is asked** (D121), with the walk's own sentence and nothing after it:
-    /// it already says what to send instead, and Files is no answer to it. No entry is asked whether
-    /// it is a link, and the file, which does not exist, is never opened — a worker that opened it
-    /// would say «Cannot open …» instead.
+    crate::windows_unix_omission!(
+        off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened,
+        "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
+    );
+
+    /// **Off Windows an agent's image is opened under any name a file can have** (D121): a `..`, a
+    /// name ending in a dot, one made only of dots and a DOS device name are walked as written and
+    /// the image is decoded, the file last among the entries asked.
+    #[cfg(not(windows))]
     #[test]
-    fn a_name_the_walk_cannot_ask_refuses_an_agents_image_before_anything_is_asked() {
+    fn off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened() {
+        use std::sync::Mutex;
+        static ASKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
         let temp = Temp::new();
-        for (name, why) in [
-            ("..", "has a «..» in it; give the path without one".to_owned()),
-            (
-                "...",
-                "has «...» in it, a name made only of dots; give the path without it".to_owned(),
-            ),
-            (
-                "x.",
-                "has «x.» in it, a name that ends in a dot or a space, which Windows drops; give a \
-                 path whose names do not end in one"
-                    .to_owned(),
-            ),
-            (
-                "COM9",
-                "has «COM9» in it, which Windows reads as a device; give the path without it"
-                    .to_owned(),
-            ),
+        for folder in ["x.", "...", "COM9", "sub"] {
+            fs::create_dir(temp.0.join(folder)).unwrap();
+        }
+        let shot = image::RgbaImage::from_fn(4, 2, |x, _| image::Rgba([x as u8, 9, 30, 255]));
+        for path in [
+            temp.0.join("x.").join("a.png"),
+            temp.0.join("...").join("a.png"),
+            temp.0.join("COM9").join("aux.png"),
+            temp.0.join("sub").join("..").join("con.png"),
         ] {
-            let missing = temp.0.join(name).join("missing.png");
-            let asked: IsLink = |at| panic!("{} was asked", at.display());
+            shot.save_with_format(&path, image::ImageFormat::Png)
+                .unwrap();
+            ASKED.lock().unwrap().clear();
+            let recorded: IsLink = |at| {
+                ASKED.lock().unwrap().push(at.to_path_buf());
+                Ok(false)
+            };
+            let picture = decode_image(&path, 4096, Some(recorded));
             assert_eq!(
-                decode_image(&missing, 4096, Some(asked)).err().unwrap(),
-                format!("{} {why}", missing.display()),
-                "{name}"
+                picture.map(|p| p.original.dimensions()),
+                Ok((4, 2)),
+                "{}",
+                path.display()
             );
+            assert_eq!(ASKED.lock().unwrap().last(), Some(&path));
         }
     }
 

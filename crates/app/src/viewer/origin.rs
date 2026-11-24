@@ -284,8 +284,8 @@ pub(crate) struct Room<'a> {
 /// console and nothing else holds the screen or the keys. The keyboard stays where it was. Refused
 /// over that console's unsent marks, with nothing shown and nothing said in the drawer, because the
 /// agent is the one asking. The file itself is not read here: the worker that decodes it walks the
-/// path first, refusing on every platform a `..` or a name Windows rewrites and, on Windows, a
-/// path through a link — a walk a person's own open is spared (D121).
+/// path first and, on Windows, refuses a path through a link, then opens the spelling it walked —
+/// a walk a person's own open is spared (D121).
 pub(crate) fn open_for_an_agent(
     window: &mut Window,
     pane: usize,
