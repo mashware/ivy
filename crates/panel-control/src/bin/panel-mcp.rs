@@ -1906,13 +1906,16 @@ mod tests {
         png.extend_from_slice(b"rest");
         std::fs::write(plain.join("a.png"), png).unwrap();
         let junction = std::path::PathBuf::from(format!(r"\\?\{}\x.", folder.display()));
+        let temporary_junction = folder.join("junction");
         let made = std::process::Command::new("cmd")
             .args(["/C", "mklink", "/J"])
-            .arg(&junction)
+            .arg(&temporary_junction)
             .arg(&plain)
             .output()
             .unwrap();
         assert!(made.status.success(), "{made:?}");
+        // Rename to the verbatim destination to preserve the dot independently of mklink's parsing.
+        std::fs::rename(&temporary_junction, &junction).unwrap();
         assert!(
             std::fs::symlink_metadata(&junction)
                 .unwrap()
