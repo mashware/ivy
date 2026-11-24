@@ -201,7 +201,12 @@ impl Fixture {
     }
 
     fn read(&mut self) -> Value {
-        read(&self.output, &mut self.buffered)
+        read(
+            &self.pty,
+            &self.output,
+            &mut self.buffered,
+            "fixture output",
+        )
     }
     fn command(&mut self, request: Value, mode: &str) -> Value {
         let mut command = json!({"request":request});
@@ -224,15 +229,24 @@ impl Fixture {
     }
 }
 
-fn read(output: &Receiver<Vec<u8>>, buffered: &mut Vec<u8>) -> Value {
+fn read(pty: &Pty, output: &Receiver<Vec<u8>>, buffered: &mut Vec<u8>, stage: &str) -> Value {
+    let mut diagnostic = Vec::new();
     loop {
         if let Some(end) = buffered.iter().position(|byte| *byte == b'\n') {
             let line: Vec<_> = buffered.drain(..=end).collect();
             if let Ok(json) = serde_json::from_slice(&line) {
                 return json;
             }
+            diagnostic.extend(line);
         } else {
-            buffered.extend(output.recv_timeout(Duration::from_secs(5)).unwrap());
+            buffered.extend(output.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|error| {
+                panic!(
+                    "{stage}: fixture output ended before a JSON reply ({error:?}); PTY ending: {:?}\n{}{}",
+                    pty.ending(),
+                    String::from_utf8_lossy(&diagnostic),
+                    String::from_utf8_lossy(buffered)
+                )
+            }));
         }
     }
 }
@@ -255,7 +269,37 @@ fn control(
     let mut line = serde_json::to_vec(&command).unwrap();
     line.push(b'\n');
     pty.write(&line).unwrap();
-    read(output, buffered)["reply"].clone()
+    read(
+        pty,
+        output,
+        buffered,
+        command["request"]["tool"]
+            .as_str()
+            .unwrap_or("fixture control"),
+    )["reply"]
+        .clone()
+}
+
+#[test]
+fn fixture_failure_preserves_its_traceback_stage_and_pty_ending() {
+    let mut f = Fixture::new(Client::Claude);
+    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        control(&mut f.pty, &f.output, &mut f.buffered, json!({}))
+    }))
+    .expect_err("a malformed fixture command must terminate its Python process");
+    let message = failure.downcast_ref::<String>().unwrap();
+    for expected in [
+        "fixture control:",
+        "Disconnected",
+        "Traceback (most recent call last):",
+        "KeyError: 'request'",
+        "PTY ending: Some(EndedWell)",
+    ] {
+        assert!(
+            message.contains(expected),
+            "missing {expected:?}: {message}"
+        );
+    }
 }
 
 #[test]
