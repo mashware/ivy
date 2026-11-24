@@ -194,7 +194,7 @@ fn render(
                     );
                     assert!(rect.width() <= width + 0.01);
                     let visible = rect.intersect(ui.clip_rect());
-                    assert!(canvas.contains_rect(visible));
+                    assert!(!visible.is_positive() || canvas.contains_rect(visible));
                 },
             );
             assert!(ui.min_rect().width() <= 1440.0);
@@ -609,4 +609,186 @@ fn roadmap_source_hits_are_limited_to_the_visible_header() {
         );
     })
     .drop_without_applying_deltas();
+}
+
+#[test]
+fn group_separators_end_before_the_next_project() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    let plan = fixture();
+    let section = section(Vec::new(), plan.clone());
+    let roles = Roles::of(&crate::theme::Theme::default());
+    let mut bottom = 0.0;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+            ..Default::default()
+        },
+        |ui| {
+            paint_plan_with(
+                ui,
+                &section,
+                &plan,
+                &roles,
+                &mut reader,
+                &Default::default(),
+                &column,
+                &mut |_, _, _, _, _| {},
+            );
+            bottom = ui.next_widget_position().y;
+            ui.label("Next project witness");
+        },
+    );
+    let vertical: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::LineSegment { points, stroke }
+                if points[0].x == points[1].x && stroke.color == roles.line =>
+            {
+                Some(points)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(!vertical.is_empty());
+    assert!(
+        vertical
+            .iter()
+            .all(|points| points.iter().all(|p| p.y <= bottom)),
+        "separator crosses the next project at {bottom}"
+    );
+    output.drop_without_applying_deltas();
+}
+
+#[test]
+fn card_filters_keep_item_targets_and_claiming_columns_yield_to_show_all() {
+    let section = section(
+        vec![
+            entry(1, Some("H2"), Some("AEAT-SEAL"), None),
+            entry(2, Some("H3"), Some("TERRITORIES"), Some("wait")),
+            entry(3, None, None, Some("block")),
+            entry(4, None, None, None),
+        ],
+        fixture(),
+    );
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    render(&ctx, &section, &mut reader, &Default::default());
+    let items = |reader: &Reader| {
+        reader
+            .targets
+            .iter()
+            .filter_map(|(target, _)| matches!(target, Target::Item(..)).then_some(target.clone()))
+            .collect::<Vec<_>>()
+    };
+    let before = items(&reader);
+    assert!(!before.is_empty());
+    render(
+        &ctx,
+        &section,
+        &mut reader,
+        &crate::board::filter::Filter {
+            query: "no console has this label".into(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        items(&reader),
+        before,
+        "text narrowing changed roadmap items"
+    );
+    assert!(
+        !reader
+            .targets
+            .iter()
+            .any(|(target, _)| matches!(target, Target::Card(_)))
+    );
+
+    let claiming = crate::board::filter::Filter {
+        claiming_only: true,
+        ..Default::default()
+    };
+    render(&ctx, &section, &mut reader, &claiming);
+    let headers = |reader: &Reader| {
+        reader
+            .targets
+            .iter()
+            .filter_map(|(target, _)| match target {
+                Target::Header(key) => Some(key.milestone.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(headers(&reader), [Identity::from("H3"), Identity::Outside]);
+    let cards = |reader: &Reader| {
+        reader
+            .targets
+            .iter()
+            .filter_map(|(target, _)| match target {
+                Target::Card(pane) => Some(*pane),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(cards(&reader), [2, 3]);
+    assert_eq!(
+        reader
+            .targets
+            .iter()
+            .filter(|(target, _)| matches!(target, Target::Strip(_)))
+            .count(),
+        14
+    );
+    reader.apply(&Action::ShowAll(true));
+    render(&ctx, &section, &mut reader, &claiming);
+    assert_eq!(
+        headers(&reader).len(),
+        15,
+        "Show all must restore every milestone plus off-plan"
+    );
+    assert_eq!(
+        cards(&reader),
+        [2, 3],
+        "Show all must preserve the claiming card filter"
+    );
+}
+
+#[test]
+fn all_done_message_keeps_unmatched_consoles_before_outside_items() {
+    let plan = panel_contract::plan::parse_document_noting(
+        r#"{"milestones":[{"id":"H0","title":"Complete","items":[{"text":"Done task","mark":"done"}]}],"outside":[{"text":"Company certificate","mark":"pending"}]}"#,
+    ).unwrap().0;
+    let section = section(vec![entry(8, None, None, None)], plan);
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    let shapes = render(&ctx, &section, &mut reader, &Default::default());
+    assert!(
+        shapes
+            .iter()
+            .any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
+        if text.galley.text() == "All milestones done · Show all to review"))
+    );
+    let card = reader
+        .targets
+        .iter()
+        .position(|(target, _)| *target == Target::Card(8))
+        .unwrap();
+    let outside = reader
+        .targets
+        .iter()
+        .position(|(target, _)| {
+            matches!(target,
+        Target::Item(key, 0) if key.milestone == Identity::Outside)
+        })
+        .unwrap();
+    assert!(
+        card < outside,
+        "outside work preceded the unmatched console"
+    );
+    assert!(!reader.targets.iter().any(|(target, _)| matches!(target,
+        Target::Header(key) if key.milestone == Identity::from("H0"))));
 }

@@ -635,8 +635,8 @@ IDs, with milestone-level fallback for an unknown item and Off the plan for an a
 milestone. Off the plan consoles precede outside tasks. Plan-less projects use a responsive grid
 capped at four columns; unreadable plans state their error. The full reader rules are below under
 Board milestone reading.
-Every card opens with its state: the claim's pill and words for waiting, stuck and finished, the
-column's mark for working and idle, and the observed wait in minutes. A project with a configured
+By state cards open with their effective state, including Working/Idle marks; compact By milestone
+cards show a band for claims only, with an observed wait duration when known. A project with a configured
 roadmap file and no console keeps its columns there; a published plan shows while its project has a
 console. Published plans override configured files as a
 whole; retirement reveals the file again. Plain-string plan items retain their text and count toward

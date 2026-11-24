@@ -139,18 +139,15 @@ pub(in crate::board) fn paint(
         .max_width(viewport_width)
         .show(ui, |ui| {
             ui.set_min_width(total);
-            ui.horizontal_top(|ui| {
+            let mut boundaries = Vec::new();
+            let row = ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (n, (spec, width)) in specs.iter().zip(&widths).enumerate() {
                     if n > 0 {
                         ui.add_space(20.0);
                         if specs[n - 1].group != spec.group {
                             let at = ui.next_widget_position();
-                            ui.painter().vline(
-                                at.x + 11.0,
-                                at.y..=at.y + ui.available_height().min(800.0),
-                                Stroke::new(1.0, roles.line),
-                            );
+                            boundaries.push(at.x + 11.0);
                             ui.add_space(24.0);
                         }
                     }
@@ -332,6 +329,10 @@ pub(in crate::board) fn paint(
                     }
                 }
             });
+            for x in boundaries {
+                ui.painter()
+                    .vline(x, row.response.rect.y_range(), Stroke::new(1.0, roles.line));
+            }
         });
     if reveal.is_some() {
         reader.reveal = None;
