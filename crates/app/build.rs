@@ -5,7 +5,6 @@ fn main() {
     }
 }
 
-#[cfg(windows)]
 fn windows_resources() {
     let version = std::env::var("CARGO_PKG_VERSION").expect("package version");
     let part = |name| -> u64 {
@@ -27,9 +26,4 @@ fn windows_resources() {
         .set_version_info(winresource::VersionInfo::FILEVERSION, numeric)
         .set_version_info(winresource::VersionInfo::PRODUCTVERSION, numeric);
     resource.compile().expect("compile Ivy Windows resources");
-}
-
-#[cfg(not(windows))]
-fn windows_resources() {
-    panic!("Windows resources require a Windows build host");
 }
