@@ -518,6 +518,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/title_typography.rs"),
     ),
     (
+        "app/src/tests/windows_fixture.rs",
+        include_str!("../src/tests/windows_fixture.rs"),
+    ),
+    (
         "app/src/git_process.rs",
         include_str!("../src/git_process.rs"),
     ),
