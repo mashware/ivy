@@ -50,7 +50,12 @@ mod tests {
     fn write(dir: &PanelDir, text: &str, at: SystemTime) {
         let path = dir.path().join(PANEL_FILE);
         std::fs::write(&path, text).unwrap();
-        std::fs::File::open(path).unwrap().set_modified(at).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
     }
 
     #[test]

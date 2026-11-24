@@ -108,8 +108,24 @@ jobs:
       - name: Test the Windows workspace against its known failures
         shell: pwsh
         run: |
-          python scripts/windows-known-failures.py
+          python scripts/windows-known-failures.py 2>&1 | Tee-Object windows-workspace.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/windows-fixture-tests.py windows-workspace.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove native Windows fixture regressions with mutations
+        shell: pwsh
+        run: |
+          python scripts/windows-fixture-mutations.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Keep Windows fixture test and mutation evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-fixture-evidence
+          path: |
+            windows-workspace.log
+            target/windows-fixture-mutations/*.log
+          if-no-files-found: warn
       - name: Check compiler-listed Unix-only omissions
         shell: pwsh
         run: |

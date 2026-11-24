@@ -283,7 +283,9 @@ mod tests {
     fn published(document: &str, minutes: u64) -> crate::panel::PanelState {
         let dir = panel_contract::PanelDir::create().expect("dir");
         crate::panel::tests::publish(&dir, document);
-        std::fs::File::open(dir.path().join(panel_contract::PANEL_FILE))
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.path().join(panel_contract::PANEL_FILE))
             .expect("open")
             .set_modified(
                 std::time::SystemTime::now() - std::time::Duration::from_secs(minutes * 60),
