@@ -37,6 +37,9 @@ fi
 if [ "$1 $2 $3" = 'app-server daemon start' ]; then
     echo daemon >> "$CALLS"
     printf '%s\0' "${PANEL_ID-unset}" "${PANEL_DIR-unset}" > "$DAEMON_ENV"
+    if [ -n "${IVY_NATIVE_RESPONSIBILITY_RECORD-}" ]; then
+        /usr/bin/python3 -c 'import ctypes,json,os,sys; query=ctypes.CDLL(None).responsibility_get_pid_responsible_for_pid; query.argtypes=[ctypes.c_int]; query.restype=ctypes.c_int; json.dump({"daemon_pid":os.getppid(),"responsible":query(os.getpid())},open(sys.argv[1],"w"))' "$IVY_NATIVE_RESPONSIBILITY_RECORD" || exit 92
+    fi
     printf '%s' "$DAEMON_JSON"
     exit 0
 fi
@@ -109,6 +112,43 @@ exit 37
     }
     fn diagnostic(output: &Output) -> String {
         String::from_utf8_lossy(&output.stderr).into_owned()
+    }
+
+    // macOS responsibility is kernel state; the Python supplied with Xcode queries it
+    // in the actual daemon-start fixture, so bypassing the launch correction fails this test.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ordinary_daemon_start_separates_native_responsibility_but_explicit_admin_keeps_it() {
+        let client = Client::new();
+        let record = client.dir.join("native-responsibility.json");
+        for (args, separate) in [
+            (&["app-server", "daemon", "start"][..], false),
+            (&[][..], true),
+        ] {
+            let output = client
+                .command(args, REMOTE_HELP)
+                .env("IVY_NATIVE_RESPONSIBILITY_RECORD", &record)
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(if separate { 37 } else { 0 }),
+                "{}",
+                diagnostic(&output)
+            );
+            let captured: serde_json::Value =
+                serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+            if separate {
+                assert_eq!(captured["responsible"], captured["daemon_pid"]);
+            } else {
+                assert_ne!(
+                    captured["responsible"], captured["daemon_pid"],
+                    "control already disclaimed; native regression oracle is unavailable"
+                );
+            }
+        }
+        assert_eq!(client.fields("daemon-env"), ["unset", "unset"]);
+        assert_eq!(client.calls(), "daemon\nhelp\ndaemon\n");
     }
 
     #[test]

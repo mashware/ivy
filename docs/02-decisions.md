@@ -10321,6 +10321,37 @@ process scans or per-frame inspection (unbounded or frame-blocking work without 
 
 ## D92 — Codex mobile and panel tools share one conversation owner
 
+**Amended 23 November 2026 — #224.** On macOS, the bounded official
+`app-server daemon start` launch disclaims Ivy's native process responsibility at exec.
+The reporter closed Ivy and confirmed that its main process had exited, while two
+official Codex daemon processes still reported Ivy's executable as their responsible
+path. The surviving MCP bridges instead reported ChatGPT. A daemon's responsible PID
+being itself after its original parent exits does not remove the cached application
+attribution, so PPID 1 or `setsid` does not establish an independent application lifetime.
+
+Only this persistent-service launch uses the native adapter. Argument/environment storage,
+absolute PATH candidates and spawn attributes are prepared before fork; the final hook replaces
+the already-prepared child with `posix_spawn(POSIX_SPAWN_SETEXEC)`, retaining its PID,
+stdio, directory, signal setup and the existing timeout/reaping path. The dynamically
+resolved `responsibility_spawnattrs_setdisclaim` SPI follows LLVM's spawn-time interface;
+an unavailable capability or failed setup refuses the launch rather than silently
+claiming separation. Ordinary shells, remote TUIs, proxies and explicit admin commands
+retain their launch behavior. New permission requests belong to the resulting service's
+native identity; no permission is granted or authentication setting changed by Ivy.
+
+The official shared server remains the conversation owner. Attaching to an existing
+server does not repair its old attribution, restart it or stop other clients. A server
+already attributed to Ivy can retain the Dock entry until it is explicitly restarted.
+Native tests must observe effective responsibility through the actual launch path;
+cross-compilation does not prove the packaged Dock outcome or mobile interoperability.
+Those acceptance checks remain required on macOS.
+
+**Discarded:** killing all Codex daemons or bundled MCP helpers on exit (disrupts shared
+and external clients); adding `--no-daemon` (loses live mobile ownership); merely
+detaching the Unix session (does not clear native attribution); relocating the MCP
+bridge (the observed bridges belonged to ChatGPT); installing a new persistent launch
+service (introduces lifecycle and installation behavior beyond this fix).
+
 **Amended 23 November 2026 — #223.** Relay health counts inbound byte progress, including an incomplete WebSocket frame that yields through read timeouts. Counting only complete messages falsely closed a valid slowly delivered MCP inventory response after the five-second probe deadline: a Pong cannot interrupt the bytes of an already-started frame. Idle connections still receive the five-second Ping probe, and an unanswered probe with no inbound progress still closes after five further seconds. A per-connection failure emits its fixed, payload-free reason before closing; conversation contents, protocol payloads and authentication tokens are absent.
 
 The unchanged relay reproduced the cutoff at 10.045 seconds with 100-byte writes every 500 ms; the same response sent immediately and a healthy twelve-second wait succeeded. Separately, actual Codex 0.171.0 reproduced both reported unavailable/read-only messages after an induced disconnect on a fresh main conversation: its server rejected reattachment because no rollout existed before the first turn. This establishes the portable failure paths, not native macOS incident identity. Byte-progress regression tests use a real decoder and virtual time; silence and route-proof semantics remain unchanged.
