@@ -265,3 +265,27 @@ pub(super) fn widths(available: f32, columns: &[(bool, bool)], separators: usize
         })
         .collect()
 }
+
+/// Visible indices are in roadmap order, so one merge counts the hidden items in linear time.
+/// Full expansion has no hidden items and never walks the item list for its summary.
+pub(super) fn hidden_counts(
+    items: &[panel_contract::plan::Item],
+    visible: &[usize],
+    full: bool,
+) -> (usize, usize) {
+    if full {
+        return (0, 0);
+    }
+    let mut shown = visible.iter().peekable();
+    let (mut pending, mut done) = (0, 0);
+    for (index, item) in items.iter().enumerate() {
+        if shown.peek().is_some_and(|shown| **shown == index) {
+            shown.next();
+        } else if item.mark == Some(Mark::Done) {
+            done += 1;
+        } else {
+            pending += 1;
+        }
+    }
+    (pending, done)
+}

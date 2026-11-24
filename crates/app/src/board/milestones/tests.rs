@@ -792,3 +792,79 @@ fn all_done_message_keeps_unmatched_consoles_before_outside_items() {
     assert!(!reader.targets.iter().any(|(target, _)| matches!(target,
         Target::Header(key) if key.milestone == Identity::from("H0"))));
 }
+
+#[test]
+fn hidden_summary_counts_only_omitted_items_and_full_expansion_has_none() {
+    let items = (0..10_000)
+        .map(|i| panel_contract::plan::Item {
+            text: format!("Task {i}"),
+            mark: Some(if i % 2 == 0 {
+                Mark::Done
+            } else {
+                Mark::Pending
+            }),
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        projection::hidden_counts(&items, &[1, 5000, 9999], false),
+        (4998, 4999)
+    );
+    assert_eq!(projection::hidden_counts(&items, &[], false), (5000, 5000));
+    assert_eq!(
+        projection::hidden_counts(&items, &(0..items.len()).collect::<Vec<_>>(), true),
+        (0, 0)
+    );
+}
+
+#[test]
+fn diagnostics_emit_once_per_current_plan_snapshot_not_once_per_session() {
+    let mut reader = Reader::default();
+    let mut a = fixture();
+    a.milestones[0].depends_on = vec!["unknown-A".into()];
+    let mut b = a.clone();
+    b.milestones[0].depends_on = vec!["unknown-B".into()];
+    let messages = |plan: &Plan| Projection::new(plan, &place(&[], plan), &column).diagnostics;
+    let da = messages(&a);
+    let db = messages(&b);
+    assert_eq!(reader.new_diagnostics("p", &a, &da), da);
+    assert!(reader.new_diagnostics("p", &a.clone(), &da).is_empty());
+    assert_eq!(
+        reader.new_diagnostics("q", &a, &da),
+        da,
+        "projects deduplicate independently"
+    );
+    assert_eq!(reader.new_diagnostics("p", &b, &db), db);
+    assert!(reader.new_diagnostics("p", &b, &db).is_empty());
+    assert_eq!(
+        reader.new_diagnostics("p", &a, &da),
+        da,
+        "returning snapshot must not inherit obsolete warnings"
+    );
+}
+
+#[test]
+fn publication_age_over_a_day_uses_wait_ink_while_fresh_age_is_muted() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let roles = Roles::of(&crate::theme::Theme::default());
+    for (hours, expected) in [(2, roles.tx3), (25, roles.wait)] {
+        let mut section = section(Vec::new(), fixture());
+        let source = section.roadmap.as_mut().unwrap();
+        source.source = format!("published {hours}h ago");
+        source.published_at =
+            Some(std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600));
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(1440.0);
+            project_header(ui, &section, Claims::default(), true, &roles);
+        });
+        let actual = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == format!("published {hours}h ago") => {
+                Some(text.fallback_color)
+            }
+            _ => None,
+        });
+        output.drop_without_applying_deltas();
+        assert_eq!(actual, Some(expected));
+    }
+}

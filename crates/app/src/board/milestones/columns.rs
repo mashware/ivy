@@ -13,7 +13,7 @@ use crate::{
     theme::Roles,
 };
 use eframe::egui::{self, FontId, Rect, Stroke, pos2, vec2};
-use panel_contract::{Mark, plan::Plan};
+use panel_contract::plan::Plan;
 
 struct ColumnSpec {
     index: Option<usize>,
@@ -50,13 +50,8 @@ pub(in crate::board) fn paint(
         .map(|(i, c)| (strip::key(&project, plan, i).milestone, *c))
         .collect();
     reader.reconcile(&project, &classes);
-    for diagnostic in &projection.diagnostics {
-        if reader
-            .diagnostics
-            .insert((project.clone(), diagnostic.clone()))
-        {
-            eprintln!("Board: {diagnostic}");
-        }
+    for diagnostic in reader.new_diagnostics(&project, plan, &projection.diagnostics) {
+        eprintln!("Board: {diagnostic}");
     }
     strip::paint(ui, &project, plan, &projection, reader, roles);
     let p = reader.project(&project);
@@ -236,23 +231,13 @@ pub(in crate::board) fn paint(
                                         );
                                     }
                                 }
-                                let hidden: Vec<_> = m
-                                    .items
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| !visible.contains(i))
-                                    .map(|(_, item)| item)
-                                    .collect();
-                                if spec.full || !hidden.is_empty() {
-                                    let done = hidden
-                                        .iter()
-                                        .filter(|i| i.mark == Some(Mark::Done))
-                                        .count();
-                                    let pending = hidden.len() - done;
+                                let (pending, done) =
+                                    super::projection::hidden_counts(&m.items, &visible, spec.full);
+                                if spec.full || pending + done > 0 {
                                     let label = if spec.full {
                                         "Show less ▴".into()
                                     } else if spec.collapsed {
-                                        format!("{} ▸", hidden.len())
+                                        format!("{} ▸", pending + done)
                                     } else {
                                         [
                                             if pending > 0 {

@@ -53,6 +53,8 @@ pub(super) struct Project {
     pub(super) full: HashSet<Identity>,
     pub(super) show_all: bool,
     classes: HashMap<Identity, Class>,
+    diagnostic_plan: Option<panel_contract::plan::Plan>,
+    diagnostics: HashSet<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::board) enum Target {
@@ -70,7 +72,6 @@ pub(in crate::board) struct Reader {
     pub(in crate::board) reveal: Option<Key>,
     pub(in crate::board) reveal_pane: Option<usize>,
     pub(in crate::board) zone: FocusZone,
-    pub(super) diagnostics: HashSet<(String, String)>,
     all: bool,
 }
 impl Reader {
@@ -94,6 +95,24 @@ impl Reader {
             }
         }
         reader.classes = classes.iter().cloned().collect();
+    }
+    /// Keep warnings only for the current bounded plan snapshot, not every plan seen this session.
+    pub(super) fn new_diagnostics(
+        &mut self,
+        project: &str,
+        plan: &panel_contract::plan::Plan,
+        diagnostics: &[String],
+    ) -> Vec<String> {
+        let reader = self.project(project);
+        if reader.diagnostic_plan.as_ref() != Some(plan) {
+            reader.diagnostics.clear();
+            reader.diagnostic_plan = Some(plan.clone());
+        }
+        diagnostics
+            .iter()
+            .filter(|message| reader.diagnostics.insert((*message).clone()))
+            .cloned()
+            .collect()
     }
     pub(in crate::board) fn show_all(&self) -> bool {
         self.all
@@ -216,7 +235,6 @@ impl Default for Reader {
             reveal: None,
             reveal_pane: None,
             zone: FocusZone::Cards,
-            diagnostics: HashSet::new(),
             all: false,
         }
     }
