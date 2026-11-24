@@ -1194,6 +1194,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../examples/hinting.rs"),
         4,
     ),
+    (
+        "examples/windows_altgr.rs",
+        include_str!("../examples/windows_altgr.rs"),
+        2,
+    ),
     ("examples/leak.rs", include_str!("../examples/leak.rs"), 59),
     (
         "examples/screen_demo.rs",

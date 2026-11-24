@@ -20,11 +20,11 @@
 //! `is_paste_command`'s Shift+Insert arm requires Shift without Ctrl or Alt. Those three functions
 //! are cut out of the residual hash and pinned whole, line by line, below.
 //!
-//! **No test in this repository, or any that could be added to it, can exercise that fix
-//! behaviourally.** `winit::event::KeyEvent` carries `pub(crate) platform_specific`
+//! **A synthetic KeyEvent test cannot exercise the adapter behaviourally.** `winit::event::KeyEvent` carries `pub(crate) platform_specific`
 //! (`winit-0.30.13/src/event.rs:655`), private to the `winit` crate itself — not to `egui-winit`,
 //! which sits one crate away and has no more access to that field than this one does — so no test
-//! outside `winit` can construct the event that triggers the bug. And
+//! outside `winit` can construct the event that triggers the bug. D122 adds a Windows
+//! native example using real SendInput and a live event loop instead. And
 //! `on_window_event` demands a real `&winit::window::Window`, which winit only
 //! ever hands out from a live event loop bound to a running compositor. Every existing paste test
 //! in this crate builds `egui::Event::Paste` by hand via `enqueue()` and starts **after** the layer
@@ -43,6 +43,10 @@
 //! b) the vendored copy's paste branch still gates its `return` on having pushed a paste, instead
 //!    of upstream's unconditional one — and its three clipboard predicates hold exactly D33's and
 //!    D115's arms;
+//! D122 adds a separately fingerprinted Ctrl+Alt dispatcher and pins its Windows call before
+//! key and clipboard dispatch. Portable effect tests exercise that dispatcher; the native
+//! `windows_altgr.rs` example tests actual OS events, with installed-terminal manual checks separate.
+//!
 //! c) nothing else in the vendored copy has been *edited* — every file but `src/lib.rs` is locked by
 //!    a content hash, and `src/lib.rs` is locked **outside** its patched places, so a change
 //!    anywhere else in the crate is caught even though this test never re-reads the crates.io copy;
@@ -208,6 +212,12 @@ fn source_fingerprint(bytes: &[u8]) -> (usize, u64) {
 fn unpatched_source(source: &str) -> String {
     let source = String::from_utf8(canonical_source(source.as_bytes()))
         .expect("normalizing line endings preserves UTF-8");
+    let source = source.replacen("#[cfg(target_os = \"windows\")]\nmod altgr;\n\n", "", 1);
+    let dispatch = brace_block(
+        &source,
+        "        #[cfg(target_os = \"windows\")]\n        {",
+    );
+    let source = source.replacen(&format!("{dispatch}\n\n"), "", 1);
     let residual = source.replacen(paste_branch(&source), "", 1);
     let residual = residual.replacen(cut_command(&residual), "", 1);
     let residual = residual.replacen(copy_command(&residual), "", 1);
@@ -255,6 +265,7 @@ const LOCKED_FILES: &[(&str, u64, usize)] = &[
     ("LICENSE-APACHE", 0x519795a3ca7bc6f0, 10850),
     ("LICENSE-MIT", 0x98e169e17925e47e, 1092),
     ("README.md", 0x869047775257e977, 571),
+    ("src/altgr.rs", 0xc0b8c9edb44d60f1, 751),
     ("src/clipboard.rs", 0xc134c090beecb79a, 5801),
     ("src/dropped_file.rs", 0x6e83ae380deac032, 425),
     ("src/safe_area.rs", 0x29c8f9ee6133a5ad, 2394),
@@ -542,4 +553,41 @@ fn the_vendored_paste_command_takes_shift_insert_only_with_shift_alone() {
         "`is_paste_command` is not upstream's with its Windows Shift+Insert arm narrowed to Shift \
          alone (D115)"
     );
+}
+
+fn check_windows_altgr_dispatch(source: &str) {
+    let source = String::from_utf8(canonical_source(source.as_bytes())).unwrap();
+    let body = brace_block(
+        &source,
+        "fn on_keyboard_input(&mut self, event: &winit::event::KeyEvent) {",
+    );
+    let dispatch = brace_block(body, "        #[cfg(target_os = \"windows\")]\n        {");
+    assert_eq!(
+        code_lines(dispatch),
+        [
+            "#[cfg(target_os = \"windows\")]",
+            "{",
+            "use winit::platform::modifier_supplement::KeyEventExtModifierSupplement as _;",
+            "if altgr::consume(",
+            "event.state == winit::event::ElementState::Pressed,",
+            "self.modifiers,",
+            "event.text_with_all_modifiers(),",
+            "&mut self.egui_input.events,",
+            ") {",
+            "return;",
+            "}",
+            "}",
+        ]
+    );
+    assert!(body.find(dispatch).unwrap() < body.find("let winit::event::KeyEvent {").unwrap());
+    assert!(source.contains("#[cfg(target_os = \"windows\")]\nmod altgr;"));
+}
+
+#[test]
+fn windows_altgr_dispatch_precedes_clipboard_and_key_events() {
+    let source = fs::read_to_string(repo().join("vendor/egui-winit/src/lib.rs")).unwrap();
+    let lf = source.replace("\r\n", "\n");
+    for source in [&lf, &lf.replace('\n', "\r\n")] {
+        check_windows_altgr_dispatch(source);
+    }
 }

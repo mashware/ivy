@@ -7760,6 +7760,8 @@ so F2.7 names the observer it uses on each of them.
   | `Shift+Insert` | text on the clipboard | the text, pasted |
   | `Shift+Insert` | an image on the clipboard | nothing at all |
   | `AltGr+2`, `AltGr+´` | Spanish layout, a shell prompt | `@`, `{` |
+  | left `Ctrl+Alt+2` | Spanish layout, a shell prompt | `@` once; native verification pending for #206 |
+  | `Ctrl+Alt+A` | US layout, a shell prompt | no text; native verification pending for #206 |
   | `AltGr+Q`, `AltGr+7` | German layout, a shell prompt | `@`, `{` |
   | `Ctrl+Insert`, then `Shift+Delete` | text selected in a Settings field | copied; then cut |
   | `Ctrl+Insert` | lines selected in the drawer's code viewer | copied |
@@ -12292,3 +12294,32 @@ published figure changes. The glyph's read sits inside the tab bar's and the hea
 | A denylist of path shapes (review rounds 4–5) | It refused ordinary Linux/macOS names and still missed Windows rewrites (`CONIN$` was already missing). Three review rounds showed that checking partial paths and opening the whole path in different spellings cannot be repaired by enumerating names. One normalized verbatim spelling makes the two operations agree. |
 | Asking each folder with a trailing separator | Avoided trailing-dot and space rewrites, but did not establish the same rule for device names. |
 | Walking a person's own open too | The person chose the path; the rule is about an agent's word. |
+
+
+## D122 — Windows Ctrl+Alt system characters take precedence over shortcuts
+
+**Decided for #206.** On Windows, a pressed Ctrl+Alt gesture with nonempty printable
+`text_with_all_modifiers()` becomes exactly one text event before clipboard and key shortcuts.
+Missing text, control characters and releases retain the existing key path. Real AltGr retains
+its existing path, as do Linux and macOS. The modifier supplement is the character Windows
+actually emitted, including composition; `KeyEvent::text` can reconstruct a plain letter after
+removing Ctrl and is not evidence that a shortcut typed a character.
+
+**Why.** Left Ctrl+left Alt+2 on a Spanish layout retains Ctrl in winit, so the previous adapter
+suppressed its `@`. Simply allowing Ctrl+Alt whenever ordinary text is present would type `a`
+for Ctrl+Alt+A on a US layout. Sending a key event as well could invoke an application or
+clipboard shortcut before the character is inserted.
+
+**Discarded.** A table of keyboard layouts and key positions would duplicate Windows' input
+translation. Comparing against `key_without_modifiers()` confuses Shift, Caps Lock and dead-key
+composition with alternate-character input. Accepting ordinary nonempty `KeyEvent::text` admits
+the US shortcut fallback. Altering only the terminal's text filter cannot recover text discarded
+by the adapter and leaves other text widgets inconsistent.
+
+**Evidence boundary.** Portable regressions exercise the actual dispatcher and terminal byte
+translation. A disposable Windows witness supplies real input through winit and the production
+adapter for Spanish, German, Polish and US layouts; it records actual character messages and emitted
+bytes. It is not a hand check of the complete installed terminal and does not replace D53's
+Windows rows. Neither native execution nor those manual rows are claimed passed by this change
+before the corresponding run is observed. The existing vendor residual fingerprint is retained;
+only the new module and narrowly pinned Windows call are excluded and checked separately.
