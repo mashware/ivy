@@ -50,7 +50,7 @@ assert all(a.get('jsonrpc') == '2.0' and 'error' not in a and not a['result'].ge
 assert answers[0]['result']['serverInfo']['version'] == os.environ['IVY_SMOKE_VERSION'], answers[0]
 assert {t['name'] for t in answers[1]['result']['tools']} == {
     'panel_set', 'panel_get', 'panel_patch', 'panel_retire',
-    'plan_set', 'plan_get', 'plan_retire', 'split_open', 'split_read', 'split_close'}, answers[1]
+    'plan_set', 'plan_get', 'plan_retire', 'split_open', 'split_read', 'split_close', 'image_open'}, answers[1]
 helper_env = dict(os.environ)
 if not runtime:
     helper_env.pop('PANEL_ID', None)
