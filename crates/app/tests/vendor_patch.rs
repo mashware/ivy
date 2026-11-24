@@ -555,9 +555,8 @@ fn the_vendored_paste_command_takes_shift_insert_only_with_shift_alone() {
     );
 }
 
-#[test]
-fn windows_altgr_dispatch_precedes_clipboard_and_key_events() {
-    let source = fs::read_to_string(repo().join("vendor/egui-winit/src/lib.rs")).unwrap();
+fn check_windows_altgr_dispatch(source: &str) {
+    let source = String::from_utf8(canonical_source(source.as_bytes())).unwrap();
     let body = brace_block(
         &source,
         "fn on_keyboard_input(&mut self, event: &winit::event::KeyEvent) {",
@@ -582,4 +581,13 @@ fn windows_altgr_dispatch_precedes_clipboard_and_key_events() {
     );
     assert!(body.find(dispatch).unwrap() < body.find("let winit::event::KeyEvent {").unwrap());
     assert!(source.contains("#[cfg(target_os = \"windows\")]\nmod altgr;"));
+}
+
+#[test]
+fn windows_altgr_dispatch_precedes_clipboard_and_key_events() {
+    let source = fs::read_to_string(repo().join("vendor/egui-winit/src/lib.rs")).unwrap();
+    let lf = source.replace("\r\n", "\n");
+    for source in [&lf, &lf.replace('\n', "\r\n")] {
+        check_windows_altgr_dispatch(source);
+    }
 }
