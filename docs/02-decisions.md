@@ -12333,3 +12333,26 @@ bytes. It is not a hand check of the complete installed terminal and does not re
 Windows rows. Neither native execution nor those manual rows are claimed passed by this change
 before the corresponding run is observed. The existing vendor residual fingerprint is retained;
 only the new module and narrowly pinned Windows call are excluded and checked separately.
+
+## D123 — Windows GUI launch and background processes do not create a console
+
+**Decided for #171.** The installed Windows GUI uses the graphical subsystem, embeds its icon and
+version resources, and captures startup diagnostics without depending on an inherited console.
+Background capability and Git commands are started without creating console windows.
+
+**Why.** Starting a graphical application or its background helpers from Explorer must not flash an
+extra console. The executable itself must identify Ivy to Windows, while failures still need a
+persistent diagnostic destination when no standard error exists.
+
+**Discarded.** Hiding a console after startup permits a visible flash; launching Ivy with a detached
+or no-window flag in its test would hide a subsystem regression. Inspecting only the PE subsystem
+cannot establish that the installed application starts and responds, and counting windows by process
+ID cannot establish whether a process owns a console.
+
+**Evidence boundary.** The disposable Windows installer trial starts installed Ivy with ordinary
+creation flags from a detached host, checks console attachment, responsiveness and clean closure,
+and compares the installed icon resources and version strings. A console child is the positive
+control for the inspector. Named native tests and individual flag-removal mutations exercise both
+background launch paths. The existing interactive launch trial remains independent. These witnesses
+cover the inspected process and named paths, not every possible visible process; native results are
+not claimed until the Windows CI run completes.
