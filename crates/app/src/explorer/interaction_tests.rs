@@ -995,7 +995,7 @@ fn enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer() {
     assert!(window.explorer.visible, "Files stays beside the drawer");
 }
 
-/// The child paints these witnesses so ConPTY's resize repaint preserves the same contents.
+/// Wait for both terminal cells and painted glyphs, including live child-output witnesses.
 fn wait_for_console_text(
     window: &mut crate::Window,
     ctx: &egui::Context,
@@ -1030,13 +1030,13 @@ fn wait_for_console_text(
         }
         assert!(
             Instant::now() < deadline,
-            "child did not paint {expected:?}: {painted:?}"
+            "console did not paint {expected:?}: {painted:?}"
         );
         std::thread::yield_now();
     }
 }
 
-fn paint_child_path(
+fn paint_console_path(
     window: &mut crate::Window,
     ctx: &egui::Context,
     area: egui::Rect,
@@ -1046,9 +1046,8 @@ fn paint_child_path(
     window
         .pane_called(pane)
         .unwrap()
-        .pty
-        .write(format!("{path}\n").as_bytes())
-        .unwrap();
+        .screen
+        .advance(format!("\x1b[?25l\x1b[2J\x1b[H{path}").as_bytes());
     wait_for_console_text(window, ctx, area, pane, path, true);
 }
 
@@ -1065,10 +1064,7 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
         )
         .unwrap();
     }
-    let command = format!(
-        "cd '{}' && while IFS= read -r line; do printf '\\033[?25l\\033[2J\\033[H%s' \"$line\"; done",
-        directory.0.display()
-    );
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, area, vec![]);
@@ -1077,9 +1073,16 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
     let target = directory.0.join("folder/entry-60.rs");
     let other = window.active().panes()[1].name;
     window.active_mut().focus = other;
-    #[cfg(windows)]
-    wait_for_console_text(&mut window, &ctx, area, pane, "ivy-fixture-reading", false);
-    paint_child_path(&mut window, &ctx, area, pane, "folder/entry-60.rs");
+    // This test owns the screen contents; child startup and resize output are unrelated input.
+    // Keep a pending clear to prove the fixture stays isolated through the real frame pump.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let live_output = std::mem::replace(
+        &mut window.pane_called(pane).unwrap().pty_output,
+        crate::PtyOutput::seeded(receiver, b"\x1b[2J\x1b[H".to_vec(), || {}),
+    );
+    let _live_output = (sender, live_output);
+    let _output = crate::tests::isolate_output(&mut window);
+    paint_console_path(&mut window, &ctx, area, pane, "folder/entry-60.rs");
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
     let console = window
@@ -1119,7 +1122,7 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
         ("./folder", "entry-00.rs"),
         ("./missing.rs", "Path unavailable"),
     ] {
-        paint_child_path(&mut window, &ctx, area, pane, text);
+        paint_console_path(&mut window, &ctx, area, pane, text);
         let console = window
             .pane_called(pane)
             .unwrap()
