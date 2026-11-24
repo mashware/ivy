@@ -742,19 +742,17 @@ replaces it.
   before it asks for the file, and the window refuses again before its worker reads, where the
   refusal is painted in the drawer followed by `Open it from Files to see it yourself.` A person's
   own open of the same file is not refused, and other platforms refuse no link (**D121**).
-- **No `..`.** On every platform a path with a `..` in it is refused with `<path> has a «..» in it;
-  give the path without one`, before anything is asked of the disk: Windows collapses it by the
-  text, so it could step past a missing folder onto a link (**D121**).
-- **No name Windows rewrites.** On every platform, and before anything is asked of the disk, a path
-  is refused when a folder or file on it has a name made only of dots (`<path> has «<name>» in it,
-  a name made only of dots; give the path without it`), a name that ends in a dot or a space
-  (`<path> has «<name>» in it, a name that ends in a dot or a space, which Windows drops; give a
-  path whose names do not end in one`), or a reserved device name — CON, PRN, AUX, NUL, COM0–9,
-  LPT0–9 and COM¹–³, LPT¹–³, in any case, with or without an extension (`<path> has «<name>» in
-  it, which Windows reads as a device; give the path without it`). The check for links asks each
-  entry as the end of a path, where Windows reads those names as another entry (**D121**). Where
-  the window refuses a `..` or one of these names, the drawer paints the sentence alone, without the
-  `Open it from Files` sentence that follows a refusal over a link.
+- **One Windows spelling for checks and read.** Before disk access, the bridge and the window's
+  image worker each make the agent's path absolute by text and rebuild it under `\\?\`, allowing
+  only a drive or volume-GUID prefix. Every entry checked for links and the file read use that
+  same spelling, so Windows does not reinterpret a partial path differently from the whole one
+  (**D121**). A `..` is resolved before the walk; dots, spaces and device names follow Windows'
+  interpretation once. A resulting device/share prefix refuses with `<path> is read by Windows
+  as <whole>, which is not a file on a drive` / `which is not on this machine`; failure to make
+  the path absolute refuses with `<path> cannot be read as a Windows path: <error>`. These text
+  refusals are painted alone, without `Open it from Files`. Linux and macOS keep the agent's
+  path as given, including `..` and names Windows would rewrite. The path on the wire stays the
+  original absolute path; a person's own open is unchanged.
 - **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
   person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
   image — it opened on it, or its Image tab was already on show for that console — and `opened; the

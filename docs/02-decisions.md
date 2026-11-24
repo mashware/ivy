@@ -12113,34 +12113,34 @@ link, and an agent's image is not opened through one`. A link is a name-surrogat
 which is the rule std's `is_symlink` applies: a symbolic link, a junction, or any other tag that
 names a path. A reparse point that names nothing — a cloud placeholder, deduplication,
 compression — passes, as D108 lets it pass: it holds the file's own data behind its filter, and
-refusing it could refuse images a sync client such as OneDrive keeps as placeholders. **A path
-with a `..` in it is refused before anything is asked** (`<path> has a «..» in it; give the path
-without one`), on every platform (review round 4): Windows collapses `..` by the text, without
-asking the disk, so in `C:\repo\gone\..\shots\a.png` the walk would stop at the missing `gone`
-while the open reached `shots`, a link, and an agent has no reason to send one. **The names Win32
-rewrites at the end of a path are refused the same way** (review round 5), because the walk asks
-each entry as the end of a path while the open passes through it as written: a name made only of
-dots (`...` is asked as the folder it sits in), one that ends in a dot or a space (`x.` is asked as
-`x`), and a reserved device name — CON, PRN, AUX, NUL, COM0–9 and LPT0–9 with the superscripts
-¹ ² ³ as well, in any case, with or without an extension — which is asked as the device. Each kind
-has its sentence, naming the name and what to send instead. That is a junction named `x.` or
-COM9, made through `\\?\`, that the walk could not see. The price is images an agent cannot open
-by such a name on any platform, judged small. How likely such a junction was is no reason to let
-it through: git refuses those names in a checkout on Windows (`core.protectNTFS`) and Windows'
-archive tools refuse them when unpacking, so the two sources this rule names — a cloned repository,
-an unpacked archive — do not bring one, and what is left is local code making it through `\\?\`,
-which could reach a share by itself; but the walk's claim is that it asks what the open passes
-through, and with these names it did not. Discarded: asking each folder with a trailing
-separator, which turns the last-segment rewrites off for the dots and spaces but could not be
-shown to for the device names. Without those, an
-entry that is not there stops the walk and leaves the path to the open, which has to pass through
-that same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through
-a link: <error>`), because a folder the walk may not look into can still be passed through by the
-open. The drawer follows the window's refusal over a link, or over an entry it could not ask, with
-«Open it from Files to see it yourself.»: the person's own open is theirs to make. A refusal by the
-path's text — a `..` or a name Win32 rewrites — is painted as the agent is told it, with nothing
-after it (review round 5): its sentence already says what to send instead, and a second
-instruction beside it read as two. Where a link leads is never read. The bridge walks before
+refusing it could refuse images a sync client such as OneDrive keeps as placeholders.
+
+**One spelling for checking and opening** (owner, 23 November 2026: «Una sola ruta»).
+On Windows the agent's path is made absolute by text with `std::path::absolute`
+(`GetFullPathNameW`, without disk access), checked again for a drive or volume-GUID prefix, and
+rebuilt under `\\?\`. Both the root-down walk and the read use that returned spelling: Win32
+cannot rewrite the last segment of each partial path differently from the whole path. This
+replaces the name denylist from review rounds 4–5. A `..` is resolved before the walk; a trailing
+dot or space and a device name are interpreted once by Windows, and the resulting spelling is
+what is checked and read. If the resulting prefix names a device or another machine it is
+refused before disk access with `<path> is read by Windows as <whole>, which is not a file on a
+drive` or `which is not on this machine`; an error making it absolute says `<path> cannot be read
+as a Windows path: <error>`. Paths already under `\\?\` keep their literal names, with dot
+components resolved while rebuilding that one spelling. The original path remains the tool's
+address and the text in diagnostics; the window repeats the same spelling and walk before its
+own read.
+
+On Linux and macOS the path stays as given: `..`, `aux.png`, `con.png`, dots and spaces in a
+file name are no longer rejected because Windows would interpret them differently. An entry
+that is not there stops the walk and leaves the path to the open, which must pass through the
+same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through a
+link: <error>`). The drawer follows the window's refusal over a link, or over an entry it could
+not ask, with «Open it from Files to see it yourself.»: the person's own open is theirs to make.
+A refusal while spelling the path is painted alone: it already tells the agent what Windows made
+of the path. The one-spelling rule was checked against Rust's path and Windows namespace
+implementation, but its Windows runtime witnesses still need a real Windows run.
+
+Where a link leads is never read. The bridge walks before
 its `stat`, and the image worker walks before it opens, **only for an agent's open**: the open
 carries who named the path to the worker, and a person's own click or Files open is not walked. A
 link swapped in between the walk and the open is not caught, the race D108 also leaves. Elsewhere
@@ -12188,4 +12188,6 @@ published figure changes. The glyph's read sits inside the tab bar's and the hea
 | Following each link and checking where it leads (review round 2) | Review round 3 found three ways around it: an error looking at an entry ended the walk as a pass, a raw NT target such as `\GLOBAL??\UNC\…` came back rootless and was read as local, and a relative target was joined to the folder the link was spelled in rather than the one it really sits in. A screenshot folder reached through a junction to another local drive is refused now; the owner took that cost over a walk that has to model Windows' resolution. |
 | Canonicalizing the path and testing the result | `canonicalize` opens the path, following each link, so it reaches the host it was meant to detect. |
 | Refusing every reparse point, `FILE_ATTRIBUTE_REPARSE_POINT` | A cloud placeholder carries it, so every agent's image a sync client such as OneDrive keeps would be refused. Which reparse tags a real OneDrive folder carries has not been looked at on Windows. |
+| A denylist of path shapes (review rounds 4–5) | It refused ordinary Linux/macOS names and still missed Windows rewrites (`CONIN$` was already missing). Three review rounds showed that checking partial paths and opening the whole path in different spellings cannot be repaired by enumerating names. One normalized verbatim spelling makes the two operations agree. |
+| Asking each folder with a trailing separator | Avoided trailing-dot and space rewrites, but did not establish the same rule for device names. |
 | Walking a person's own open too | The person chose the path; the rule is about an agent's word. |
