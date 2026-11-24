@@ -1,4 +1,4 @@
-# Ivy 0.1.0-alpha.20
+# Ivy 0.1.0-alpha.21
 
 ## New in this alpha
 
@@ -172,12 +172,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.20_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha20-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.20-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.20-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.20-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.21_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha21-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.21-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.21-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.21-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.20/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.21/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.

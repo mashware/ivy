@@ -182,6 +182,8 @@ fn directory_and_input_fixtures_set_cwd_and_record_received_utf8_without_bom() {
     assert_eq!(std::fs::read(&received).unwrap(), b"");
     let text = "first ü\nsecond line\n";
     pane.pty.write(text.as_bytes()).unwrap();
+    // Directory preparation must not consume the actual byte-delivery witness's budget.
+    let until = Instant::now() + Duration::from_secs(10);
     while std::fs::read(&received).unwrap() != text.as_bytes() {
         pane.pump(Default::default());
         assert!(
