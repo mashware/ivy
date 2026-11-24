@@ -361,6 +361,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/tests/windows_fixture.rs",
+        include_str!("../src/tests/windows_fixture.rs"),
+        7,
+    ),
+    (
         "src/git_process.rs",
         include_str!("../src/git_process.rs"),
         0,

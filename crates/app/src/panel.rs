@@ -1323,7 +1323,9 @@ mod tests {
     /// systems, and then the test would pass or fail depending on the machine.
     pub(super) fn age_the_file(dir: &PanelDir, seconds: u64) {
         let path = dir.path().join(PANEL_FILE);
-        std::fs::File::open(&path)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
             .expect("open")
             .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(seconds))
             .expect("move the date");
@@ -1515,7 +1517,9 @@ mod tests {
     fn published_ago(file: &str, how_much: Duration) -> PanelState {
         let dir = PanelDir::create().expect("create the directory");
         publish(&dir, file);
-        std::fs::File::open(dir.path().join(PANEL_FILE))
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.path().join(PANEL_FILE))
             .expect("open")
             .set_modified(SystemTime::now() - how_much)
             .expect("move the date");
@@ -1955,13 +1959,17 @@ mod tests {
             .modified()
             .expect("there is a date");
         std::fs::write(&path, "broken").expect("break it");
-        std::fs::File::open(&path)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
             .expect("open")
             .set_modified(date + Duration::from_secs(1))
             .expect("move the date");
         state.refresh(dir.path());
         publish(&dir, r#"{"lines":["the real latest"]}"#);
-        std::fs::File::open(&path)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
             .expect("open")
             .set_modified(date)
             .expect("restore the date");
@@ -2503,7 +2511,9 @@ mod tests {
             .expect("the unchanged file did not end idempotency");
 
         publish(&dir, r#"{"lines":["the later file"]}"#);
-        std::fs::File::open(dir.path().join(PANEL_FILE))
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.path().join(PANEL_FILE))
             .expect("open the later file")
             .set_modified(retired_date)
             .expect("keep the same timestamp");
@@ -2556,7 +2566,9 @@ mod tests {
 
         let replacement = dir.path().join("panel.next");
         std::fs::write(&replacement, document).expect("write an atomic replacement");
-        std::fs::File::open(&replacement)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&replacement)
             .expect("open the replacement")
             .set_modified(retired_date)
             .expect("preserve its timestamp and bytes");
@@ -3638,7 +3650,9 @@ mod tests {
             .expect("the read brings the file's date");
 
         publish(&dir, r#"{"lines":["the second"]}"#);
-        std::fs::File::open(dir.path().join(PANEL_FILE))
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.path().join(PANEL_FILE))
             .expect("open")
             .set_modified(date)
             .expect("restore the date to where it was");

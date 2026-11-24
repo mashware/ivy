@@ -612,7 +612,7 @@ fn remote_source_suspends_navigation_and_local_directory_changes_follow_automati
     publish_directory(
         &mut window,
         pane,
-        &format!("file://localhost{}", current.0.display()),
+        url::Url::from_directory_path(&current.0).unwrap().as_str(),
     );
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
     wait_for_text(&mut window, &ctx, area, "current.md");
@@ -637,7 +637,7 @@ fn remote_source_suspends_navigation_and_local_directory_changes_follow_automati
     publish_directory(
         &mut window,
         pane,
-        &format!("file://localhost{}", current.0.display()),
+        url::Url::from_directory_path(&current.0).unwrap().as_str(),
     );
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
     wait_for_text(&mut window, &ctx, area, "current.md");
@@ -892,7 +892,10 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
     assert!(listed("NeedleFolder"));
     assert!(listed("NeedleChild.txt"));
     assert!(
-        listed("src/nested/"),
+        listed(&format!(
+            "{}/",
+            std::path::Path::new("src").join("nested").display()
+        )),
         "a match shows its folder beside its name"
     );
     // The tree under the list still shows it once; a match would show it a second time.
@@ -992,6 +995,63 @@ fn enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer() {
     assert!(window.explorer.visible, "Files stays beside the drawer");
 }
 
+/// The child paints these witnesses so ConPTY's resize repaint preserves the same contents.
+fn wait_for_console_text(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+    expected: &str,
+    at_home: bool,
+) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let painted = frame(window, ctx, area, vec![]);
+        let console = window
+            .pane_called(pane)
+            .unwrap()
+            .painted_console
+            .as_ref()
+            .unwrap();
+        let first_row = console
+            .view
+            .row(0)
+            .unwrap()
+            .iter()
+            .map(|cell| cell.c)
+            .collect::<String>();
+        let drawn: String = painted
+            .iter()
+            .filter(|(_, pos)| console.area.contains(*pos))
+            .map(|(text, _)| text.as_str())
+            .collect();
+        if (!at_home || first_row.trim_end() == expected) && drawn.contains(expected) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "child did not paint {expected:?}: {painted:?}"
+        );
+        std::thread::yield_now();
+    }
+}
+
+fn paint_child_path(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+    path: &str,
+) {
+    window
+        .pane_called(pane)
+        .unwrap()
+        .pty
+        .write(format!("{path}\n").as_bytes())
+        .unwrap();
+    wait_for_console_text(window, ctx, area, pane, path, true);
+}
+
 #[test]
 fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() {
     let ctx = egui::Context::default();
@@ -1005,7 +1065,10 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
         )
         .unwrap();
     }
-    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let command = format!(
+        "cd '{}' && while IFS= read -r line; do printf '\\033[?25l\\033[2J\\033[H%s' \"$line\"; done",
+        directory.0.display()
+    );
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, area, vec![]);
@@ -1014,12 +1077,9 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
     let target = directory.0.join("folder/entry-60.rs");
     let other = window.active().panes()[1].name;
     window.active_mut().focus = other;
-    window
-        .pane_called(pane)
-        .unwrap()
-        .screen
-        .advance(b"\x1b[?25l\x1b[2J\x1b[Hfolder/entry-60.rs");
-    frame(&mut window, &ctx, area, vec![]);
+    #[cfg(windows)]
+    wait_for_console_text(&mut window, &ctx, area, pane, "ivy-fixture-reading", false);
+    paint_child_path(&mut window, &ctx, area, pane, "folder/entry-60.rs");
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
     let console = window
@@ -1059,12 +1119,7 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
         ("./folder", "entry-00.rs"),
         ("./missing.rs", "Path unavailable"),
     ] {
-        window
-            .pane_called(pane)
-            .unwrap()
-            .screen
-            .advance(format!("\x1b[2J\x1b[H{text}").as_bytes());
-        frame(&mut window, &ctx, area, vec![]);
+        paint_child_path(&mut window, &ctx, area, pane, text);
         let console = window
             .pane_called(pane)
             .unwrap()
@@ -1127,19 +1182,25 @@ fn scrolling_files_keeps_console_paint_and_geometry_stable() {
     for index in 0..100 {
         fs::write(directory.0.join(format!("entry-{index:03}.txt")), "entry").unwrap();
     }
-    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let command = format!(
+        "cd '{}' && printf '\x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS'; sleep 30",
+        directory.0.display()
+    );
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, area, vec![]);
     let pane = window.active().panes()[0].name;
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
-    window
-        .pane_called(pane)
-        .unwrap()
-        .screen
-        .advance(b"\x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS");
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     wait_for_text(&mut window, &ctx, area, "entry-000.txt");
+    wait_for_console_text(
+        &mut window,
+        &ctx,
+        area,
+        pane,
+        "CONSOLE_OPACITY_WITNESS",
+        false,
+    );
     let baseline = painted_frame(&mut window, &ctx, area, vec![]).1;
     let console = window
         .pane_called(pane)
