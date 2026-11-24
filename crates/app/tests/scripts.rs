@@ -75,6 +75,10 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "panel-control/src/codex_relay/windows_tests.rs",
+        include_str!("../../panel-control/src/codex_relay/windows_tests.rs"),
+    ),
+    (
         "app/src/board/milestones/columns.rs",
         include_str!("../src/board/milestones/columns.rs"),
     ),
