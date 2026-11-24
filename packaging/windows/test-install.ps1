@@ -12,6 +12,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:IVY_DISPOSABLE_RUNNER -ne 'yes') {
 $Installer = (Resolve-Path $Installer).Path
 $BinaryDir = (Resolve-Path $BinaryDir).Path
 $ConptyDir = (Resolve-Path $ConptyDir).Path
+$Adapters = (Resolve-Path (Join-Path $PSScriptRoot '../../integrations/session-recovery')).Path
 $ConsoleHost = @((Get-Content (Join-Path $PSScriptRoot 'conpty.json') -Raw | ConvertFrom-Json).files.PSObject.Properties.Name)
 if ($ConsoleHost.Count -ne 2) { throw 'conpty.json does not name the console host pair' }
 $Root = Join-Path $env:RUNNER_TEMP ('ivy-install-' + [guid]::NewGuid())
@@ -26,9 +27,24 @@ Get-ChildItem $Preferences -File | ForEach-Object { $Before[$_.Name] = (Get-File
 function Install-Candidate {
     $Process = Start-Process $Installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$Destination`"") -Wait -PassThru
     if ($Process.ExitCode -ne 0) { throw "Installer exited $($Process.ExitCode)" }
-    foreach ($Pair in @(@('app.exe', 'Ivy.exe'), @('panel-mcp.exe', 'panel-mcp.exe'))) {
+    foreach ($Pair in @(@('app.exe', 'Ivy.exe'), @('panel-mcp.exe', 'panel-mcp.exe'),
+                        @('ivy-session.exe', 'ivy-session.exe'), @('ivy-codex.exe', 'ivy-codex.exe'))) {
         if ((Get-FileHash (Join-Path $BinaryDir $Pair[0])).Hash -ne (Get-FileHash (Join-Path $Destination $Pair[1])).Hash) {
             throw "Installed executable differs: $($Pair[1])"
+        }
+    }
+    $InstalledAdapters = Join-Path $Destination 'session-recovery'
+    $SourceFiles = @(Get-ChildItem $Adapters -Recurse -File | ForEach-Object {
+        [IO.Path]::GetRelativePath($Adapters, $_.FullName)
+    })
+    $InstalledFiles = @(Get-ChildItem $InstalledAdapters -Recurse -File | ForEach-Object {
+        [IO.Path]::GetRelativePath($InstalledAdapters, $_.FullName)
+    })
+    if (Compare-Object $SourceFiles $InstalledFiles) { throw 'Installed recovery adapter tree differs' }
+    foreach ($Relative in $SourceFiles) {
+        if ((Get-FileHash (Join-Path $Adapters $Relative)).Hash -ne
+            (Get-FileHash (Join-Path $InstalledAdapters $Relative)).Hash) {
+            throw "Installed recovery adapter differs: $Relative"
         }
     }
     # Microsoft's console host travels flat beside Ivy.exe (D112).
@@ -109,7 +125,7 @@ if ($SoftwareOpenGL) {
 Install-Candidate
 $Process = Start-Process (Join-Path $Destination 'unins000.exe') -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
 if ($Process.ExitCode -ne 0) { throw "Uninstaller exited $($Process.ExitCode)" }
-foreach ($Name in @('Ivy.exe') + $ConsoleHost) {
+foreach ($Name in @('Ivy.exe', 'panel-mcp.exe', 'ivy-session.exe', 'ivy-codex.exe', 'session-recovery') + $ConsoleHost) {
     if (Test-Path (Join-Path $Destination $Name)) { throw "Uninstall retained $Name" }
 }
 if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Ivy.lnk')) { throw 'Uninstall retained shortcut' }
