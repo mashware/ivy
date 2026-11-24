@@ -14,6 +14,8 @@ const CLAUDE_AUTHORIZED_MESSAGE: &str =
     "Responde solo OK, sin usar herramientas ni modificar archivos";
 const ROOT_SCRIPT: &str = r#"
 import os,sys,socket,json,termios,subprocess
+# Traceback assertions compare plain text even when Python enables terminal colors by default.
+os.environ['PYTHON_COLORS']='0'
 a=termios.tcgetattr(0);a[3]&=~termios.ECHO;termios.tcsetattr(0,termios.TCSANOW,a)
 endpoint=sys.argv[1]
 helper='import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(sys.argv[2].encode()+b"\\n"); print(s.makefile().readline(),end="")'
