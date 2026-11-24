@@ -1,6 +1,14 @@
-# Ivy 0.1.0-alpha.16
+# Ivy 0.1.0-alpha.17
 
 ## New in this alpha
+
+- See a large project roadmap in one compact milestone strip, with readable columns for work in progress, ready work and milestones you open yourself.
+- Keep console cards beneath their explicitly linked roadmap tasks, with compact published summaries and clear waiting states.
+- Expand milestones, show the whole roadmap and filter console cards without losing the project overview.
+- Board columns and cards have aligned headers, consistent spacing and word-wrapped text.
+- Agents can open images directly in their own console through Ivy's MCP bridge, including remote images.
+
+## Previously in 0.1.0-alpha.16
 
 - Saved layouts restore even when an obsolete session-ownership file was left by another account.
 - Configured project roadmaps can be JSON documents as well as Markdown files.
@@ -157,12 +165,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.16_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha16-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.16-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.16-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.16-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.17_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha17-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.17-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.17-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.17-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.16/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.17/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
