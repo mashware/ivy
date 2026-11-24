@@ -67,6 +67,10 @@ fn matches(entry: &Entry, query: &str) -> bool {
         .any(|text| text.to_lowercase().contains(query))
 }
 
+pub(super) fn accepts(entry: &Entry, filter: &Filter, column: Column) -> bool {
+    (!filter.claiming_only || claims(column)) && matches(entry, &filter.query.trim().to_lowercase())
+}
+
 /// Narrows the sections in place. With a narrowing active, a project left without consoles is
 /// dropped — its roadmap included — because what the reader asked for is consoles.
 pub(super) fn apply(

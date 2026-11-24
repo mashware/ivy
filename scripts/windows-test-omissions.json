@@ -1044,6 +1044,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::board::tests::milestone_filter_cannot_activate_a_hidden_console",
+    "reason": "unix-only: creates POSIX shell consoles to exercise Board focus"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::board::tests::project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan",
     "reason": "unix-only: exercises the Unix panel-control endpoint"
   },

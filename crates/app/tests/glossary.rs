@@ -60,6 +60,13 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "
 /// A crate whose every file ends up here is **not** thereby ready for [`FINISHED_CRATES`]: that list
 /// is the stronger claim, and this one cannot add up to it.
 const GLOSSARY_CLEAN_FILES: &[&str] = &[
+    "app/src/board/milestones/columns.rs",
+    "app/src/board/milestones/compact.rs",
+    "app/src/board/milestones/details.rs",
+    "app/src/board/milestones/projection.rs",
+    "app/src/board/milestones/state.rs",
+    "app/src/board/milestones/strip.rs",
+    "app/src/board/milestones/tests.rs",
     "app/tests/scope_launch.rs",
     "term-core/src/scope.rs",
     "term-core/src/scope/protocol_tests.rs",
@@ -509,6 +516,13 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/board/bar.rs", "app"),
     ("app/src/board/filter.rs", "app"),
     ("app/src/board/milestones.rs", "app"),
+    ("app/src/board/milestones/columns.rs", "app"),
+    ("app/src/board/milestones/compact.rs", "app"),
+    ("app/src/board/milestones/details.rs", "app"),
+    ("app/src/board/milestones/projection.rs", "app"),
+    ("app/src/board/milestones/state.rs", "app"),
+    ("app/src/board/milestones/strip.rs", "app"),
+    ("app/src/board/milestones/tests.rs", "app"),
     ("app/src/board/cards.rs", "app"),
     ("app/src/board/style.rs", "app"),
     ("app/src/board/observation.rs", "app"),

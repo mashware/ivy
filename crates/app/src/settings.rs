@@ -2482,7 +2482,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 58] = [
+        const SOURCES: [(&str, &str); 65] = [
             (
                 "diagnostics_log/graphics.rs",
                 include_str!("diagnostics_log/graphics.rs"),
@@ -2491,6 +2491,31 @@ mod tests {
             ("board/plans/disk.rs", include_str!("board/plans/disk.rs")),
             ("board/roadmap.rs", include_str!("board/roadmap.rs")),
             ("board/cards.rs", include_str!("board/cards.rs")),
+            (
+                "board/milestones/columns.rs",
+                include_str!("board/milestones/columns.rs"),
+            ),
+            (
+                "board/milestones/compact.rs",
+                include_str!("board/milestones/compact.rs"),
+            ),
+            (
+                "board/milestones/details.rs",
+                include_str!("board/milestones/details.rs"),
+            ),
+            (
+                "board/milestones/projection.rs",
+                include_str!("board/milestones/projection.rs"),
+            ),
+            (
+                "board/milestones/state.rs",
+                include_str!("board/milestones/state.rs"),
+            ),
+            (
+                "board/milestones/strip.rs",
+                include_str!("board/milestones/strip.rs"),
+            ),
+            ("board/milestones.rs", include_str!("board/milestones.rs")),
             ("board/style.rs", include_str!("board/style.rs")),
             ("board/view.rs", include_str!("board/view.rs")),
             ("roadmap_file.rs", include_str!("roadmap_file.rs")),
@@ -2662,9 +2687,9 @@ mod tests {
         // One and not more: `tab_bar.rs` carries a single sentence, so any higher number would be a
         // table rather than a floor — the same reason its sibling gives.
         for (name, _) in SOURCES {
-            if name == "session/ownership.rs" {
-                // This lock/IO module returns errors to its caller and has no user-facing
-                // sentences. If that changes, require it to join the per-file census.
+            if matches!(name, "session/ownership.rs" | "board/milestones/state.rs") {
+                // These ownership/disclosure modules have no user-facing sentences. If that
+                // changes, require them to join the per-file census.
                 assert!(
                     !sentences.iter().any(|(from, _)| from == &name),
                     "{name} now has a sentence: include it in the per-file census"
@@ -2713,9 +2738,9 @@ mod tests {
             assert!(
                 message.chars().all(|c| c.is_ascii()
                     || c == DRAWN_RULE
-                    || matches!(c, '·' | '✓' | '▸' | '▾' | '○' | '⎇')),
+                    || matches!(c, '·' | '✓' | '▸' | '▾' | '▴' | '↗' | '○' | '⎇')),
                 "«{message}» ({where_from}) carries a character that is neither ASCII nor the \
-                 report's rule: the angle quotes, the dashes and the accents are how this \
+                 report's rule or Board UI symbols: the angle quotes, the dashes and the accents are how this \
                  repository writes Spanish"
             );
             assert_eq!(

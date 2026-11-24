@@ -48,6 +48,10 @@ use std::path::Path;
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     (
+        "src/board/milestones/tests.rs",
+        include_str!("../src/board/milestones/tests.rs"),
+    ),
+    (
         "src/launch/tests.rs",
         include_str!("../src/launch/tests.rs"),
     ),
@@ -429,6 +433,30 @@ const MODULES: &[(&str, &str)] = &[
     (
         "src/board/milestones.rs",
         include_str!("../src/board/milestones.rs"),
+    ),
+    (
+        "src/board/milestones/columns.rs",
+        include_str!("../src/board/milestones/columns.rs"),
+    ),
+    (
+        "src/board/milestones/compact.rs",
+        include_str!("../src/board/milestones/compact.rs"),
+    ),
+    (
+        "src/board/milestones/details.rs",
+        include_str!("../src/board/milestones/details.rs"),
+    ),
+    (
+        "src/board/milestones/projection.rs",
+        include_str!("../src/board/milestones/projection.rs"),
+    ),
+    (
+        "src/board/milestones/state.rs",
+        include_str!("../src/board/milestones/state.rs"),
+    ),
+    (
+        "src/board/milestones/strip.rs",
+        include_str!("../src/board/milestones/strip.rs"),
     ),
     ("src/board/cards.rs", include_str!("../src/board/cards.rs")),
     ("src/board/style.rs", include_str!("../src/board/style.rs")),

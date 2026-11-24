@@ -170,13 +170,15 @@ pub(crate) fn before_keys(
             continue;
         }
         match event {
-            // The first Escape leaves the filter field; the next one closes the Board.
             egui::Event::Key {
                 key: egui::Key::Escape,
                 pressed: true,
                 repeat: false,
                 ..
-            } if window.board.keyboard_focus && window.board.filter.editing => {
+            } if window.board.keyboard_focus
+                && window.board.filter.editing
+                && window.board.arrangement == super::filter::Arrangement::ByState =>
+            {
                 window.board.filter.editing = false;
                 owns_events = true;
             }
@@ -190,8 +192,28 @@ pub(crate) fn before_keys(
                 owns_events = true;
             }
             egui::Event::Key {
-                key, pressed: true, ..
+                key,
+                modifiers,
+                pressed: true,
+                ..
             } if window.board.keyboard_focus => {
+                if window.board.arrangement == super::filter::Arrangement::ByMilestone {
+                    let (handled, activate) = window
+                        .board
+                        .surface
+                        .milestones
+                        .keyboard(*key, modifiers.shift);
+                    if let Some(pane) = activate {
+                        window.board.activate = Some(pane);
+                    }
+                    if handled {
+                        if *key == egui::Key::Tab {
+                            window.board.filter.editing = false;
+                        }
+                        owns_events = true;
+                        continue;
+                    }
+                }
                 if matches!(
                     key,
                     egui::Key::ArrowUp
@@ -357,7 +379,14 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
                 .unwrap_or(state.ordinal);
         }
     } else if let Some((rect, command)) = state.surface.child_pressed.take() {
-        if let super::cards::Command::Bar(action) = command {
+        if let super::cards::Command::Bar(super::bar::Action::ShowAll(value)) = command {
+            if rect.contains(pos) {
+                state
+                    .surface
+                    .milestones
+                    .apply(&super::milestones::state::Action::ShowAll(value));
+            }
+        } else if let super::cards::Command::Bar(action) = command {
             if rect.contains(pos) {
                 state.close_requested |=
                     super::bar::apply(&mut state.arrangement, &mut state.filter, action);
@@ -439,5 +468,96 @@ mod tests {
         state.selected = Some(9);
         navigate(&mut state, egui::Key::ArrowDown);
         assert_eq!(state.selected, Some(2), "clamped to the shorter row");
+    }
+    #[test]
+    fn a_milestone_press_keeps_its_identity_and_opens_the_painted_column() {
+        let plan = panel_contract::plan::parse_document_noting(include_str!(
+            "../../tests/fixtures/board-milestones/plan.json"
+        ))
+        .unwrap()
+        .0;
+        let section = super::super::model::Section {
+            key: None,
+            kind: super::super::model::Kind::Repository {
+                name: "TaxPlatform".into(),
+            },
+            entries: Vec::new(),
+            roadmap: None,
+            ink: None,
+        };
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = crate::theme::Roles::of(&crate::theme::Theme::default());
+        let mut state = State {
+            arrangement: super::super::filter::Arrangement::ByMilestone,
+            ..Default::default()
+        };
+        let draw = |state: &mut State| {
+            state.surface.milestones.hits.clear();
+            state.surface.milestones.targets.clear();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    super::super::milestones::paint_plan_with(
+                        ui,
+                        &section,
+                        &plan,
+                        &roles,
+                        &mut state.surface.milestones,
+                        &Default::default(),
+                        &|_| super::super::observation::Column::Idle,
+                        &mut |_, _, _, _, _| {},
+                    );
+                },
+            );
+            let texts = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            output.drop_without_applying_deltas();
+            state.surface.child_hits = state
+                .surface
+                .milestones
+                .hits
+                .iter()
+                .map(|(r, a)| (*r, super::super::cards::Command::Milestone(a.clone())))
+                .collect();
+            texts
+        };
+        let before = draw(&mut state);
+        assert!(!before.iter().any(|s| s.starts_with("H6 ·")));
+        let at = state
+            .surface
+            .child_hits
+            .iter()
+            .find_map(|(r, a)| match a {
+                super::super::cards::Command::Milestone(
+                    super::super::milestones::state::Action::ToggleColumn(k),
+                ) if k.milestone == super::super::milestones::state::Identity::from("H6") => {
+                    Some(r.center())
+                }
+                _ => None,
+            })
+            .unwrap();
+        pointer(&mut state, at, true);
+        state.surface.child_hits.clear();
+        pointer(&mut state, at, false);
+        let after = draw(&mut state);
+        assert!(after.iter().any(|s| s == "H6 · Customers"));
+        assert!(
+            after
+                .iter()
+                .any(|s| s.contains("waiting on H2 (17/18), H5 (0/14)"))
+        );
     }
 }

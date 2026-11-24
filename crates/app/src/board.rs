@@ -178,10 +178,19 @@ pub(crate) fn suspend(window: &mut crate::Window) {
 /// Runs only after active and background panel refresh, preserving normal PTY geometry.
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::Rect) {
     observe(window, ui.ctx());
-    if !window.board.enabled || !window.board.open {
+    let document = window.board.surface.document_to_open.take();
+    if document.is_none() && (!window.board.enabled || !window.board.open) {
         return;
     }
     let started = Instant::now();
+    if let Some((pane, path)) = document {
+        crate::viewer::open_document_target(window, pane, path, None);
+    }
+    if !window.board.enabled || !window.board.open {
+        window.board.timing.record_work(started.elapsed());
+        window.timed_separately += window.board.timing.take_cost();
+        return;
+    }
     if let Some(target) = window
         .board
         .surface
@@ -256,10 +265,12 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
             .count(),
         claiming,
     };
-    filter::apply(&mut sections, &window.board.filter, |entry| {
-        let signal = signals.get(&entry.pane).copied();
-        observation::classify(entry.snapshot.document.as_deref(), signal, wall)
-    });
+    if window.board.arrangement == filter::Arrangement::ByState {
+        filter::apply(&mut sections, &window.board.filter, |entry| {
+            let signal = signals.get(&entry.pane).copied();
+            observation::classify(entry.snapshot.document.as_deref(), signal, wall)
+        });
+    }
     let panes: Vec<usize> = sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -279,7 +290,12 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
     view::paint(window, ui, area, &sections, &signals, wall, totals);
-    if let Some(target) = window.board.activate.take() {
+    if let Some(target) = window
+        .board
+        .activate
+        .take()
+        .filter(|target| window.board.order.iter().any(|slot| slot.pane == *target))
+    {
         activate(window, ui.ctx(), target);
     }
     window.board.timing.record_work(started.elapsed());
@@ -376,6 +392,45 @@ pub(crate) fn observe(window: &mut crate::Window, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queued_source_activation_is_attributed_once_even_when_board_is_closed() {
+        for open in [false, true] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            window.board.enabled = false;
+            window.board.open = open;
+            let pane = window.active().focus;
+            let path = std::env::temp_dir().join("ivy-board-source-timing.md");
+            window.board.surface.document_to_open = Some((pane, path));
+            let ctx = egui::Context::default();
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+            window.timed_separately = std::time::Duration::ZERO;
+            ctx.run_ui(egui::RawInput::default(), |ui| paint(&mut window, ui, area))
+                .drop_without_applying_deltas();
+            assert!(
+                crate::viewer::is_open(&window),
+                "queued source never opened"
+            );
+            assert!(window.board.surface.document_to_open.is_none());
+            let charged = window.timed_separately;
+            assert!(charged > std::time::Duration::ZERO);
+            assert_eq!(window.board.timing.take_cost(), std::time::Duration::ZERO);
+            ctx.run_ui(egui::RawInput::default(), |ui| paint(&mut window, ui, area))
+                .drop_without_applying_deltas();
+            assert_eq!(
+                window.timed_separately, charged,
+                "activation was charged twice"
+            );
+            window.board.timing.close_frame();
+            let mut report = Vec::new();
+            window.board.timing.publish(&mut report).unwrap();
+            let report = String::from_utf8(report).unwrap();
+            assert!(
+                report.contains(&format!("board application: frames=1, total={charged:?},")),
+                "{report}"
+            );
+        }
+    }
 
     #[test]
     fn board_selection_and_scroll_survive_shared_sidebar_switches() {

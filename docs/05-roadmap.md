@@ -112,9 +112,9 @@ way. If it is never done, nothing extra will have been built to get there. That 
 ## Phase 6 — «Everything in flight, on one board»
 
 **What you see:** the Overview screen is gone and a board takes its place. One board for the whole
-window, split into one section per project. Each section opens with that project's roadmap — the
-milestone in progress, the last two finished and the next ones — and below it one card per console
-working in that project: what it is doing, which step it is on, and whether it is waiting for you,
+window, split into one section per project. In By milestone, each section opens with every milestone in one compact line, followed by readable
+columns for active and ready work, outside work and milestones you open explicitly. Console cards
+sit below their declared task; By state retains the console-state columns. Each console shows: what it is doing, which step it is on, and whether it is waiting for you,
 stuck or finished. The bar on top still says how many consoles are claiming you. A project you have
 a roadmap for shows up even when no console is open in it, with only its roadmap.
 

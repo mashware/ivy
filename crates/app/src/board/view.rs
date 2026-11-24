@@ -1,7 +1,7 @@
 //! A native, scrollable kanban; each painted card retains the console's stable identity.
 use super::{
     cards,
-    layout::Slot,
+    layout::{Geometry, Slot, reveal_offset},
     model::{Entry, Section},
     observation::{self, COLUMNS, Column},
 };
@@ -12,10 +12,12 @@ use std::time::{Instant, SystemTime};
 
 #[derive(Default)]
 pub(super) struct ViewState {
+    pub(super) milestones: super::milestones::state::Reader,
     pub(super) cards: std::collections::HashMap<usize, cards::Reader>,
     pub(super) child_hits: Vec<(Rect, cards::Command)>,
     pub(super) child_pressed: Option<(Rect, cards::Command)>,
     pub(super) link_to_open: Option<String>,
+    pub(super) document_to_open: Option<(usize, std::path::PathBuf)>,
     pub(super) painted: Vec<(usize, Rect)>,
     pub(super) pressed: Option<(usize, Rect)>,
 }
@@ -31,6 +33,14 @@ impl ViewState {
             | cards::Command::Expand(pane)
             | cards::Command::Compact(pane) => *pane,
             cards::Command::Bar(_) => return,
+            cards::Command::Source(pane, path) => {
+                self.document_to_open = Some((*pane, path.clone()));
+                return;
+            }
+            cards::Command::Milestone(action) => {
+                self.milestones.apply(action);
+                return;
+            }
         };
         if !self.cards.contains_key(&pane) {
             return;
@@ -48,33 +58,9 @@ impl ViewState {
                 timing.expanded();
             }
             cards::Command::Compact(_) => self.cards.get_mut(&pane).unwrap().apply(command),
-            cards::Command::Bar(_) => {}
+            cards::Command::Bar(_) | cards::Command::Milestone(_) | cards::Command::Source(..) => {}
         }
     }
-}
-
-#[derive(Clone)]
-struct Geometry {
-    viewport: Rect,
-    offset: Vec2,
-    next_offset: Vec2,
-    cards: Vec<(usize, Rect)>,
-}
-
-fn reveal_offset(geometry: &Geometry, pane: usize, offset: Vec2) -> Vec2 {
-    let Some((_, previous)) = geometry.cards.iter().find(|(id, _)| *id == pane) else {
-        return offset;
-    };
-    let rect = previous.translate(geometry.offset - offset);
-    let mut result = offset;
-    for axis in 0..2 {
-        if rect.min[axis] < geometry.viewport.min[axis] {
-            result[axis] += rect.min[axis] - geometry.viewport.min[axis];
-        } else if rect.max[axis] > geometry.viewport.max[axis] {
-            result[axis] += rect.max[axis] - geometry.viewport.max[axis];
-        }
-    }
-    result.max(Vec2::ZERO)
 }
 
 fn column(entry: &Entry, signals: &HashMap<usize, View>, now: SystemTime) -> Column {
@@ -132,12 +118,16 @@ fn paint_contents(
     super::style::apply(&mut ui, &theme);
     ui.painter().rect_filled(area, 0.0, roles.base);
     window.board.surface.child_hits.clear();
+    window.board.surface.milestones.hits.clear();
+    window.board.surface.milestones.targets.clear();
     super::bar::paint(
         &mut ui,
         area.width(),
         totals,
         window.board.arrangement,
         &window.board.filter,
+        (window.board.arrangement == super::filter::Arrangement::ByMilestone)
+            .then_some(window.board.surface.milestones.show_all()),
         &roles,
         &mut window.board.surface.child_hits,
     );
@@ -192,10 +182,22 @@ fn paint_contents(
                 if window.board.arrangement == super::filter::Arrangement::ByMilestone {
                     let started = Instant::now();
                     let base = row_base;
+                    let source_pane = section
+                        .entries
+                        .first()
+                        .map_or(window.active().focus, |entry| entry.pane);
+                    let mut source_hit = None;
                     // Cards are timed by their own spans (`content_layout`, `content_paint`), and
                     // «By state» paints them outside the plan's span: subtract them here too, or
                     // their cost is published twice and once under the plan's name (D13).
                     let mut cards = std::time::Duration::ZERO;
+                    let mut milestone_reader = std::mem::take(&mut window.board.surface.milestones);
+                    milestone_reader.reveal_pane = window.board.selected.filter(|_| reveal);
+                    let filter = super::filter::Filter {
+                        query: window.board.filter.query.clone(),
+                        claiming_only: window.board.filter.claiming_only,
+                        editing: false,
+                    };
                     let mut paint_card =
                         |ui: &mut egui::Ui, entry: &Entry, row: usize, index: usize, width: f32| {
                             let card_started = Instant::now();
@@ -222,13 +224,25 @@ fn paint_contents(
                     row_base += egui::Frame::new()
                         .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
                         .show(ui, |ui| {
-                            super::milestones::project_header(ui, section, claims, true, &roles);
+                            let source_rect = super::milestones::project_header(
+                                ui, section, claims, true, &roles,
+                            );
+                            if let (Some(rect), Some(path)) = (
+                                source_rect,
+                                section.roadmap.as_ref().and_then(|r| r.path.clone()),
+                            ) {
+                                source_hit =
+                                    Some((rect, cards::Command::Source(source_pane, path)));
+                            }
                             match &plan {
-                                Some(plan) => super::milestones::paint_plan(
+                                Some(plan) => super::milestones::paint_plan_with(
                                     ui,
                                     section,
                                     plan,
                                     &roles,
+                                    &mut milestone_reader,
+                                    &filter,
+                                    &|entry| column(entry, signals, now),
                                     &mut paint_card,
                                 ),
                                 None => {
@@ -237,6 +251,10 @@ fn paint_contents(
                             }
                         })
                         .inner;
+                    window.board.surface.milestones = milestone_reader;
+                    if let Some(hit) = source_hit {
+                        window.board.surface.child_hits.push(hit);
+                    }
                     super::milestones::rule(ui, &roles);
                     window
                         .board
@@ -350,6 +368,15 @@ fn paint_contents(
                 ui.separator();
             }
         });
+    for (rect, action) in &window.board.surface.milestones.hits {
+        if rect.is_positive() {
+            window
+                .board
+                .surface
+                .child_hits
+                .push((*rect, cards::Command::Milestone(action.clone())));
+        }
+    }
     paint_hint(&mut ui, window.board.remember_error.as_deref(), &roles);
     geometry.viewport = output.inner_rect;
     geometry.offset = offset;
@@ -360,6 +387,13 @@ fn paint_contents(
         .board
         .order
         .sort_by_key(|slot| (slot.row, slot.column));
+    let visible: Vec<_> = window.board.order.iter().map(|slot| slot.pane).collect();
+    window.board.selected =
+        super::model::reconcile(window.board.selected, window.board.ordinal, &visible);
+    window.board.ordinal = visible
+        .iter()
+        .position(|pane| Some(*pane) == window.board.selected)
+        .unwrap_or(0);
 }
 
 const HINT_HEIGHT: f32 = 26.0;
@@ -414,6 +448,11 @@ fn paint_entries(
     ui.set_min_width(width);
     let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
     for (row, entry) in entries.into_iter().enumerate() {
+        if window.board.arrangement == super::filter::Arrangement::ByMilestone
+            && !super::filter::accepts(entry, &window.board.filter, column)
+        {
+            continue;
+        }
         let signal = signals.get(&entry.pane).copied();
         let panel_wait = entry
             .snapshot
@@ -436,21 +475,35 @@ fn paint_entries(
         let show_selection = selected && window.board.original != Some(entry.pane);
         let board = &mut window.board;
         let reader = board.surface.cards.entry(entry.pane).or_default();
-        let rect = cards::paint(
-            ui,
-            entry,
-            column,
-            backed,
-            since,
-            branch.as_deref(),
-            show_selection,
-            reader,
-            &mut window.discoverer,
-            theme,
-            &roles,
-            &mut board.timing,
-            &mut board.surface.child_hits,
-        );
+        let rect = if board.arrangement == super::filter::Arrangement::ByMilestone {
+            super::milestones::compact::paint(
+                ui,
+                entry,
+                column,
+                backed,
+                since,
+                branch.as_deref(),
+                selected,
+                &roles,
+                &mut board.timing,
+            )
+        } else {
+            cards::paint(
+                ui,
+                entry,
+                column,
+                backed,
+                since,
+                branch.as_deref(),
+                show_selection,
+                reader,
+                &mut window.discoverer,
+                theme,
+                &roles,
+                &mut board.timing,
+                &mut board.surface.child_hits,
+            )
+        };
         board.order.push(Slot {
             pane: entry.pane,
             row: row_base + row,
