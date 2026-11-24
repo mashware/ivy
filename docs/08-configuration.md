@@ -299,6 +299,9 @@ Braille patterns in titles, including Codex's activity glyphs such as `⠸`, are
 than requested from the installed font. This preserves the published title's text and animation;
 it does not interpret a pattern as agent activity.
 
+Other title symbols, including Claude's `◐`, use the bundled text fallback faces when Geist and
+the proportional fallbacks do not contain them. No installed font or configuration is required.
+
 ### The blink, if you want it settled
 
 ```
