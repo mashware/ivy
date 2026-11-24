@@ -97,12 +97,22 @@ def stop(child):
 def host(executable):
     if K.GetConsoleWindow():
         raise AssertionError('detached host has a console')
-    control = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], close_fds=True)
-    try:
-        if not has_console(control):
-            raise AssertionError('positive control did not allocate a console')
-    finally:
-        stop(control)
+    with tempfile.TemporaryDirectory(prefix='ivy-console-control-') as root:
+        ready = Path(root, 'ready')
+        control = subprocess.Popen([sys.executable, '-c',
+            'import pathlib,sys,time; pathlib.Path(sys.argv[1]).touch(); time.sleep(30)',
+            str(ready)], close_fds=True)
+        try:
+            # CreateProcess returns before child initialization; inspect after its own ready signal.
+            deadline = time.monotonic() + 10
+            while not ready.exists():
+                if control.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError('console positive control did not initialize')
+                time.sleep(0.05)
+            if not has_console(control):
+                raise AssertionError('positive control did not allocate a console')
+        finally:
+            stop(control)
     with tempfile.TemporaryDirectory(prefix='ivy-gui-') as root:
         env = os.environ.copy()
         for key in list(env):

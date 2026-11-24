@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import struct
 import sys
@@ -165,11 +166,15 @@ class WindowsPackageTests(unittest.TestCase):
             with self.subTest(name=name, value=value[152:154]):
                 path = self.binaries / name
                 original = path.read_bytes()
-                path.write_bytes(value)
-                with self.assertRaises(ValueError):
-                    PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
-                self.assertFalse(self.payload.exists())
-                path.write_bytes(original)
+                try:
+                    path.write_bytes(value)
+                    with self.assertRaises(ValueError):
+                        PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
+                    self.assertFalse(self.payload.exists())
+                finally:
+                    path.write_bytes(original)
+                    if self.payload.exists():
+                        shutil.rmtree(self.payload)
 
     def test_rejects_foreign_architecture_and_missing_pe(self):
         path = self.binaries / 'app.exe'
