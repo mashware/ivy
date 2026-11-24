@@ -1,0 +1,522 @@
+#![cfg(test)]
+use super::*;
+use super::{
+    projection::{Class, Projection},
+    state::{Action, Key, Reader, Target},
+};
+use crate::board::observation::Column;
+use std::sync::Arc;
+
+fn fixture() -> Plan {
+    panel_contract::plan::parse_document_noting(include_str!(
+        "../../../tests/fixtures/board-milestones/plan.json"
+    ))
+    .unwrap()
+    .0
+}
+fn entry(pane: usize, m: Option<&str>, d: Option<&str>, attention: Option<&str>) -> Entry {
+    Entry {pane,console_label:"Per-organization AEAT seal with lifecycle".into(),tab_label:"Billing".into(),snapshot:crate::panel::summary::Snapshot {document:Some(Arc::new(panel_contract::parse_document(&serde_json::json!({"milestone":m,"deliverable":d,"attention":attention,"lines":[{"text":"Task title","style":"title"},{"text":"Literal content"}]}).to_string()).unwrap())),warning:None,attention:None,outside:false}}
+}
+fn column(e: &Entry) -> Column {
+    crate::board::observation::classify(
+        e.snapshot.document.as_deref(),
+        None,
+        std::time::SystemTime::now(),
+    )
+}
+fn section(entries: Vec<Entry>, plan: Plan) -> Section {
+    Section {
+        key: None,
+        kind: crate::board::model::Kind::Repository {
+            name: "TaxPlatform".into(),
+        },
+        entries,
+        roadmap: Some(crate::board::roadmap::Resolved {
+            plan: Some(Arc::new(plan)),
+            source: "published 2h ago".into(),
+            error: None,
+            published_at: None,
+            path: None,
+        }),
+        ink: None,
+    }
+}
+#[test]
+fn taxplatform_classification_uses_references_not_titles_or_partial_progress() {
+    let plan = fixture();
+    let entries = vec![
+        entry(1, Some("H2"), Some("AEAT-SEAL"), None),
+        entry(2, Some("H3"), Some("TERRITORIES"), Some("wait")),
+    ];
+    let placed = place(&entries, &plan);
+    assert_eq!(placed.milestones[2].items[17][0].pane, 1);
+    assert!(placed.off.is_empty());
+    let result = Projection::new(&plan, &placed, &column);
+    assert_eq!(
+        result.classes,
+        vec![
+            Class::Done,
+            Class::Done,
+            Class::Active,
+            Class::Active,
+            Class::Claim(Column::Wait),
+            Class::Later,
+            Class::Ready,
+            Class::Later,
+            Class::Later,
+            Class::Later,
+            Class::Ready,
+            Class::Later,
+            Class::Later,
+            Class::Later
+        ]
+    );
+    assert_eq!(result.missing[7], ["H2 (17/18)", "H5 (0/14)"]);
+    let unlinked = vec![entry(3, None, None, None)];
+    assert_eq!(place(&unlinked, &plan).off[0].pane, 3);
+}
+#[test]
+fn claim_priority_done_attachment_empty_milestone_and_cycles_are_explicit() {
+    let plan=panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"A","depends_on":["B"],"items":[{"mark":"pending","text":"x"}]},{"id":"B","title":"B","depends_on":["A"],"items":[{"mark":"done","text":"x"}]},{"id":"C","title":"C","depends_on":["missing"],"items":[{"text":"x"}]},{"id":"E","title":"empty"}]}"#).unwrap().0;
+    let result = Projection::new(&plan, &place(&[], &plan), &column);
+    assert_eq!(
+        result.classes,
+        [Class::Later, Class::Done, Class::Later, Class::Done]
+    );
+    assert_eq!(result.diagnostics.len(), 3);
+    assert_eq!(
+        projection::claim([Column::Done, Column::Block, Column::Wait]),
+        Some(Column::Wait)
+    );
+    let entries = vec![entry(1, Some("B"), None, Some("wait"))];
+    assert_eq!(
+        Projection::new(&plan, &place(&entries, &plan), &column).classes[1],
+        Class::Done
+    );
+}
+#[test]
+fn selective_items_include_all_attachments_and_only_two_pending_after_last_relevant() {
+    let mut plan = fixture();
+    let m = &mut plan.milestones[4];
+    m.items[6].mark = Some(Mark::Current);
+    let mut attached = vec![false; m.items.len()];
+    attached[5] = true;
+    assert_eq!(
+        projection::visible(m, &attached, false, false),
+        [5, 6, 7, 8]
+    );
+    assert_eq!(projection::visible(m, &attached, false, true), [5]);
+    assert_eq!(projection::visible(m, &attached, true, false).len(), 10);
+    assert_eq!(
+        projection::visible(&plan.milestones[6], &[], false, false),
+        [0, 1]
+    );
+}
+#[test]
+fn strip_actions_show_all_class_changes_and_reopen_keep_reader_owned_choices() {
+    let mut reader = Reader::default();
+    let key = Key {
+        project: "p".into(),
+        milestone: "H6".into(),
+    };
+    reader.reconcile("p", &[("H6".into(), Class::Later)]);
+    reader.apply(&Action::Strip(key.clone()));
+    assert!(reader.project("p").opened.contains("H6"));
+    reader.apply(&Action::ShowAll(true));
+    reader.apply(&Action::ShowAll(false));
+    assert!(reader.project("p").opened.contains("H6"));
+    reader.reconcile("p", &[("H6".into(), Class::Done)]);
+    assert!(!reader.project("p").full.contains("H6"));
+    assert!(reader.project("p").opened.contains("H6"));
+    reader.apply(&Action::Close(key.clone()));
+    assert!(!reader.project("p").opened.contains("H6"));
+    reader.reconcile("p", &[("H6".into(), Class::Ready)]);
+    reader.apply(&Action::Strip(key.clone()));
+    assert!(reader.project("p").full.contains("H6"));
+    reader.apply(&Action::Strip(key));
+    assert!(!reader.project("p").full.contains("H6"));
+}
+#[test]
+fn compact_excerpt_is_literal_bounded_and_prioritizes_published_marks() {
+    let panel=panel_contract::parse_document(r#"{"lines":[{"text":"Title","style":"title"},"first",{"text":"Do not interpret this","mark":"wait"},"third","fourth"]}"#).unwrap();
+    let lines = compact::excerpt(&panel);
+    assert_eq!(
+        lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+        ["Do not interpret this", "first", "third"]
+    );
+}
+#[test]
+fn widths_preserve_collapsed_width_and_use_horizontal_overflow() {
+    let widths = projection::widths(500.0, &[(false, true), (true, false), (false, false)], 1);
+    assert_eq!(widths, [240.0, 190.0, 240.0]);
+    let widths = projection::widths(1440.0, &[(false, true), (true, false), (false, false)], 1);
+    assert_eq!(widths[1], 190.0);
+    assert!(widths[0] > widths[2]);
+    assert!((widths.iter().sum::<f32>() + 64.0 - 1440.0).abs() < 0.1);
+}
+fn render(
+    ctx: &egui::Context,
+    section: &Section,
+    reader: &mut Reader,
+    filter: &crate::board::filter::Filter,
+) -> Vec<egui::epaint::ClippedShape> {
+    let roles = Roles::of(&crate::theme::Theme::default());
+    reader.hits.clear();
+    reader.targets.clear();
+    let out = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+            ..Default::default()
+        },
+        |ui| {
+            let plan = section.roadmap.as_ref().unwrap().plan.as_ref().unwrap();
+            let canvas = ui.max_rect();
+            paint_plan_with(
+                ui,
+                section,
+                plan,
+                &roles,
+                reader,
+                filter,
+                &column,
+                &mut |ui, e, _, _, width| {
+                    assert!(width >= 200.0);
+                    let rect = compact::paint(
+                        ui,
+                        e,
+                        column(e),
+                        true,
+                        None,
+                        Some("main"),
+                        false,
+                        &roles,
+                        &mut crate::measure::Board::default(),
+                    );
+                    assert!(rect.width() <= width + 0.01);
+                    let visible = rect.intersect(ui.clip_rect());
+                    assert!(canvas.contains_rect(visible));
+                },
+            );
+            assert!(ui.min_rect().width() <= 1440.0);
+        },
+    );
+    let shapes = out.shapes.clone();
+    out.drop_without_applying_deltas();
+    shapes
+}
+#[test]
+fn fourteen_chips_stay_on_one_line_filters_do_not_change_strip_and_h6_opens() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    let section = section(
+        vec![
+            entry(1, Some("H2"), Some("AEAT-SEAL"), None),
+            entry(2, Some("H3"), Some("TERRITORIES"), Some("wait")),
+        ],
+        fixture(),
+    );
+    render(&ctx, &section, &mut reader, &Default::default());
+    let chips: Vec<_> = reader
+        .targets
+        .iter()
+        .filter(|(t, _)| matches!(t, Target::Strip(_)))
+        .collect();
+    assert_eq!(chips.len(), 14);
+    assert!(chips.iter().all(|(_, r)| r.top() == chips[0].1.top()));
+    assert!(
+        chips
+            .windows(2)
+            .all(|pair| pair[0].1.right() <= pair[1].1.left())
+    );
+    assert!(
+        chips
+            .iter()
+            .all(|(_, r)| r.left() >= 0.0 && r.right() <= 1440.0)
+    );
+    let strip: Vec<_> = chips.iter().map(|(_, r)| *r).collect();
+    render(
+        &ctx,
+        &section,
+        &mut reader,
+        &crate::board::filter::Filter {
+            query: "nothing matches".into(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        reader
+            .targets
+            .iter()
+            .filter(|(t, _)| matches!(t, Target::Strip(_)))
+            .map(|(_, r)| *r)
+            .collect::<Vec<_>>(),
+        strip
+    );
+    let k = strip::key(
+        &project_key(&section),
+        section.roadmap.as_ref().unwrap().plan.as_ref().unwrap(),
+        7,
+    );
+    reader.apply(&Action::Strip(k.clone()));
+    let shapes = render(&ctx, &section, &mut reader, &Default::default());
+    assert!(
+        reader
+            .targets
+            .iter()
+            .any(|(t, _)| *t == Target::Header(k.clone()))
+    );
+    assert!(shapes.iter().any(
+        |s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.text().contains("waiting on H2"))
+    ));
+}
+
+#[test]
+fn keyboard_tab_arrows_and_activation_keep_stable_targets() {
+    let mut reader = Reader::default();
+    let k = Key {
+        project: "p".into(),
+        milestone: "H6".into(),
+    };
+    let rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 30.0));
+    reader.reconcile("p", &[("H6".into(), Class::Later)]);
+    reader.targets = vec![
+        (Target::Strip(k.clone()), rect),
+        (Target::Header(k.clone()), rect),
+        (Target::Item(k.clone(), 0), rect),
+        (Target::Card(7), rect),
+    ];
+    assert!(reader.keyboard(egui::Key::Tab, false).0);
+    assert_eq!(reader.focus, Some(Target::Strip(k.clone())));
+    reader.keyboard(egui::Key::Space, false);
+    assert!(reader.project("p").opened.contains("H6"));
+    reader.keyboard(egui::Key::Tab, false);
+    reader.keyboard(egui::Key::ArrowDown, false);
+    assert_eq!(reader.focus, Some(Target::Item(k, 0)));
+    reader.keyboard(egui::Key::ArrowDown, false);
+    assert_eq!(reader.keyboard(egui::Key::Enter, false), (true, Some(7)));
+    reader.keyboard(egui::Key::Tab, false);
+    assert_eq!(reader.keyboard(egui::Key::ArrowRight, false), (false, None));
+}
+
+#[test]
+fn capture_milestone_reference_when_requested() {
+    let Ok(directory) = std::env::var("IVY_BOARD_CAPTURE") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    for named in [
+        crate::theme::NamedTheme::IvyNight,
+        crate::theme::NamedTheme::IvyDay,
+        crate::theme::NamedTheme::Nord,
+    ] {
+        for opened in [false, true] {
+            let ctx = egui::Context::default();
+            crate::fonts::install_bundled(&ctx);
+            let theme = named.theme();
+            let roles = Roles::of(&theme);
+            let mut reader = Reader::default();
+            let mut active = entry(2, Some("H3"), Some("TERRITORIES"), Some("wait"));
+            active.snapshot.document=Some(Arc::new(panel_contract::parse_document(r#"{"milestone":"H3","deliverable":"TERRITORIES","attention":"wait","phase":"design","lines":[{"text":"Special European territories and their tax details","style":"title"},{"text":"Migration or approval for territory tax rates?","mark":"wait","ref":"Decision"},{"text":"Expand the jurisdiction catalog","ref":"Now"}]}"#).unwrap()));
+            let section = section(
+                vec![entry(1, Some("H2"), Some("AEAT-SEAL"), None), active],
+                fixture(),
+            );
+            if opened {
+                let plan = section.roadmap.as_ref().unwrap().plan.as_ref().unwrap();
+                reader.reconcile(
+                    &project_key(&section),
+                    &plan
+                        .milestones
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            (
+                                strip::key(&project_key(&section), plan, i).milestone,
+                                Class::Later,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                reader.apply(&Action::Strip(strip::key(&project_key(&section), plan, 7)));
+            }
+            let mut textures = std::collections::HashMap::new();
+            let mut meshes = Vec::new();
+            for _ in 0..3 {
+                reader.hits.clear();
+                reader.targets.clear();
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(1440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        crate::board::style::apply(ui, &theme);
+                        ui.painter().rect_filled(ui.max_rect(), 0, roles.base);
+                        crate::board::bar::paint(
+                            ui,
+                            1440.0,
+                            crate::board::bar::Totals {
+                                consoles: 2,
+                                projects: 1,
+                                claiming: 1,
+                            },
+                            crate::board::filter::Arrangement::ByMilestone,
+                            &Default::default(),
+                            Some(false),
+                            &roles,
+                            &mut Vec::new(),
+                        );
+                        egui::Frame::new().inner_margin(16).show(ui, |ui| {
+                            project_header(
+                                ui,
+                                &section,
+                                Claims {
+                                    wait: 1,
+                                    ..Default::default()
+                                },
+                                true,
+                                &roles,
+                            );
+                            let plan = section.roadmap.as_ref().unwrap().plan.as_ref().unwrap();
+                            paint_plan_with(
+                                ui,
+                                &section,
+                                plan,
+                                &roles,
+                                &mut reader,
+                                &Default::default(),
+                                &column,
+                                &mut |ui, e, _, _, _| {
+                                    compact::paint(
+                                        ui,
+                                        e,
+                                        column(e),
+                                        true,
+                                        None,
+                                        Some("master"),
+                                        e.pane == 2,
+                                        &roles,
+                                        &mut crate::measure::Board::default(),
+                                    );
+                                },
+                            );
+                        });
+                    },
+                );
+                for (id, deltas) in &output.textures_delta.set {
+                    for delta in deltas {
+                        let egui::ImageData::Color(image) = &delta.image;
+                        let key = format!("{id:?}");
+                        let buffer = textures.entry(key).or_insert_with(|| {
+                            image::RgbaImage::new(image.width() as u32, image.height() as u32)
+                        });
+                        let [x, y] = delta.pos.unwrap_or([0, 0]);
+                        for iy in 0..image.height() {
+                            for ix in 0..image.width() {
+                                buffer.put_pixel(
+                                    (x + ix) as u32,
+                                    (y + iy) as u32,
+                                    image::Rgba(image.pixels[iy * image.width() + ix].to_array()),
+                                );
+                            }
+                        }
+                    }
+                }
+                meshes=ctx.tessellate(std::mem::take(&mut output.shapes),1.0).into_iter().filter_map(|p| {
+                    let egui::epaint::Primitive::Mesh(mesh)=p.primitive else {return None};
+                    Some(serde_json::json!({"clip":[p.clip_rect.min.x,p.clip_rect.min.y,p.clip_rect.max.x,p.clip_rect.max.y],"texture":format!("{:?}",mesh.texture_id),"indices":mesh.indices,"vertices":mesh.vertices.iter().map(|v|[v.pos.x,v.pos.y,v.uv.x,v.uv.y,v.color.r() as f32,v.color.g() as f32,v.color.b() as f32,v.color.a() as f32]).collect::<Vec<_>>()}))
+                }).collect();
+                output.drop_without_applying_deltas();
+            }
+            let name = format!("{}-{}", named.id(), if opened { "h6" } else { "default" });
+            for (id, image) in textures {
+                image
+                    .save(directory.join(format!("{name}-{id}.png")))
+                    .unwrap();
+            }
+            std::fs::write(
+                directory.join(format!("{name}.json")),
+                serde_json::to_vec(&meshes).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn show_all_paints_the_entire_roadmap_then_restores_the_compact_groups() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    let section = section(
+        vec![
+            entry(1, Some("H2"), Some("AEAT-SEAL"), None),
+            entry(2, Some("H3"), Some("TERRITORIES"), Some("wait")),
+        ],
+        fixture(),
+    );
+    render(&ctx, &section, &mut reader, &Default::default());
+    let headers = |r: &Reader| {
+        r.targets
+            .iter()
+            .filter_map(|(t, _)| match t {
+                Target::Header(k) if k.milestone != "@off" => Some(k.milestone.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = headers(&reader);
+    assert_eq!(before.len(), 5);
+    reader.apply(&Action::ShowAll(true));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(
+        headers(&reader),
+        fixture()
+            .milestones
+            .iter()
+            .map(|m| m.id.clone().unwrap())
+            .collect::<Vec<_>>()
+    );
+    reader.apply(&Action::ShowAll(false));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(headers(&reader), before);
+}
+
+#[test]
+fn outside_expansion_survives_projection_and_current_outside_items_are_visible() {
+    let mut plan = fixture();
+    plan.outside = (0..6)
+        .map(|i| panel_contract::plan::Item {
+            text: format!("Outside item {i}"),
+            mark: Some(if i == 4 { Mark::Current } else { Mark::Pending }),
+            ..Default::default()
+        })
+        .collect();
+    let section = section(Vec::new(), plan);
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    render(&ctx, &section, &mut reader, &Default::default());
+    let outside = |r: &Reader| {
+        r.targets
+            .iter()
+            .filter_map(|(t, _)| match t {
+                Target::Item(k, i) if k.milestone == "@off" => Some(*i),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(outside(&reader), [4, 5]);
+    let key = Key {
+        project: project_key(&section),
+        milestone: "@off".into(),
+    };
+    reader.apply(&Action::Toggle(key));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(outside(&reader), [0, 1, 2, 3, 4, 5]);
+}

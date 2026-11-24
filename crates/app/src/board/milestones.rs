@@ -1,5 +1,11 @@
-//! «By milestone»: each project's roadmap as columns, a console's card under the deliverable its
-//! panel declares, and «Off the plan» for whatever declares none (D6: the place is never deduced).
+mod columns;
+pub(super) mod compact;
+mod details;
+mod projection;
+pub(super) mod state;
+mod strip;
+// «By milestone»: each project's roadmap as columns, a console's card under the deliverable its
+// panel declares, and «Off the plan» for whatever declares none (D6: the place is never deduced).
 use super::{
     model::{Entry, Section},
     roadmap::{Placement, placement},
@@ -11,7 +17,7 @@ use panel_contract::{
     plan::{Milestone, Plan},
 };
 
-/// Below this a column's cards stop being readable, so the columns wrap onto another row.
+/// The responsive grid for projects without a roadmap.
 const MIN_COLUMN: f32 = 260.0;
 const GAP: f32 = 8.0;
 
@@ -78,7 +84,7 @@ pub(super) fn progress(milestone: &Milestone) -> (usize, usize) {
 
 /// How many columns fit side by side, and how wide each one is.
 pub(super) fn grid(width: f32, columns: usize) -> (usize, f32) {
-    let fit = (((width + GAP) / (MIN_COLUMN + GAP)).floor() as usize).clamp(1, columns.max(1));
+    let fit = (((width + GAP) / (MIN_COLUMN + GAP)).floor() as usize).clamp(1, columns.clamp(1, 4));
     (
         fit,
         ((width - GAP * (fit - 1) as f32) / fit as f32).max(1.0),
@@ -88,107 +94,9 @@ pub(super) fn grid(width: f32, columns: usize) -> (usize, f32) {
 /// What paints a card: the Board's own painter, handed in so this module never owns navigation.
 pub(super) type CardPainter<'p> = dyn FnMut(&mut egui::Ui, &Entry, usize, usize, f32) + 'p;
 
-fn column_header(
-    ui: &mut egui::Ui,
-    width: f32,
-    title: &str,
-    progress: Option<(usize, usize)>,
-    tally: usize,
-    after: Option<&str>,
-    roles: &Roles,
-) {
-    let height = if after.is_some() { 52.0 } else { 36.0 };
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
-    let painter = ui.painter();
-    let font = FontId::new(13.0, crate::fonts::ui_weight(ui.ctx(), 600));
-    // A milestone counts deliverables done; «Off the plan» has none, so it counts its consoles.
-    let counted = progress.map_or_else(|| tally.to_string(), |(done, all)| format!("{done}/{all}"));
-    let count_at = pos2(rect.right() - 4.0, rect.top() + 12.0);
-    let count_width = painter
-        .text(
-            count_at,
-            Align2::RIGHT_CENTER,
-            counted,
-            FontId::monospace(11.0),
-            roles.tx3,
-        )
-        .width();
-    let clip = Rect::from_min_max(rect.min, pos2(count_at.x - count_width - 8.0, rect.max.y));
-    painter
-        .with_clip_rect(clip.intersect(painter.clip_rect()))
-        .text(
-            pos2(rect.left() + 4.0, rect.top() + 12.0),
-            Align2::LEFT_CENTER,
-            title,
-            font,
-            roles.tx,
-        );
-    let track = Rect::from_min_size(
-        pos2(rect.left() + 4.0, rect.top() + 26.0),
-        vec2(width - 8.0, 3.0),
-    );
-    if progress.is_some() {
-        painter.rect_filled(track, 1.5, roles.line);
-    }
-    if let Some((done, all)) = progress.filter(|(_, all)| *all > 0) {
-        let filled = track.width() * done as f32 / all as f32;
-        painter.rect_filled(
-            Rect::from_min_size(track.min, vec2(filled, 3.0)),
-            1.5,
-            roles.accent,
-        );
-    }
-    if let Some(after) = after {
-        painter
-            .with_clip_rect(rect.intersect(painter.clip_rect()))
-            .text(
-                pos2(rect.left() + 4.0, rect.top() + 42.0),
-                Align2::LEFT_CENTER,
-                after,
-                FontId::proportional(11.5),
-                roles.tx3,
-            );
-    }
-}
+pub(super) use columns::paint as paint_plan_with;
 
-/// One muted line under a milestone's header, cut at the column's edge.
-fn note(ui: &mut egui::Ui, width: f32, text: &str, roles: &Roles) {
-    let (row, _) = ui.allocate_exact_size(vec2(width, 18.0), egui::Sense::hover());
-    ui.painter()
-        .with_clip_rect(row.intersect(ui.clip_rect()))
-        .text(
-            pos2(row.left() + 4.0, row.center().y),
-            Align2::LEFT_CENTER,
-            super::cards::clean(text),
-            FontId::proportional(11.5),
-            roles.tx3,
-        );
-}
-
-fn deliverable(ui: &mut egui::Ui, width: f32, text: &str, mark: Option<Mark>, roles: &Roles) {
-    let (row, _) = ui.allocate_exact_size(vec2(width, 22.0), egui::Sense::hover());
-    let (mark, ink, text_ink) = match mark {
-        Some(Mark::Done) => (Mark::Done, roles.accent, roles.tx3),
-        Some(Mark::Current) => (Mark::Current, roles.accent, roles.tx),
-        Some(Mark::Block) => (Mark::Block, roles.block, roles.tx),
-        Some(Mark::Wait) => (Mark::Wait, roles.wait, roles.tx),
-        _ => (Mark::Pending, roles.tx3, roles.tx2),
-    };
-    let glyph = Rect::from_center_size(pos2(row.left() + 10.0, row.center().y), vec2(12.0, 16.0));
-    crate::panel::body::paint_mark(ui.painter(), glyph, mark, ink, FontId::monospace(12.0));
-    ui.painter()
-        .with_clip_rect(row.intersect(ui.clip_rect()))
-        .text(
-            pos2(row.left() + 22.0, row.center().y),
-            Align2::LEFT_CENTER,
-            super::cards::clean(text),
-            FontId::proportional(12.5),
-            text_ink,
-        );
-}
-
-/// A project whose plan is laid out as columns. `paint_card(ui, entry, row, column, width)` paints
-/// one card at the next free spot; this returns how many navigation rows the project used.
+#[cfg(test)]
 pub(super) fn paint_plan(
     ui: &mut egui::Ui,
     section: &Section,
@@ -196,83 +104,31 @@ pub(super) fn paint_plan(
     roles: &Roles,
     paint_card: &mut CardPainter,
 ) -> usize {
-    let placed = place(&section.entries, plan);
-    let columns = plan.milestones.len() + 1;
-    let (fit, width) = grid(ui.available_width(), columns);
-    let mut rows_used = 0;
-    let mut first = 0;
-    while first < columns {
-        let last = (first + fit).min(columns);
-        let mut tallest = 0;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = GAP;
-            for index in first..last {
-                ui.allocate_ui_with_layout(
-                    vec2(width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_width(width);
-                        let mut row = rows_used;
-                        // The grid column on screen, not the milestone's index: ↑/↓ move between
-                        // wrapped rows by it.
-                        let column = index - first;
-                        if let Some(milestone) = plan.milestones.get(index) {
-                            let title = match &milestone.id {
-                                Some(id) => format!("{id} · {}", milestone.title),
-                                None => milestone.title.clone(),
-                            };
-                            let after = after(milestone, plan);
-                            column_header(
-                                ui,
-                                width,
-                                &super::cards::clean(&title),
-                                Some(progress(milestone)),
-                                0,
-                                after.as_deref(),
-                                roles,
-                            );
-                            if let Some(criterion) = &milestone.done_when {
-                                note(ui, width, &format!("Done when: {criterion}"), roles);
-                            }
-                            for (item, consoles) in
-                                milestone.items.iter().zip(&placed.milestones[index].items)
-                            {
-                                deliverable(ui, width, &item.text, item.mark, roles);
-                                for entry in consoles {
-                                    paint_card(ui, entry, row, column, width);
-                                    row += 1;
-                                }
-                            }
-                            for entry in &placed.milestones[index].loose {
-                                paint_card(ui, entry, row, column, width);
-                                row += 1;
-                            }
-                        } else {
-                            // Everything the column holds: the plan's outside work and the consoles.
-                            let count = placed.off.len() + plan.outside.len();
-                            column_header(ui, width, "Off the plan", None, count, None, roles);
-                            // The plan's own work outside its milestones (a contract, a review) is
-                            // the plan's, not a console's: listed here, above the consoles.
-                            for item in &plan.outside {
-                                deliverable(ui, width, &item.text, item.mark, roles);
-                            }
-                            if placed.off.is_empty() && plan.outside.is_empty() {
-                                ui.weak("—");
-                            }
-                            for entry in &placed.off {
-                                paint_card(ui, entry, row, column, width);
-                                row += 1;
-                            }
-                        }
-                        tallest = tallest.max(row - rows_used);
-                    },
-                );
-            }
-        });
-        rows_used += tallest.max(1);
-        first = last;
-    }
-    rows_used
+    let mut reader = state::Reader::default();
+    reader.apply(&state::Action::ShowAll(true));
+    paint_plan_with(
+        ui,
+        section,
+        plan,
+        roles,
+        &mut reader,
+        &super::filter::Filter::default(),
+        &|entry| {
+            super::observation::classify(
+                entry.snapshot.document.as_deref(),
+                None,
+                std::time::SystemTime::now(),
+            )
+        },
+        paint_card,
+    )
+}
+
+pub(super) fn project_key(section: &Section) -> String {
+    section.key.as_ref().map_or_else(
+        || format!("name:{}", section.name()),
+        |key| format!("{key:?}"),
+    )
 }
 
 /// A project with no roadmap: its cards in one wrapping row, under «no roadmap».
@@ -320,15 +176,15 @@ pub(super) struct Claims {
 }
 
 /// A project's name in its header ink, its consoles, how many sit in each claiming column, and
-/// where its roadmap came from — or why it could not be read. The source is named, not linked: it
-/// is a file path or a publication, and the Board opens only web addresses (`links::WebTarget`).
+/// where its roadmap came from — or why it could not be read. Returns the source target so the
+/// Board can route an explicit local-file click through its read-only document viewer.
 pub(super) fn project_header(
     ui: &mut egui::Ui,
     section: &Section,
     claims: Claims,
     with_roadmap: bool,
     roles: &Roles,
-) {
+) -> Option<Rect> {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), egui::Sense::hover());
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let y = rect.center().y;
@@ -423,14 +279,47 @@ pub(super) fn project_header(
         .as_ref()
         .filter(|r| with_roadmap && r.plan.is_some())
     {
-        painter.text(
-            pos2(rect.right() - 4.0, y),
-            Align2::RIGHT_CENTER,
-            super::cards::clean(&source.source),
-            FontId::monospace(11.0),
-            roles.tx3,
+        let source_rect = Rect::from_min_max(
+            pos2(rect.right() - (rect.width() * 0.36).min(420.0), rect.top()),
+            rect.max,
         );
+        let old = source.published_at.is_some_and(|at| {
+            std::time::SystemTime::now()
+                .duration_since(at)
+                .unwrap_or_default()
+                .as_secs()
+                > 86400
+        });
+        let label = if source.path.is_some() {
+            format!("{} ↗", source.source)
+        } else {
+            source.source.clone()
+        };
+        strip::text(
+            ui,
+            source_rect,
+            &label,
+            FontId::monospace(11.0),
+            if old { roles.wait } else { roles.tx3 },
+            1,
+        );
+        ui.interact(
+            source_rect,
+            ui.id().with(("roadmap-source", project_key(section))),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(format!(
+            "{}\n{}",
+            source.source,
+            if source.path.is_some() {
+                "Open roadmap"
+            } else {
+                "Local roadmap source is unavailable"
+            }
+        ));
+        return Some(source_rect);
     }
+    None
 }
 
 #[cfg(test)]
@@ -529,6 +418,8 @@ mod tests {
                 plan: plan.map(std::sync::Arc::new),
                 source: "ROADMAP.md".into(),
                 error: error.map(str::to_owned),
+                published_at: None,
+                path: None,
             }),
             ink: None,
         }
@@ -553,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn wrapped_milestones_restart_their_grid_column_so_up_and_down_stay_in_line() {
+    fn milestone_columns_keep_their_horizontal_identity_when_the_row_overflows() {
         let plan = panel_contract::plan::parse_document_noting(
             r#"{"milestones":[{"id":"A","title":"A","items":[]},{"id":"B","title":"B","items":[]},{"id":"C","title":"C","items":[]}]}"#,
         )
@@ -561,16 +452,13 @@ mod tests {
         .0;
         let entries = vec![entry(1, Some("A"), None), entry(3, Some("C"), None)];
         let section = section(entries, None, None);
-        // Two columns fit: A and B on the first row, C and Off the plan on the second.
+        // The row overflows horizontally; C remains the third column.
         let asked = laid_out(600.0, &section, &plan);
         let a = asked.iter().find(|(p, ..)| *p == 1).unwrap();
         let c = asked.iter().find(|(p, ..)| *p == 3).unwrap();
         assert_eq!(a.2, 0);
-        assert_eq!(
-            c.2, 0,
-            "C is the first column of its row, not the third column overall"
-        );
-        assert!(c.1 > a.1, "C sits on a later navigation row");
+        assert_eq!(c.2, 2, "C keeps its horizontal column");
+        assert_eq!(c.1, a.1, "columns share the same navigation row");
     }
 
     #[test]
@@ -583,9 +471,9 @@ mod tests {
         ];
         let section = section(entries, None, None);
         let asked = laid_out(1200.0, &section, &plan());
-        // Painted in the plan's order: under R1, under R2, then the loose card after them all.
+        // Milestone-level cards precede items, which remain in roadmap order.
         let order: Vec<usize> = asked.iter().map(|(p, ..)| *p).collect();
-        assert_eq!(order, [2, 1, 0]);
+        assert_eq!(order, [0, 2, 1]);
         assert_eq!(
             progress(&plan().milestones[0]),
             (0, 2),
@@ -697,3 +585,7 @@ mod tests {
         assert!(!says(header_texts_with(&other, true), "no roadmap"));
     }
 }
+
+#[cfg(test)]
+#[path = "milestones/tests.rs"]
+mod specification_tests;

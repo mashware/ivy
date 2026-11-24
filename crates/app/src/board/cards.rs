@@ -18,6 +18,8 @@ pub(super) enum Command {
     Compact(usize),
     /// A press on the Board's top bar, which belongs to no card.
     Bar(super::bar::Action),
+    Milestone(super::milestones::state::Action),
+    Source(usize, std::path::PathBuf),
 }
 #[derive(Default)]
 pub(super) struct Reader {
@@ -39,7 +41,7 @@ impl Reader {
             Command::Body(_, action) => self.body.apply(action),
             Command::Expand(_) => self.full = !self.full,
             Command::Compact(_) => self.opened = !self.opened,
-            Command::Bar(_) => return,
+            Command::Bar(_) | Command::Milestone(_) | Command::Source(..) => return,
         }
         self.cache = None;
     }
@@ -406,7 +408,7 @@ fn state_row(
     }
 }
 
-fn dashed(painter: &egui::Painter, rect: Rect, color: Color32) {
+pub(super) fn dashed(painter: &egui::Painter, rect: Rect, color: Color32) {
     let r = rect.shrink(0.5);
     let inset = f32::from(crate::theme::metrics::RADIUS_CARD);
     let stroke = egui::Stroke::new(1.0, color);
