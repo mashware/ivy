@@ -1,9 +1,10 @@
 //! The small fixture vocabulary used by cross-platform console tests.
 
 // Windows cooked input waits for CR, while the original fixtures send LF. Read the child's
-// real console in character mode and recognize either terminator ourselves; ReadConsoleW
+// real console in VT character mode and recognize either terminator ourselves; ReadConsoleW
 // preserves Unicode without depending on PowerShell's input code page. Disable echo too,
-// so only a fixture that actually reads and writes can produce its output witness.
+// so only a fixture that actually reads and writes can produce its output witness. Non-VT
+// ReadConsoleW drops LF even with line input off (microsoft/terminal src/host/stream.cpp).
 // https://learn.microsoft.com/en-us/windows/console/setconsolemode
 // https://learn.microsoft.com/en-us/windows/console/readconsole
 const CONSOLE_INPUT: &str = r#"Add-Type -TypeDefinition @'
@@ -26,7 +27,7 @@ public static class IvyFixtureInput {
     public static void Prepare() {
         input = GetStdHandle(-10);
         uint mode;
-        if (!GetConsoleMode(input, out mode) || !SetConsoleMode(input, mode & ~6u))
+        if (!GetConsoleMode(input, out mode) || !SetConsoleMode(input, (mode & ~6u) | 0x200u))
             throw new Win32Exception(Marshal.GetLastWin32Error());
         PrepareOutput();
     }

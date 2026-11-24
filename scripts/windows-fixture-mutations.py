@@ -14,6 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = "crates/app/src/tests/windows_fixture.rs"
 MUTATIONS = [
     (
+        "console-input-drops-line-feed", FIXTURE,
+        "SetConsoleMode(input, (mode & ~6u) | 0x200u)",
+        "SetConsoleMode(input, mode & ~6u)",
+        "tests::windows_fixture::directory_and_input_fixtures_set_cwd_and_record_received_utf8_without_bom",
+    ),
+    (
         "timestamp-handle-is-read-only", "crates/app/src/panel.rs",
         'std::fs::OpenOptions::new()\n            .write(true)\n'
         '            .open(dir.path().join(PANEL_FILE))\n            .expect("open")\n'
