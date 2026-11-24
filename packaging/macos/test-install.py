@@ -126,7 +126,7 @@ assert all("error" not in a and not a["result"].get("isError") for a in answers)
 assert answers[0]["result"]["serverInfo"]["version"] == os.environ["IVY_MAC_VERSION"], answers[0]
 assert {t["name"] for t in answers[1]["result"]["tools"]} == {
     "panel_set","panel_get","panel_patch","panel_retire",
-    "plan_set","plan_get","plan_retire","split_open","split_read","split_close"}, answers[1]
+    "plan_set","plan_get","plan_retire","split_open","split_read","split_close","image_open"}, answers[1]
 assert "IVY_MAC_PACKAGE_OK" in json.dumps(answers[3]["result"]["content"]), answers[3]
 helper = subprocess.run([os.environ["IVY_MAC_HELPER"], "attach", "claude"],
                         text=True, capture_output=True, timeout=5)
