@@ -1,5 +1,7 @@
 """Portable rejection and payload tests for Windows packaging (not native runtime proof)."""
 import hashlib
+import ctypes
+from unittest.mock import patch
 import importlib.util
 import json
 import shutil
@@ -45,6 +47,47 @@ def pinned(dll, host):
     """A pin over the given bytes, as conpty.json spells it."""
     return {'conpty.dll': {'member': DLL_MEMBER, 'sha256': hashlib.sha256(dll).hexdigest()},
             'OpenConsole.exe': {'member': HOST_MEMBER, 'sha256': hashlib.sha256(host).hexdigest()}}
+
+
+class WindowsLaunchWitnessTests(unittest.TestCase):
+    def test_selects_only_the_named_non_dialog_main_window(self):
+        windows = [{'handle': 1, 'title': 'Default IME', 'class': 'IME'},
+                   {'handle': 2, 'title': 'Ivy', 'class': '#32770'},
+                   {'handle': 3, 'title': 'Ivy', 'class': 'winit'}]
+        self.assertEqual(GUI.main_window(windows), 3)
+        self.assertIsNone(GUI.main_window(windows[:2]))
+
+    def test_reads_exact_readiness_marker_for_all_default_windows_shell_encodings(self):
+        with tempfile.TemporaryDirectory() as root:
+            marker = Path(root, 'marker')
+            self.assertFalse(GUI.marker_matches(marker, 'token'))
+            for encoding in ('utf-8', 'utf-8-sig', 'utf-16'):
+                marker.write_bytes('token\r\n'.encode(encoding))
+                self.assertTrue(GUI.marker_matches(marker, 'token'))
+                self.assertFalse(GUI.marker_matches(marker, 'other'))
+            marker.write_bytes(b'\xff')
+            self.assertFalse(GUI.marker_matches(marker, 'token'))
+
+    def test_sendinput_layout_and_unicode_enter_match_the_existing_native_witness(self):
+        self.assertEqual(ctypes.sizeof(GUI.KeyboardInput), 24)
+        self.assertEqual(ctypes.sizeof(GUI.MouseInput), 32)
+        self.assertEqual(GUI.Input.u.offset, 8)
+        self.assertEqual(ctypes.sizeof(GUI.Input), 40)
+        captured = []
+        class Native:
+            def SendInput(self, count, events, size):
+                self_size = ctypes.sizeof(GUI.Input)
+                if size != self_size:
+                    raise AssertionError('incorrect native input size')
+                captured.extend((e.type, e.u.keyboard.key, e.u.keyboard.scan,
+                                 e.u.keyboard.flags) for e in events)
+                return count
+        with patch.object(GUI, 'U', Native(), create=True):
+            GUI.type_command('A\U0001f600')
+        self.assertEqual(captured, [(1, 0, 65, 4), (1, 0, 65, 6),
+                                    (1, 0, 0xd83d, 4), (1, 0, 0xd83d, 6),
+                                    (1, 0, 0xde00, 4), (1, 0, 0xde00, 6),
+                                    (1, 13, 0, 0), (1, 13, 0, 2)])
 
 
 class WindowsIconTests(unittest.TestCase):
