@@ -4,7 +4,6 @@ use panel_contract::PanelDir;
 use panel_control::Channel;
 use panel_control::session::Client;
 use serde_json::{Value, json};
-use std::ffi::OsStr;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{Receiver, sync_channel};
@@ -15,6 +14,8 @@ const CLAUDE_AUTHORIZED_MESSAGE: &str =
     "Responde solo OK, sin usar herramientas ni modificar archivos";
 const ROOT_SCRIPT: &str = r#"
 import os,sys,socket,json,termios,subprocess
+# Traceback assertions compare plain text even when Python enables terminal colors by default.
+os.environ['PYTHON_COLORS']='0'
 a=termios.tcgetattr(0);a[3]&=~termios.ECHO;termios.tcsetattr(0,termios.TCSANOW,a)
 endpoint=sys.argv[1]
 helper='import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(sys.argv[2].encode()+b"\\n"); print(s.makefile().readline(),end="")'
@@ -139,8 +140,6 @@ impl Fixture {
         let cleanup = FixtureExecutable(executable.clone());
         let endpoint = directory.path().join(panel_contract::CONTROL_SOCKET);
         let mut directories = FixtureDirectories(Vec::new());
-        // Python colors tracebacks on a PTY; diagnostic fixtures need the same bytes on every terminal.
-        let environment = [("PYTHON_COLORS", Some(OsStr::new("0")))];
         let (pty, output) = if wrapped {
             for name in ["shell-cwd", "client-cwd", "closing-cwd"] {
                 let path = directory.path().join(name);
@@ -158,15 +157,14 @@ impl Fixture {
                     ROOT_SCRIPT,
                 ],
                 Size::default(),
-                &environment,
+                &[],
                 Some(&directories.0[0]),
             )
         } else {
-            Pty::spawn_with_env(
+            Pty::spawn(
                 executable.to_str().unwrap(),
                 &["-c", ROOT_SCRIPT, endpoint.to_str().unwrap()],
                 Size::default(),
-                &environment,
             )
         }
         .unwrap();
