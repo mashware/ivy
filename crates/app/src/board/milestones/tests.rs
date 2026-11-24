@@ -152,7 +152,7 @@ fn widths_preserve_collapsed_width_and_use_horizontal_overflow() {
     let widths = projection::widths(1440.0, &[(false, true), (true, false), (false, false)], 1);
     assert_eq!(widths[1], 190.0);
     assert!(widths[0] > widths[2]);
-    assert!((widths.iter().sum::<f32>() + 64.0 - 1440.0).abs() < 0.1);
+    assert!((widths.iter().sum::<f32>() + 44.0 - 1440.0).abs() < 0.1);
 }
 fn render(
     ctx: &egui::Context,
@@ -867,4 +867,61 @@ fn publication_age_over_a_day_uses_wait_ink_while_fresh_age_is_muted() {
         output.drop_without_applying_deltas();
         assert_eq!(actual, Some(expected));
     }
+}
+
+#[test]
+fn column_groups_use_one_gap_and_published_values_keep_their_own_column() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut claim = entry(2, Some("H3"), Some("TERRITORIES"), Some("wait"));
+    claim.snapshot.document = Some(Arc::new(panel_contract::parse_document(r#"{"milestone":"H3","deliverable":"TERRITORIES","attention":"wait","lines":[{"text":"Tax details","style":"title"},{"text":"Migration or approval for territory tax rates?","ref":"Decision","mark":"wait"},{"text":"Expand the jurisdiction catalog","ref":"Now"}]}"#).unwrap()));
+    let section = section(
+        vec![entry(1, Some("H2"), Some("AEAT-SEAL"), None), claim],
+        fixture(),
+    );
+    let mut reader = Reader::default();
+    render(&ctx, &section, &mut reader, &Default::default());
+    let shapes = render(&ctx, &section, &mut reader, &Default::default());
+    let headers: Vec<_> = reader
+        .targets
+        .iter()
+        .filter_map(|(t, r)| matches!(t, Target::Header(_)).then_some(*r))
+        .collect();
+    assert!(
+        headers
+            .iter()
+            .all(|h| (h.top() - headers[0].top()).abs() < 0.1),
+        "column headers must share a baseline"
+    );
+    assert!((headers[1].left() - headers[0].right() - 20.0).abs() < 0.1);
+    assert!(
+        (headers[3].left() - headers[2].right() - 24.0).abs() < 0.1,
+        "group gap must replace, not add to, the column gap: {headers:?}"
+    );
+    let text = |needle: &str| {
+        shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == needle => Some(t),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let decision = text("Decision");
+    let now = text("Now");
+    let decision_value = text("Migration or approval for territory tax rates?");
+    let now_value = text("Expand the jurisdiction catalog");
+    assert_eq!(
+        decision.pos.x, now.pos.x,
+        "published keys must align despite an optional mark"
+    );
+    assert_eq!(
+        decision_value.pos.x, now_value.pos.x,
+        "published values must align"
+    );
+    assert!(
+        decision_value.pos.x >= decision.pos.x + 66.0,
+        "a wrapped value must not run below its key"
+    );
+    assert!(now.pos.y >= decision_value.pos.y + decision_value.galley.size().y + 6.0);
 }

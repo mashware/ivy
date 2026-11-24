@@ -152,7 +152,7 @@ pub(super) fn header(
         );
     }
     ui.separator();
-    ui.add_space(4.0);
+    ui.add_space(8.0);
 }
 pub(super) fn button(
     ui: &mut egui::Ui,
@@ -205,6 +205,7 @@ pub(super) fn item_row(
         (ui.available_width() - 22.0).max(1.0),
     );
     job.wrap.max_rows = 2;
+    job.wrap.break_anywhere = false;
     job.wrap.overflow_character = Some('…');
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
     let height = galley.size().y.max(22.0);

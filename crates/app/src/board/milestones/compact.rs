@@ -17,6 +17,32 @@ pub(super) fn excerpt(panel: &panel_contract::Panel) -> Vec<&panel_contract::Lin
     lines.sort_by_key(|(i, line)| (!matches!(line.mark, Some(Mark::Wait | Mark::Block)), *i));
     lines.into_iter().take(3).map(|(_, line)| line).collect()
 }
+// Measure the same word-wrapped text that is painted: short rows leave no empty slots,
+// while long values keep their own column instead of running underneath the published key.
+fn layout(
+    ui: &egui::Ui,
+    text: &str,
+    font: FontId,
+    ink: egui::Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(cards::clean(text), font, ink, width.max(1.0));
+    job.wrap.max_rows = 3;
+    job.wrap.overflow_character = Some('…');
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+fn value_inset(line: &panel_contract::Line, width: f32) -> f32 {
+    let mark = if line.mark.is_some() || line.reference.as_deref().is_some_and(|s| !s.is_empty()) {
+        16.0
+    } else {
+        0.0
+    };
+    mark + if line.reference.as_deref().is_some_and(|s| !s.is_empty()) {
+        66.0_f32.min(width * 0.4) + 8.0
+    } else {
+        0.0
+    }
+}
 #[allow(clippy::too_many_arguments)]
 pub(in crate::board) fn paint(
     ui: &mut egui::Ui,
@@ -38,11 +64,43 @@ pub(in crate::board) fn paint(
         || entry.snapshot.warning.is_some()
         || (column == Column::Wait && !backed);
     let claim = crate::board::filter::claims(column);
-    let height = 74.0
-        + if claim { 24.0 } else { 0.0 }
-        + rows.len() as f32 * 38.0
+    let content_width = (width - 20.0).max(1.0);
+    let title = layout(
+        ui,
+        cards::title(entry),
+        FontId::monospace(12.5),
+        roles.tx,
+        content_width,
+    );
+    let values: Vec<_> = rows
+        .iter()
+        .map(|line| {
+            let ink = match line.mark {
+                Some(Mark::Wait) => roles.wait,
+                Some(Mark::Block) => roles.block,
+                _ => roles.tx2,
+            };
+            layout(
+                ui,
+                &line.text,
+                FontId::monospace(11.5),
+                ink,
+                content_width - value_inset(line, content_width),
+            )
+        })
+        .collect();
+    let height = 20.0
+        + title.size().y
+        + 8.0
+        + 16.0
+        + if claim { 28.0 } else { 0.0 }
+        + values
+            .iter()
+            .map(|v| v.size().y.max(16.0) + 6.0)
+            .sum::<f32>()
         + if warning { 32.0 } else { 0.0 }
-        + if stale { 18.0 } else { 0.0 };
+        + if stale { 18.0 } else { 0.0 }
+        + if doc.is_none() { 22.0 } else { 0.0 };
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
     timing.content_layout(started.elapsed());
     let started = Instant::now();
@@ -119,38 +177,56 @@ pub(in crate::board) fn paint(
                 "Observed {age}; time before observation is unknown"
             ));
         }
-        y += 24.0;
+        y += 28.0;
     }
-    super::strip::text(
-        ui,
-        Rect::from_min_size(pos2(inner.left(), y), vec2(inner.width(), 34.0)),
-        cards::title(entry),
-        FontId::monospace(12.5),
-        ink(roles.tx),
-        2,
-    );
-    y += 36.0;
-    for line in &rows {
+    let title_height = title.size().y;
+    ui.painter().galley(pos2(inner.left(), y), title, roles.tx);
+    y += title_height + 8.0;
+    for (line, value) in rows.iter().zip(values) {
         let color = match line.mark {
             Some(Mark::Wait) => roles.wait,
             Some(Mark::Block) => roles.block,
             _ => roles.tx2,
         };
-        let label = line.reference.as_deref().unwrap_or("");
-        let prefix = if label.is_empty() {
-            String::new()
-        } else {
-            format!("{label}  ")
-        };
-        super::strip::text(
-            ui,
-            Rect::from_min_size(pos2(inner.left(), y), vec2(inner.width(), 36.0)),
-            &format!("{prefix}{}", line.text),
-            FontId::monospace(11.5),
-            ink(color),
-            2,
+        let mark_width =
+            if line.mark.is_some() || line.reference.as_deref().is_some_and(|s| !s.is_empty()) {
+                16.0
+            } else {
+                0.0
+            };
+        if let Some(mark) = line.mark {
+            crate::panel::body::paint_mark(
+                ui.painter(),
+                Rect::from_min_size(pos2(inner.left(), y), vec2(14.0, 18.0)),
+                mark,
+                color,
+                FontId::monospace(11.5),
+            );
+        }
+        if let Some(label) = line.reference.as_deref().filter(|s| !s.is_empty()) {
+            super::strip::text(
+                ui,
+                Rect::from_min_size(
+                    pos2(inner.left() + mark_width, y),
+                    vec2(66.0_f32.min(inner.width() * 0.4), 18.0),
+                ),
+                label,
+                FontId::monospace(11.5),
+                if matches!(line.mark, Some(Mark::Wait | Mark::Block)) {
+                    color
+                } else {
+                    roles.tx3
+                },
+                1,
+            );
+        }
+        let height = value.size().y.max(16.0);
+        ui.painter().galley(
+            pos2(inner.left() + value_inset(line, inner.width()), y),
+            value,
+            color,
         );
-        y += 38.0;
+        y += height + 6.0;
     }
     if warning {
         let message = entry
@@ -224,15 +300,19 @@ pub(in crate::board) fn paint(
         ink(roles.tx3),
         1,
     );
+    let phase_rect = Rect::from_min_size(
+        pos2(footer.right() - phase_width, footer.top() - 2.0),
+        vec2(phase_width, 18.0),
+    );
+    if !phase.is_empty() {
+        ui.painter().rect_filled(phase_rect, 4, roles.raised);
+    }
     super::strip::text(
         ui,
-        Rect::from_min_size(
-            pos2(footer.right() - phase_width, footer.top()),
-            vec2(phase_width, 16.0),
-        ),
+        phase_rect.shrink2(vec2(5.0, 0.0)),
         phase,
         FontId::proportional(11.0),
-        ink(roles.tx3),
+        roles.tx3,
         1,
     );
     if stale {

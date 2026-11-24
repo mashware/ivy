@@ -236,7 +236,7 @@ pub(super) fn visible_items(
 
 /// Fixed collapsed columns; expanded columns share the surplus in proportion to their weight.
 pub(super) fn widths(available: f32, columns: &[(bool, bool)], separators: usize) -> Vec<f32> {
-    let gaps = columns.len().saturating_sub(1) as f32 * 20.0 + separators as f32 * 24.0;
+    let gaps = columns.len().saturating_sub(1) as f32 * 20.0 + separators as f32 * 4.0;
     let minimum: f32 = columns
         .iter()
         .map(|(collapsed, _)| if *collapsed { 190.0 } else { 240.0 })

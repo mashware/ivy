@@ -123,7 +123,7 @@ pub(in crate::board) fn paint(
     let widths = super::projection::widths(ui.available_width(), &sizes, separators);
     let total = widths.iter().sum::<f32>()
         + 20.0 * specs.len().saturating_sub(1) as f32
-        + 24.0 * separators as f32;
+        + 4.0 * separators as f32;
     let viewport_width = ui.available_width();
     let reveal = reader.reveal.clone().filter(|k| k.project == project);
     let mut rows = 1;
@@ -139,11 +139,12 @@ pub(in crate::board) fn paint(
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (n, (spec, width)) in specs.iter().zip(&widths).enumerate() {
                     if n > 0 {
-                        ui.add_space(20.0);
                         if specs[n - 1].group != spec.group {
                             let at = ui.next_widget_position();
-                            boundaries.push(at.x + 11.0);
+                            boundaries.push(at.x + 12.0);
                             ui.add_space(24.0);
+                        } else {
+                            ui.add_space(20.0);
                         }
                     }
                     let start = ui.next_widget_position();
@@ -162,9 +163,9 @@ pub(in crate::board) fn paint(
                         |ui| {
                             ui.set_width(*width);
                             ui.set_clip_rect(bounds.intersect(ui.clip_rect()));
+                            let (caption, _) =
+                                ui.allocate_exact_size(vec2(*width, 24.0), egui::Sense::hover());
                             if !show_all && (n == 0 || specs[n - 1].group != spec.group) {
-                                let (caption, _) = ui
-                                    .allocate_exact_size(vec2(*width, 24.0), egui::Sense::hover());
                                 strip::text(
                                     ui,
                                     caption,
@@ -173,8 +174,6 @@ pub(in crate::board) fn paint(
                                     roles.tx3,
                                     1,
                                 );
-                            } else {
-                                ui.add_space(24.0);
                             }
                             let mut row = 0;
                             if let Some(i) = spec.index {

@@ -22,7 +22,7 @@ pub(super) fn text(
         rect.width().max(0.0),
     );
     job.wrap.max_rows = rows;
-    job.wrap.break_anywhere = true;
+    job.wrap.break_anywhere = rows == 1;
     job.wrap.overflow_character = Some('…');
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
     ui.painter()
@@ -63,7 +63,7 @@ pub(super) fn paint(
         return;
     }
     let width = ((ui.available_width() - 4.0 * (count - 1) as f32) / count as f32).max(0.0);
-    let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), egui::Sense::hover());
+    let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), egui::Sense::hover());
     for (i, m) in plan.milestones.iter().enumerate() {
         let rect = Rect::from_min_size(
             pos2(strip.left() + i as f32 * (width + 4.0), strip.top()),
@@ -226,7 +226,7 @@ pub(super) fn paint(
         reader.targets.push((Target::Strip(k), rect));
     }
     let (legend, _) =
-        ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
+        ui.allocate_exact_size(vec2(ui.available_width(), 32.0), egui::Sense::hover());
     text(
         ui,
         legend,
