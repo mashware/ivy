@@ -79,12 +79,19 @@ jobs:
           if (-not (Select-String -Path windows-altgr.log -SimpleMatch 'PASS all 10 native keyboard cases')) {
             throw 'The native keyboard witness did not finish every case.'
           }
+      - name: Prove native Ctrl+Alt regression detection
+        shell: pwsh
+        env:
+          IVY_DISPOSABLE_RUNNER: 'yes'
+        run: |
+          python scripts/windows-altgr-mutation.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Keep native Ctrl+Alt evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-altgr-evidence
-          path: windows-altgr.log
+          path: windows-altgr*.log
           if-no-files-found: warn
       - name: Check native full-queue reader completion before the workspace
         shell: pwsh

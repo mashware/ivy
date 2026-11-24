@@ -45,7 +45,7 @@
 //!    D115's arms;
 //! D122 adds a separately fingerprinted Ctrl+Alt dispatcher and pins its Windows call before
 //! key and clipboard dispatch. Portable effect tests exercise that dispatcher; the native
-//! `windows_altgr` example tests actual OS events, with installed-terminal manual checks separate.
+//! `windows_altgr.rs` example tests actual OS events, with installed-terminal manual checks separate.
 //!
 //! c) nothing else in the vendored copy has been *edited* — every file but `src/lib.rs` is locked by
 //!    a content hash, and `src/lib.rs` is locked **outside** its patched places, so a change
