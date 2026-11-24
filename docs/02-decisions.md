@@ -10624,6 +10624,16 @@ the definitions — start-up, a configured family, fallback discovery, a Setting
 font — starts from that base, so none of them can drop it. A configured `font` still goes first.
 Embedding needs no enumeration of the machine, so D24 stands.
 
+**Header symbol fallback, 24 November 2026 — #240.** Claude's published `◐` (U+25D0)
+rendered as the replacement box: neither Geist nor egui's proportional fallback faces cover it,
+although the already-bundled monospaced Hack does. Append egui's monospaced fallback faces after
+the existing proportional fallback chain, including the medium and semibold UI families. A face
+already in that chain is not duplicated. The existing faces still win every character they cover;
+the added fallback only supplies missing characters and survives every definition rebuild.
+Discarded: requiring a system font (machine-dependent coverage and discovery), adding another
+font asset (coverage already ships), and drawing or replacing the published symbol ourselves
+(the text font already contains it). This changes neither terminal font selection nor title text.
+
 **D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell within
 a hundredth of a point. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
 it; `⊘` comes from egui's Hack, whose advance is 1233/2048 of the size against Geist Mono's 600/1000,
