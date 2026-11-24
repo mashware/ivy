@@ -24,7 +24,7 @@ mod feedback;
 mod interaction;
 mod layout;
 mod title;
-pub(crate) use chrome::{geometry, partition};
+pub(crate) use chrome::{drawer_has_room, geometry, partition};
 pub(crate) use title::{MIN_BAND, occupied};
 #[cfg(test)]
 pub(crate) use title::{

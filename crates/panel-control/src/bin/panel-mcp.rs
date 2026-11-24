@@ -670,10 +670,101 @@ fn tools() -> serde_json::Value {
                     },
                     "required": ["pane"],
                 },
+            },
+            {
+                "name": "image_open",
+                // The one guard a subagent meets (D88): nothing on the wire tells it from the agent
+                // whose connection it shares, so the last sentence is the whole of it (D121).
+                "description": IMAGE_OPEN,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "The image file's absolute path.",
+                        },
+                    },
+                    "required": ["path"],
+                },
             }
         ],
     })
 }
+
+/// What `image_open` tells the agent it does: a shorter wording, for the agent, of the rules docs/04
+/// states for the verb (D121).
+const IMAGE_OPEN: &str = "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.";
+
+/// The file `path` names, if an agent may hand it to the window: refused with the sentence the agent
+/// reads otherwise.
+///
+/// **A courtesy, not the enforcement** (D121): it answers at once, in the bridge's own process,
+/// which is not always the agent's, so a stuck filesystem stalls the bridge and never the window;
+/// but the window may see another file (another mount namespace, a file replaced meanwhile), so
+/// its own read checks again. A path on another machine is refused before anything is asked of it:
+/// asking is what reaches that host.
+fn image_to_open(path: &str) -> Result<std::path::PathBuf, String> {
+    image_to_open_with(path, panel_control::image::refused_link)
+}
+
+/// [`image_to_open`] with how an entry is asked whether it is a link handed in, so a test can put
+/// a link on the way where the platform has none.
+fn image_to_open_with(
+    path: &str,
+    is_link: impl FnMut(&std::path::Path) -> std::io::Result<bool>,
+) -> Result<std::path::PathBuf, String> {
+    if path.is_empty() {
+        return Err("image_open's \"path\" is empty".to_owned());
+    }
+    let file = std::path::PathBuf::from(path);
+    if !file.is_absolute() {
+        return Err(format!(
+            "image_open needs an absolute path, and {path} is relative"
+        ));
+    }
+    if let Some(elsewhere) = panel_control::image::elsewhere(&file) {
+        return Err(format!("{path} {}", elsewhere.says()));
+    }
+    // Before the metadata below, which follows links: on Windows one can lead to another machine.
+    // The file is asked for in the walk's own spelling (D121): the walk is only worth the entries
+    // it asked if they are the ones this metadata and this read pass through.
+    let spelled = panel_control::image::no_link_on_the_way(&file, is_link)?;
+    let found = std::fs::metadata(&spelled).map_err(|why| format!("cannot open {path}: {why}"))?;
+    if found.is_dir() {
+        return Err(format!("{path} is a folder, not an image"));
+    }
+    if !found.is_file() {
+        return Err(format!("{path} is not a regular file"));
+    }
+    if found.len() > panel_control::image::MAX_BYTES {
+        return Err(format!(
+            "{path} is over {} MiB",
+            panel_control::image::MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    // The first bytes decide, not the extension (D121): a file that is not a PNG or JPEG at all is
+    // refused here, before the agent is told «opened». A truncated or corrupt one begins like a
+    // whole one and passes; the window's answer says the drawer explains what it cannot show.
+    let mut head = Vec::with_capacity(PNG_SIGNATURE.len());
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(
+            std::fs::File::open(&spelled).map_err(|why| format!("cannot open {path}: {why}"))?,
+            PNG_SIGNATURE.len() as u64,
+        ),
+        &mut head,
+    )
+    .map_err(|why| format!("cannot read {path}: {why}"))?;
+    if !head.starts_with(PNG_SIGNATURE) && !head.starts_with(JPEG_START) {
+        return Err(format!("{path} is not a PNG or JPEG image"));
+    }
+    Ok(file)
+}
+
+/// How every PNG file begins.
+const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// How every JPEG file begins: the start-of-image marker and the first byte of the next one.
+const JPEG_START: &[u8] = &[0xFF, 0xD8, 0xFF];
 
 /// What one tool call asks for, **already read and validated**.
 ///
@@ -690,6 +781,7 @@ enum Ask {
     Open(Side, Option<String>, Vec<String>),
     Read(String, bool),
     Close(String),
+    ImageOpen(std::path::PathBuf),
 }
 
 /// What to call an empty `ok`, **decided from what was asked and never from the shape of the reply**.
@@ -703,6 +795,8 @@ enum Ask {
 fn what_it_did(ask: &Ask) -> &'static str {
     match ask {
         Ask::Close(_) => "closed",
+        // The window's own sentence is the answer; this word is only for an empty `ok`.
+        Ask::ImageOpen(_) => "opened",
         Ask::Patch(_) => "patched",
         Ask::Retire => "retired",
         Ask::PlanRetire(..) => "retired",
@@ -742,6 +836,7 @@ fn called_routed(
             | "split_open"
             | "split_read"
             | "split_close"
+            | "image_open"
     ) {
         return failed(id, -32602, &format!("no tool \"{name}\""));
     }
@@ -856,6 +951,18 @@ fn called_routed(
             };
             Ask::Read(handle.to_owned(), scrollback)
         }
+        "image_open" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let path = match arguments.get("path") {
+                None => return succeeded(id, refusal("image_open needs a \"path\"")),
+                Some(serde_json::Value::String(path)) => path,
+                Some(_) => return succeeded(id, refusal("image_open's \"path\" is not text")),
+            };
+            match image_to_open(path) {
+                Ok(path) => Ask::ImageOpen(path),
+                Err(why) => return succeeded(id, refusal(&why)),
+            }
+        }
         // `split_close`, the only name left after the check above.
         _ => {
             let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
@@ -917,6 +1024,7 @@ fn called_routed(
         Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
         Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
         Ask::Close(handle) => producer.close_a_pane(&handle),
+        Ask::ImageOpen(path) => producer.open_an_image(&path),
     };
 
     match answer {
@@ -1571,7 +1679,8 @@ mod tests {
                 "panel_patch",
                 "split_open",
                 "split_read",
-                "split_close"
+                "split_close",
+                "image_open"
             ]
         );
         let retire = tools
@@ -1582,6 +1691,350 @@ mod tests {
             retire["inputSchema"],
             serde_json::json!({"type": "object", "properties": {}})
         );
+    }
+
+    /// **`image_open` is advertised whole, with the words `IMAGE_OPEN` holds** (D121): its schema,
+    /// its whole description, and the clause that keeps a subagent off it — which lives in the description
+    /// and not in the handshake, whose instructions name only what publishing needs (D88).
+    #[test]
+    fn image_open_is_advertised_whole_and_tells_a_subagent_to_leave_it_alone() {
+        let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+        let tool = answered["result"]["tools"]
+            .as_array()
+            .expect("there is a list of tools")
+            .iter()
+            .find(|tool| tool["name"] == "image_open")
+            .expect("image_open is advertised")
+            .clone();
+        assert_eq!(
+            tool,
+            serde_json::json!({
+                "name": "image_open",
+                "description": "Show an image to the person in the drawer under this console, where they can look at it, mark it up and send it back to this console as a line with the path of an annotated copy. Each console holds one image: this replaces the one this console had, unless the person has marks on it they have not sent, which refuses the call. If the person is working in this console the drawer opens on it at once and the keyboard stays where it was; otherwise nothing moves, and this console's tab and header show that a new image is waiting. PNG or JPEG, at most 32 MiB. If you work for another agent in this same console (a subagent, or a worker it started), do not call this: give the path to that agent.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "description": "The image file's absolute path."}},
+                    "required": ["path"]
+                }
+            })
+        );
+        let described = tool["description"].as_str().unwrap();
+        assert!(described.contains("If you work for another agent in this same console"));
+        assert!(described.contains("do not call this"));
+        assert!(!INSTRUCTIONS.contains("image_open"));
+    }
+
+    /// The agent's call for `path`, answered with no pane to reach: every answer below is the
+    /// bridge's own, given before any channel is opened.
+    fn open_an_image(path: serde_json::Value) -> serde_json::Value {
+        let call = serde_json::json!({
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "image_open", "arguments": {"path": path}},
+        });
+        ask(&call.to_string())["result"].clone()
+    }
+
+    /// **The bridge answers a file problem at once, as an error the agent reads, and the pane is
+    /// never reached** (D121): each refusal names the file and what is wrong with it.
+    #[test]
+    fn an_image_the_window_could_not_show_is_refused_by_the_bridge_with_its_reason() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-open-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let missing = folder.join("missing.png");
+        let oversize = folder.join("huge.png");
+        std::fs::File::create(&oversize)
+            .unwrap()
+            .set_len(panel_control::image::MAX_BYTES + 1)
+            .unwrap();
+        let shown = |path: &std::path::Path| path.to_str().unwrap().to_owned();
+        let refused = |result: serde_json::Value| {
+            assert_eq!(result["isError"], true, "{result}");
+            result["content"][0]["text"].as_str().unwrap().to_owned()
+        };
+        assert_eq!(
+            refused(open_an_image(serde_json::json!("shot.png"))),
+            "image_open needs an absolute path, and shot.png is relative"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(shown(&folder)))),
+            format!("{} is a folder, not an image", shown(&folder))
+        );
+        let gone = refused(open_an_image(serde_json::json!(shown(&missing))));
+        assert!(
+            gone.starts_with(&format!("cannot open {}: ", shown(&missing))),
+            "{gone}"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(shown(&oversize)))),
+            format!("{} is over 32 MiB", shown(&oversize))
+        );
+        // Not an image by its first bytes, whatever its name: text, a JPEG cut before its third
+        // byte, a PNG signature missing its last byte, and nothing at all.
+        for (name, bytes) in [
+            ("notes.png", b"not an image at all".as_slice()),
+            ("cut.jpg", &[0xFF, 0xD8]),
+            ("cut.png", &PNG_SIGNATURE[..7]),
+            ("empty.png", &[]),
+        ] {
+            let file = folder.join(name);
+            std::fs::write(&file, bytes).unwrap();
+            assert_eq!(
+                refused(open_an_image(serde_json::json!(shown(&file)))),
+                format!("{} is not a PNG or JPEG image", shown(&file))
+            );
+        }
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(""))),
+            "image_open's \"path\" is empty"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::json!(7))),
+            "image_open's \"path\" is not text"
+        );
+        assert_eq!(
+            refused(open_an_image(serde_json::Value::Null)),
+            "image_open's \"path\" is not text"
+        );
+        let call = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\
+             \"params\":{\"name\":\"image_open\",\"arguments\":{}}}";
+        assert_eq!(
+            refused(ask(call)["result"].clone()),
+            "image_open needs a \"path\""
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// **A PNG or a JPEG passes the bridge by its first bytes alone**, whatever its name: the
+    /// signature is what the bridge reads, and the decode stays the window's.
+    #[test]
+    fn an_image_that_begins_as_a_png_or_a_jpeg_passes_the_bridge() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-head-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        for (name, bytes) in [
+            ("shot", png.as_slice()),
+            ("photo.txt", &[0xFF, 0xD8, 0xFF]),
+            ("photo.jpg", &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]),
+        ] {
+            let file = folder.join(name);
+            std::fs::write(&file, bytes).unwrap();
+            assert_eq!(
+                image_to_open(file.to_str().unwrap()),
+                Ok(file.clone()),
+                "{name}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// **A link on the way refuses the path before the bridge asks for the file** (D121): the file
+    /// here does not exist, so a bridge that asked first, or never walked, would answer «cannot
+    /// open …». The folder is called one by the reader handed in, which works on every platform: the
+    /// real one calls nothing a link off Windows, and on it stops at this folder, which is not there.
+    #[test]
+    fn a_link_on_the_way_refuses_the_bridge_before_it_asks_for_the_file() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-link-{}", std::process::id()));
+        let file = folder.join("missing.png");
+        // The walk asks in its own spelling, which on Windows is the folder under `\\?\`.
+        let link = panel_control::image::one_spelling(&folder).unwrap();
+        let said = image_to_open_with(
+            file.to_str().unwrap(),
+            |at: &std::path::Path| Ok(at == link),
+        );
+        assert_eq!(
+            said,
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                file.display()
+            ))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"]
+    fn off_windows_an_image_under_a_name_windows_would_rewrite_passes_the_bridge() {}
+
+    /// **Off Windows an image under any name a file can have passes the bridge** (D121): a `..`, a
+    /// name ending in a dot, one made only of dots and a DOS device name are walked as written,
+    /// the file last among the entries asked, and the agent's own path is what goes on.
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_an_image_under_a_name_windows_would_rewrite_passes_the_bridge() {
+        let folder = std::env::temp_dir().join(format!("ivy-image-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        for name in ["x.", "...", "COM9", "sub"] {
+            std::fs::create_dir_all(folder.join(name)).unwrap();
+        }
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        for file in [
+            folder.join("x.").join("a.png"),
+            folder.join("...").join("a.png"),
+            folder.join("COM9").join("aux.png"),
+            folder.join("sub").join("..").join("con.png"),
+        ] {
+            std::fs::write(&file, &png).unwrap();
+            let mut asked = Vec::new();
+            let said = image_to_open_with(file.to_str().unwrap(), |at: &std::path::Path| {
+                asked.push(at.to_path_buf());
+                Ok(false)
+            });
+            assert_eq!(said, Ok(file.clone()), "{}", file.display());
+            assert_eq!(asked.last(), Some(&file), "{}", file.display());
+        }
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// **On a real Windows disk, a junction named with a trailing dot is never opened through by
+    /// the bridge** (D121). Given verbatim, the one spelling keeps the dot, so the walk asks the
+    /// junction itself and refuses it. Given plainly, the spelling is whatever Win32 makes of the
+    /// text — `x` without its dot, which is not there, so the read fails; or the junction, refused —
+    /// and either way the walk and the read name the same entries. It is made through `\\?\`, the
+    /// only spelling that keeps the dot, and the test first checks the junction is there under that
+    /// name, so a setup that lost the dot cannot pass for a refusal.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_through_a_junction_named_with_a_trailing_dot_is_not_opened_by_the_bridge_on_windows()
+     {
+        let folder = std::env::temp_dir().join(format!("ivy-image-dot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let plain = folder.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        std::fs::write(plain.join("a.png"), png).unwrap();
+        let junction = std::path::PathBuf::from(format!(r"\\?\{}\x.", folder.display()));
+        let temporary_junction = folder.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&temporary_junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        // Rename to the verbatim destination to preserve the dot independently of mklink's parsing.
+        std::fs::rename(&temporary_junction, &junction).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&junction)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "{} is not a junction",
+            junction.display()
+        );
+        let link = |through: &std::path::Path| {
+            format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                through.display()
+            )
+        };
+        let verbatim = junction.join("a.png");
+        assert_eq!(
+            image_to_open(verbatim.to_str().unwrap()),
+            Err(link(&verbatim))
+        );
+        let plain = folder.join("x.").join("a.png");
+        let said = image_to_open(plain.to_str().unwrap()).unwrap_err();
+        assert!(
+            said.starts_with(&format!("cannot open {}: ", plain.display())) || said == link(&plain),
+            "{said}"
+        );
+        // Removed by the name that keeps the dot: a plain one would name `x`, and leave the junction.
+        std::fs::remove_dir(&junction).unwrap();
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// **On a real Windows disk**, a PNG reached through a junction — which needs no privilege to
+    /// make — is refused by the bridge, and the same PNG by its own folder passes.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_through_a_junction_is_refused_by_the_bridge_on_windows() {
+        let folder =
+            std::env::temp_dir().join(format!("ivy-image-junction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let plain = folder.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"rest");
+        std::fs::write(plain.join("a.png"), png).unwrap();
+        let junction = folder.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&plain)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let direct = plain.join("a.png");
+        assert_eq!(image_to_open(direct.to_str().unwrap()), Ok(direct.clone()));
+        let through = junction.join("a.png");
+        assert_eq!(
+            image_to_open(through.to_str().unwrap()),
+            Err(format!(
+                "{} passes through a link, and an agent's image is not opened through one",
+                through.display()
+            ))
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// Something that is neither a file nor a folder — here a FIFO, which would hang a reader — is
+    /// refused by name.
+    #[cfg(unix)]
+    #[test]
+    fn an_image_that_is_not_a_regular_file_is_refused_by_the_bridge() {
+        let fifo = std::env::temp_dir().join(format!("ivy-image-fifo-{}", std::process::id()));
+        let _ = std::fs::remove_file(&fifo);
+        let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: `name` is a valid NUL-terminated path that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let result = open_an_image(serde_json::json!(fifo.to_str().unwrap()));
+        let _ = std::fs::remove_file(&fifo);
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["content"][0]["text"],
+            format!("{} is not a regular file", fifo.to_str().unwrap())
+        );
+    }
+
+    /// **A path on another machine is refused by its text, before the file is asked for**, which is
+    /// what would reach that host (D121): a refusal that came from asking would read «cannot open …»
+    /// or name what kind of file it found instead.
+    #[cfg(windows)]
+    #[test]
+    fn an_image_on_another_machine_is_refused_by_the_bridge_before_it_is_asked_for() {
+        for (remote, why) in [
+            (r"\\host\share\a.png", "is not on this machine"),
+            (r"\\?\UNC\host\share\a.png", "is not on this machine"),
+            (r"\\?\unc\host\share\a.png", "is not on this machine"),
+            (
+                r"\\?\GLOBALROOT\Device\Mup\host\share\a.png",
+                "is not a drive path; give it as C:\\…",
+            ),
+            (r"\\.\C:\a.png", "is not a drive path; give it as C:\\…"),
+            (
+                r"\\.\PhysicalDrive0",
+                "is not a drive path; give it as C:\\…",
+            ),
+        ] {
+            let result = open_an_image(serde_json::json!(remote));
+            assert_eq!(result["isError"], true, "{remote}");
+            assert_eq!(result["content"][0]["text"], format!("{remote} {why}"));
+        }
+    }
+
+    /// The window's sentence is what the agent reads: the bridge adds no word of its own.
+    #[test]
+    fn an_image_opened_answers_with_the_windows_sentence() {
+        let said = "opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there";
+        let result = result_of(
+            what_it_did(&Ask::ImageOpen(std::env::temp_dir())),
+            Answered::Text(said.to_owned()),
+        );
+        assert_eq!(result["content"][0]["text"], said);
+        assert!(result.get("isError").is_none());
     }
 
     /// **An open answers with its handle, or says it has none** — never with the verb's word. An open

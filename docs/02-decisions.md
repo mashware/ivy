@@ -12115,3 +12115,133 @@ clipboard thread for images, against one outstanding read keyed by console.
 
 **Verification.** The clipboard formats on macOS and Windows are compiled but only checked by hand
 there.
+
+---
+
+## D121 — An agent opens an image in its own console's slot, and the person is not moved to it
+
+**22 November 2026 — #198.** `image_open(path)` on a console's control channel fills **that**
+console's image slot (D72), the one whose endpoint the request arrived on. A name in the message
+reaches nothing (D44). **The endpoint authenticates the user, not the console**: any process of the
+same user that can read a console's `PANEL_DIR` can be that console (D44, D7), so «scoped by the
+endpoint» is a same-user premise about which slot, never a statement about who asked.
+
+**What moves on screen.** If the console is the focused one of the tab on show, and nothing else owns
+the screen or the keys, the drawer opens on its Image tab (switching from Document or Changes) and
+**the keyboard stays where it was**, as `split_open` leaves it. «Nothing else» means: the Board, the
+Settings editor, a modal pane view, the title bar's menu, the connection guide, a maximized drawer,
+or the drawer or Files holding the keys. A window too short for the drawer is asked before anything
+is switched, so there too nothing moves. Where the drawer already shows the Image tab, which is
+that console's, and the console is still in front — the focused one of the tab on show, under no
+modal surface — the new image takes the place of the last and nothing has to move, the drawer's
+keys, Files' keys and a maximized drawer included. Anywhere else nothing moves. The console's tab
+card and its header then show an image glyph until the drawer paints that image or its refusal.
+«Loading…» is not seeing it. The reply says «shown» where the drawer shows the image, whether it
+opened on it or its Image tab was already on show, and «marked» everywhere else; both end «if the
+drawer cannot show it, it says why there» (owner, 22 November 2026), because the reply comes before
+the worker decodes the file and a truncated or corrupt PNG or JPEG passes every check made before
+it — answering «shown» alone would tell the agent the person sees a picture the drawer cannot
+paint. Reading the image's header in the bridge to refuse those too was discarded: it would be a
+second decoder to keep in step with the window's, for a reply that already says where to look.
+A window that runs
+no pass answers nothing within the listener's five seconds and still applies the open on its next
+pass, as `split_open` does.
+
+**What is refused, and where.** The path must be absolute and local. On Windows only a drive
+letter (`C:\…`, `\\?\C:\…`) or a volume GUID (`\\?\Volume{…}\…`) is local; every other prefix is
+refused on the wire — a share, a device, and any other name in the NT object namespace
+(`\\host\share\a.png`, `\\?\UNC\…`, `\\?\GLOBALROOT\Device\Mup\…`, `\\.\…`) — because the image
+worker would otherwise authenticate to a remote host over SMB on an agent's word. It is an
+allowlist because a refusal list let `\\?\GLOBALROOT\…` and a lowercase `\\?\unc\…` through. A
+share (`\\host\…`, `\\?\UNC\…`, `\\.\UNC\…`) is answered «is not on this machine»; any other
+refused prefix is answered «is not a drive path; give it as C:\…», because its text cannot say
+whether it stays here — `\\.\C:\…` and `\\?\GLOBALROOT\Device\HarddiskVolume3\…` do,
+`\\?\GLOBALROOT\Device\Mup\…` does not — and the agent can act on the form where it could not act
+on a false «elsewhere». A mapped drive letter passes: it is the user's own mapping, not a host the
+agent chose. **On Windows an agent's image never passes through a link** (owner, 22 November
+2026, review round 3): a symbolic link under `C:\` — the file, or any folder on its way — can point at
+`\\host\share`, and a cloned repository or an unpacked archive is where one comes from. So each
+entry of the path is asked, from the root down and without following it (`symlink_metadata`),
+whether it is a link, and the first one that is refuses the path with `<path> passes through a
+link, and an agent's image is not opened through one`. A link is a name-surrogate reparse point,
+which is the rule std's `is_symlink` applies: a symbolic link, a junction, or any other tag that
+names a path. A reparse point that names nothing — a cloud placeholder, deduplication,
+compression — passes, as D108 lets it pass: it holds the file's own data behind its filter, and
+refusing it could refuse images a sync client such as OneDrive keeps as placeholders.
+
+**One spelling for checking and opening** (owner, 23 November 2026: «Una sola ruta»).
+On Windows the agent's path is made absolute by text with `std::path::absolute`
+(`GetFullPathNameW`, without disk access), checked again for a drive or volume-GUID prefix, and
+rebuilt under `\\?\`. Both the root-down walk and the read use that returned spelling: Win32
+cannot rewrite the last segment of each partial path differently from the whole path. This
+replaces the name denylist from review rounds 4–5. A `..` is resolved before the walk; a trailing
+dot or space and a device name are interpreted once by Windows, and the resulting spelling is
+what is checked and read. If the resulting prefix names a device or another machine it is
+refused before disk access with `<path> is read by Windows as <whole>, which is not a file on a
+drive` or `which is not on this machine`; an error making it absolute says `<path> cannot be read
+as a Windows path: <error>`. Paths already under `\\?\` keep their literal names, with dot
+components resolved while rebuilding that one spelling. The original path remains the tool's
+address and the text in diagnostics; the window repeats the same spelling and walk before its
+own read.
+
+On Linux and macOS the path stays as given: `..`, `aux.png`, `con.png`, dots and spaces in a
+file name are no longer rejected because Windows would interpret them differently. An entry
+that is not there stops the walk and leaves the path to the open, which must pass through the
+same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through a
+link: <error>`). The drawer follows the window's refusal over a link, or over an entry it could
+not ask, with «Open it from Files to see it yourself.»: the person's own open is theirs to make.
+A refusal while spelling the path is painted alone: it already tells the agent what Windows made
+of the path. The one-spelling rule was checked against Rust's path and Windows namespace
+implementation, but its Windows runtime witnesses still need a real Windows run.
+
+Where a link leads is never read. The bridge walks before
+its `stat`, and the image worker walks before it opens, **only for an agent's open**: the open
+carries who named the path to the worker, and a person's own click or Files open is not walked. A
+link swapped in between the walk and the open is not caught, the race D108 also leaves. Elsewhere
+no link is refused: a link leads to what the user made reachable, as a mapped drive letter does on
+Windows. That is accepted, not a claim that no path there names a host — macOS's `/net` and an
+autofs `-hosts` map do.
+
+The MCP bridge also `stat`s the file in its own process, which is not always the agent's, so a
+missing file, a folder, something that is not a regular file or a file over 32 MiB is refused at
+once. It then reads the file's first bytes and refuses anything that begins as
+neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to say
+included, with `<path> is not a PNG or JPEG image`, before the pane is reached (owner, 22 November
+2026): told «opened» for a file that is not an image at all, the agent would wait for marks that
+never come. **Those bridge checks are advisory**: the bridge and the window may see different
+files (another mount namespace, a file replaced in between), and a hand-written line skips the
+bridge. The window's interface pass never touches the file either: the image worker's thread reads
+it, its checks stay the enforcement, and their refusal is painted in the drawer. The format is
+decided by the file's bytes, never by its extension; a hand-written line that skips the bridge
+still reaches the window, which paints «This file is not a PNG or JPEG image». Unsent marks on that
+console's image refuse the call with a sentence the agent can act on; another console's marks never
+do.
+
+**What leaves the file.** The window reads the file with its own rights, which a sandboxed caller
+that reaches the socket may not have. Nothing of the file goes back over the channel. Its pixels
+leave only through the person's Send, a copy written into the console's own folder, so the person's
+Send is the only gate for the file's content.
+
+**Subagents.** The tool's description tells an agent working for another agent in the same console
+not to call it (D88). Nothing on the wire tells them apart. A subagent that ignores it is bounded to
+its own console's slot and refused over unsent marks.
+
+**No measurement batch opens an image**, so no batch paints the glyph or the Image tab and no
+published figure changes. The glyph's read sits inside the tab bar's and the header's declared spans
+(D13).
+
+| Discarded | Why |
+|---|---|
+| An `image` field in the panel document | A foreign `panel.json` (a cloned repository, a container) would make the app read local files, and the agent gets no error. |
+| Resolving a relative path against the console's directory | Unknown on Windows without OSC 7, and the synchronous file checks would need a `stat` in the interface pass, where a dead mount hangs the window. |
+| Resolving a relative path against the bridge's directory | The routed bridge runs in a daemon shared by every pane, so its directory is not the conversation's. |
+| Replacing over unsent marks, or queueing behind them | The marks are the person's unfinished work; a queue adds a mechanism and leaves the agent believing the image is shown. |
+| An extension gate on the wire | The bytes decide the format, and extension-less PNGs exist. |
+| Replacing the Board, or switching a maximized drawer | Both take away what the person is reading. |
+| Opening the drawer while the drawer or Files holds the keys | The person is typing there, and switching the drawer's tab or blurring Files would take the keys from them. |
+| Following each link and checking where it leads (review round 2) | Review round 3 found three ways around it: an error looking at an entry ended the walk as a pass, a raw NT target such as `\GLOBAL??\UNC\…` came back rootless and was read as local, and a relative target was joined to the folder the link was spelled in rather than the one it really sits in. A screenshot folder reached through a junction to another local drive is refused now; the owner took that cost over a walk that has to model Windows' resolution. |
+| Canonicalizing the path and testing the result | `canonicalize` opens the path, following each link, so it reaches the host it was meant to detect. |
+| Refusing every reparse point, `FILE_ATTRIBUTE_REPARSE_POINT` | A cloud placeholder carries it, so every agent's image a sync client such as OneDrive keeps would be refused. Which reparse tags a real OneDrive folder carries has not been looked at on Windows. |
+| A denylist of path shapes (review rounds 4–5) | It refused ordinary Linux/macOS names and still missed Windows rewrites (`CONIN$` was already missing). Three review rounds showed that checking partial paths and opening the whole path in different spellings cannot be repaired by enumerating names. One normalized verbatim spelling makes the two operations agree. |
+| Asking each folder with a trailing separator | Avoided trailing-dot and space rewrites, but did not establish the same rule for device names. |
+| Walking a person's own open too | The person chose the path; the rule is about an agent's word. |

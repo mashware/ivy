@@ -76,6 +76,7 @@ pub(crate) fn paint_strip(
                 focused: strip.focused,
                 green: crate::pane_view::focus_mix(ui.ctx(), pane.name, strip.focused),
                 project: pane.project.as_ref(),
+                unseen_image: pane.image.unseen(),
             },
         );
     } else {
@@ -271,6 +272,8 @@ struct Appearance<'a> {
     /// How far this header has turned to the focus green, 0 to 1 (see `pane_view::focus_mix`).
     green: f32,
     project: Option<&'a crate::project_view::Badge>,
+    /// Whether this console holds an image its agent opened that nobody has seen (D121).
+    unseen_image: bool,
 }
 
 /// `ink` brought toward `toward` a tenth at a time until it reads at `contrast` on `surface`, and
@@ -344,6 +347,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         focused,
         green,
         project,
+        unseen_image,
     } = appearance;
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
@@ -469,6 +473,13 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
                 );
                 left.x = marker.right() + 6.0;
             }
+        }
+        // In the label and not a control: always shown, never faded with the controls (D99), and
+        // pressing it is pressing the label.
+        if unseen_image {
+            let icon = crate::ui::icons::Icon::File(crate::ui::icons::FileKind::Image);
+            crate::ui::icons::paint(&clipped, left + egui::vec2(6.0, 0.0), icon, 12.0, text);
+            left.x += 18.0;
         }
         if let (Some(project), Some(ink)) = (project, ink) {
             let available = (rect.right() - left.x - 8.0).max(0.0);
@@ -775,6 +786,7 @@ mod tests {
                     focused: true,
                     green: 1.0,
                     project: Some(&badge),
+                    unseen_image: false,
                 },
             );
         });
@@ -832,6 +844,7 @@ mod tests {
             focused,
             green: if focused { 1.0 } else { 0.0 },
             project,
+            unseen_image: false,
         }
     }
 

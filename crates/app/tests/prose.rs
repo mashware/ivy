@@ -944,11 +944,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 133),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
-    ("src/control.rs", include_str!("../src/control.rs"), 354),
+    ("src/control.rs", include_str!("../src/control.rs"), 349),
     (
         "src/control/retiring.rs",
         include_str!("../src/control/retiring.rs"),
         1,
+    ),
+    (
+        "src/control/handles.rs",
+        include_str!("../src/control/handles.rs"),
+        13,
     ),
     (
         "src/panel/driving.rs",

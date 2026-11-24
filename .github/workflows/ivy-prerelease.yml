@@ -130,7 +130,10 @@ jobs:
                             'panic_and_spawn_failure_paths_still_join_and_close_slots',
                             'windows_client_rejects_wrong_server_before_sending_request_bytes',
                             'windows_endpoint_connect_uses_inherited_server_pid',
-                            'windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips') {
+                            'windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips',
+                            'an_image_through_a_junction_named_with_a_trailing_dot_is_not_opened_by_the_bridge_on_windows',
+                            'on_windows_the_one_spelling_is_the_whole_path_under_the_verbatim_prefix',
+                            'on_windows_the_walk_asks_the_one_spelling_of_a_name_win32_rewrites') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
       - name: Prove Windows peer regression witnesses with mutations
@@ -186,7 +189,8 @@ jobs:
                             'windows_paths_untracked_file_symlink_is_not_followed',
                             'windows_paths_untracked_listing_runs_git_on_the_verbatim_root',
                             'windows_paths_tilde_follows_home_dir',
-                            'windows_paths_a_link_planted_at_the_temporary_is_not_written_through') {
+                            'windows_paths_a_link_planted_at_the_temporary_is_not_written_through',
+                            'windows_paths_an_agents_image_through_a_junction_is_refused_by_the_window') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
       - name: Test that a console ends with its program and closes without waiting

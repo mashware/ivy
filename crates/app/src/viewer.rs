@@ -624,8 +624,8 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
 pub(crate) use code_header::document_relative_path;
 pub(crate) use image::is_image;
 pub(crate) use origin::{
-    KEPT_DOCUMENT, NotOpened, open_diff_for_pane, open_document_target, open_image_target,
-    show_image,
+    KEPT_DOCUMENT, NotOpened, Room, open_diff_for_pane, open_document_target, open_for_an_agent,
+    open_image_target, show_image,
 };
 
 #[cfg(test)]
