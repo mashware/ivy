@@ -36,7 +36,7 @@ MUTATIONS = [
     ),
     (
         "child-does-not-wait-for-input", FIXTURE,
-        "$null = [Console]::ReadLine(); [Console]::Write({});",
+        "$null = [IvyFixtureInput]::ReadLine(); [Console]::Write({});",
         "[Console]::Write({});",
         "tests::windows_fixture::gated_output_is_written_only_after_the_child_receives_input",
     ),

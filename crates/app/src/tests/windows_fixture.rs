@@ -1,5 +1,64 @@
 //! The small fixture vocabulary used by cross-platform console tests.
 
+// Windows cooked input waits for CR, while the original fixtures send LF. Read the child's
+// real console in character mode and recognize either terminator ourselves; ReadConsoleW
+// preserves Unicode without depending on PowerShell's input code page. Disable echo too,
+// so only a fixture that actually reads and writes can produce its output witness.
+// https://learn.microsoft.com/en-us/windows/console/setconsolemode
+// https://learn.microsoft.com/en-us/windows/console/readconsole
+const CONSOLE_INPUT: &str = r#"Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class IvyFixtureInput {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetConsoleMode(IntPtr handle, uint mode);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    static extern bool ReadConsoleW(IntPtr handle, StringBuilder buffer, uint length,
+                                   out uint read, IntPtr control);
+    static IntPtr input;
+    static bool afterCarriageReturn;
+    public static void Prepare() {
+        input = GetStdHandle(-10);
+        uint mode;
+        if (!GetConsoleMode(input, out mode) || !SetConsoleMode(input, mode & ~6u))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        PrepareOutput();
+    }
+    public static void PrepareOutput() {
+        // Noninteractive PowerShell does not guarantee VT output processing. The live
+        // line-paint fixture needs the console host to execute its clear/home sequences.
+        IntPtr output = GetStdHandle(-11);
+        uint mode;
+        if (!GetConsoleMode(output, out mode) || !SetConsoleMode(output, mode | 5u))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+    public static string ReadLine() {
+        var line = new StringBuilder();
+        var character = new StringBuilder(2);
+        while (true) {
+            uint read;
+            character.Length = 0;
+            if (!ReadConsoleW(input, character, 1, out read, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (read == 0) return line.Length == 0 ? null : line.ToString();
+            char value = character[0];
+            bool skipLineFeed = afterCarriageReturn && value == '\n';
+            afterCarriageReturn = value == '\r';
+            if (skipLineFeed) continue;
+            if (value == '\r' || value == '\n') return line.ToString();
+            line.Append(value);
+        }
+    }
+}
+'@
+"#;
+
 fn literal(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
@@ -37,33 +96,60 @@ pub(super) fn command(program: &str) -> String {
     } else if program == "true" {
         "exit 0".to_owned()
     } else if program == "cat" {
-        "while ($null -ne ($line = [Console]::ReadLine())) { [Console]::WriteLine($line) }"
+        prefix.push_str(CONSOLE_INPUT);
+        prefix.push_str("[IvyFixtureInput]::Prepare(); ");
+        "while ($null -ne ($line = [IvyFixtureInput]::ReadLine())) { [Console]::WriteLine($line) }"
             .to_owned()
+    } else if program
+        == r#"while IFS= read -r line; do printf '\033[?25l\033[2J\033[H%s' "$line"; done"#
+    {
+        prefix.push_str(CONSOLE_INPUT);
+        prefix.push_str("[IvyFixtureInput]::Prepare(); ");
+        // The producer owns the visible path, so ConPTY can repaint it after a resize.
+        "[Console]::Write(('ivy-fixture-' + 'reading')); while ($null -ne ($line = [IvyFixtureInput]::ReadLine())) { [Console]::Write(([string][char]27 + '[?25l' + [char]27 + '[2J' + [char]27 + '[H' + $line)) }".to_owned()
     } else if let Some(file) = program
         .strip_prefix("cat > '")
         .and_then(|s| s.strip_suffix('\''))
     {
-        // ReadLine consumes the console's line ending; write UTF-8 plus LF explicitly, without
+        prefix.push_str(CONSOLE_INPUT);
+        prefix.push_str("[IvyFixtureInput]::Prepare(); ");
+        // The reader consumes the console's line ending; write UTF-8 plus LF explicitly, without
         // PowerShell's BOM or CRLF, so the file witnesses exactly the input these tests send.
         format!(
-            "$file = [IO.File]::Open({}, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite); try {{ while ($null -ne ($line = [Console]::ReadLine())) {{ $bytes = [Text.Encoding]::UTF8.GetBytes($line + [char]10); $file.Write($bytes, 0, $bytes.Length); $file.Flush() }} }} finally {{ $file.Dispose() }}",
+            "$file = [IO.File]::Open({}, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite); try {{ while ($null -ne ($line = [IvyFixtureInput]::ReadLine())) {{ $bytes = [Text.Encoding]::UTF8.GetBytes($line + [char]10); $file.Write($bytes, 0, $bytes.Length); $file.Flush() }} }} finally {{ $file.Dispose() }}",
             literal(file),
         )
     } else if let Some(rest) = program.strip_prefix("read -r line; printf ") {
         let (text, seconds) = rest.split_once("; sleep ").expect("input-gated fixture");
         let seconds = seconds.parse::<u64>().expect("valid fixture sleep");
+        prefix.push_str(CONSOLE_INPUT);
+        prefix.push_str("[IvyFixtureInput]::Prepare(); ");
         format!(
-            "[Console]::Write(('ivy-fixture-' + 'reading')); $null = [Console]::ReadLine(); [Console]::Write({}); Start-Sleep -Seconds {seconds}",
+            "[Console]::Write(('ivy-fixture-' + 'reading')); $null = [IvyFixtureInput]::ReadLine(); [Console]::Write({}); Start-Sleep -Seconds {seconds}",
             literal(text),
         )
     } else if let Some(text) = program.strip_prefix("printf ") {
+        // A live child must retain its output across ConPTY resize repaints, just as the
+        // Unix printf-and-sleep fixture does. Parse only its bounded trailing sleep.
+        let (text, sleep) = text
+            .rsplit_once("; sleep ")
+            .and_then(|(text, seconds)| seconds.parse::<u64>().ok().map(|s| (text, Some(s))))
+            .unwrap_or((text, None));
         let text = text
             .strip_prefix('\'')
             .and_then(|t| t.strip_suffix('\''))
             .unwrap_or(text)
             .replace("\\n", "\n")
             .replace("\\r", "\r");
-        format!("[Console]::Write({})", literal(&text))
+        if text.contains('\u{1b}') {
+            prefix.push_str(CONSOLE_INPUT);
+            prefix.push_str("[IvyFixtureInput]::PrepareOutput(); ");
+        }
+        let mut output = format!("[Console]::Write({})", literal(&text));
+        if let Some(seconds) = sleep {
+            output.push_str(&format!("; Start-Sleep -Seconds {seconds}"));
+        }
+        output
     } else {
         panic!("unsupported Windows test fixture: {program}");
     };
