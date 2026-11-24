@@ -10527,8 +10527,8 @@ and Off the plan last. It overrides the claiming-column restriction while enable
 is per project for the app session; class changes clear temporary full expansion and retain explicit
 opens. An all-done message does not hide outside tasks or unmatched consoles.
 
-Expanded columns keep 240 points, collapsed ones 190, with a 20-point gap and an additional
-24-point group boundary. Expanded columns share surplus width, with card-bearing columns weighted
+Expanded columns keep 240 points, collapsed ones 190, with a 20-point gap within a group and
+24 points between groups. Expanded columns share surplus width, with card-bearing columns weighted
 1.2. When minima do not fit, only the column row scrolls horizontally. Both painted content and hits
 are clipped to their column and viewport. Item cards are indented 20 points; milestone-only cards
 remain above items, and Off the plan cards precede outside tasks. Plan-less projects use a responsive
