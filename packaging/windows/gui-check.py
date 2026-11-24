@@ -9,25 +9,25 @@ import sys
 import tempfile
 import time
 
-K = ctypes.WinDLL('kernel32', use_last_error=True)
-U = ctypes.WinDLL('user32', use_last_error=True)
-K.GetConsoleWindow.restype = wintypes.HWND
-K.AttachConsole.argtypes = [wintypes.DWORD]
-K.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
-K.LoadLibraryExW.restype = wintypes.HMODULE
-K.FreeLibrary.argtypes = [wintypes.HMODULE]
-K.FindResourceW.argtypes = [wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p]
-K.FindResourceW.restype = wintypes.HANDLE
-K.LoadResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
-K.LoadResource.restype = wintypes.HANDLE
-K.LockResource.argtypes = [wintypes.HANDLE]
-K.LockResource.restype = ctypes.c_void_p
-K.SizeofResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
-U.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-U.IsWindowVisible.argtypes = [wintypes.HWND]
-U.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-U.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
-
+if sys.platform == 'win32':
+    K = ctypes.WinDLL('kernel32', use_last_error=True)
+    U = ctypes.WinDLL('user32', use_last_error=True)
+    K.GetConsoleWindow.restype = wintypes.HWND
+    K.AttachConsole.argtypes = [wintypes.DWORD]
+    K.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    K.LoadLibraryExW.restype = wintypes.HMODULE
+    K.FreeLibrary.argtypes = [wintypes.HMODULE]
+    K.FindResourceW.argtypes = [wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p]
+    K.FindResourceW.restype = wintypes.HANDLE
+    K.LoadResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
+    K.LoadResource.restype = wintypes.HANDLE
+    K.LockResource.argtypes = [wintypes.HANDLE]
+    K.LockResource.restype = ctypes.c_void_p
+    K.SizeofResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
+    U.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    U.IsWindowVisible.argtypes = [wintypes.HWND]
+    U.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    U.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
 
 def resource(module, kind, name):
     handle = K.FindResourceW(module, ctypes.c_void_p(name), ctypes.c_void_p(kind))
@@ -40,21 +40,39 @@ def resource(module, kind, name):
     return ctypes.string_at(data, size)
 
 
+def validate_icon(group, ico, image_resource):
+    """Compare compiled group metadata and image bytes with the installed ICO."""
+    if len(group) < 6 or len(ico) < 6:
+        raise AssertionError('truncated icon header')
+    reserved, kind, count = struct.unpack_from('<HHH', group)
+    if (reserved, kind, count) != struct.unpack_from('<HHH', ico) or kind != 1 or not count:
+        raise AssertionError('icon group header differs from installed icon')
+    if len(group) != 6 + 14 * count or len(ico) < 6 + 16 * count:
+        raise AssertionError('truncated or invalid icon directory')
+    for i in range(count):
+        a = struct.unpack_from('<BBBBHHIH', group, 6 + 14 * i)
+        b = struct.unpack_from('<BBBBHHII', ico, 6 + 16 * i)
+        image = ico[b[7]:b[7] + b[6]]
+        if b[7] < 6 + 16 * count or len(image) != b[6]:
+            raise AssertionError(f'icon image {i} is truncated or overlaps its directory')
+        metadata = list(b[:7])
+        # RC derives one color plane from PNG data, even when the ICO directory says zero.
+        # LLVM 21 reproduces this for every PNG in Ivy.ico; all image bytes stay unchanged.
+        if image.startswith(b'\x89PNG\r\n\x1a\n') and b[4] == 0 and a[4] == 1:
+            metadata[4] = 1
+        if a[:7] != tuple(metadata):
+            raise AssertionError(f'icon group metadata {i} differs: {a[:7]} != {tuple(metadata)}')
+        if image_resource(a[7]) != image:
+            raise AssertionError(f'icon image bytes {i} differ from installed icon')
+
+
 def check_icon(executable, icon):
     module = K.LoadLibraryExW(str(executable), None, 0x22)  # data file, image resource
     if not module:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
-        group = resource(module, 14, 1)
-        ico = icon.read_bytes()
-        reserved, kind, count = struct.unpack_from('<HHH', group)
-        if (reserved, kind, count) != struct.unpack_from('<HHH', ico) or kind != 1 or not count:
-            raise AssertionError('icon group header differs from installed icon')
-        for i in range(count):
-            a = struct.unpack_from('<BBBBHHIH', group, 6 + 14 * i)
-            b = struct.unpack_from('<BBBBHHII', ico, 6 + 16 * i)
-            if a[:7] != b[:7] or resource(module, 3, a[7]) != ico[b[7]:b[7] + b[6]]:
-                raise AssertionError(f'icon image {i} differs from installed icon')
+        validate_icon(resource(module, 14, 1), icon.read_bytes(),
+                      lambda name: resource(module, 3, name))
     finally:
         K.FreeLibrary(module)
 

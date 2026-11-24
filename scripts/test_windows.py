@@ -18,6 +18,11 @@ PACKAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE)
 import conpty
 
+GUI_SPEC = importlib.util.spec_from_file_location(
+    'windows_gui_check', SCRIPTS.parent / 'packaging/windows/gui-check.py')
+GUI = importlib.util.module_from_spec(GUI_SPEC)
+GUI_SPEC.loader.exec_module(GUI)
+
 
 def pe(machine=0x8664, marker=b'', subsystem=3):
     data = bytearray(512)
@@ -40,6 +45,61 @@ def pinned(dll, host):
     """A pin over the given bytes, as conpty.json spells it."""
     return {'conpty.dll': {'member': DLL_MEMBER, 'sha256': hashlib.sha256(dll).hexdigest()},
             'OpenConsole.exe': {'member': HOST_MEMBER, 'sha256': hashlib.sha256(host).hexdigest()}}
+
+
+class WindowsIconTests(unittest.TestCase):
+    def setUp(self):
+        self.ico = (SCRIPTS.parent / 'packaging/windows/Ivy.ico').read_bytes()
+        # Captured RT_GROUP_ICON from LLVM 21.1.8 llvm-rc /no-preprocess compiling
+        # `1 ICON "Ivy.ico"`: planes 0 -> 1 for all four PNGs; RT_ICON bytes are exact.
+        self.group = bytes.fromhex(
+            '0000010004001010000001002000c4020000010020200000010020009c0700000200'
+            '3030000001002000260d000003000000000001002000dd4d00000400')
+        self.images = {}
+        for i in range(4):
+            entry = struct.unpack_from('<BBBBHHII', self.ico, 6 + 16 * i)
+            self.images[i + 1] = self.ico[entry[7]:entry[7] + entry[6]]
+
+    def test_accepts_real_compiler_png_normalization_and_exact_images(self):
+        GUI.validate_icon(self.group, self.ico, self.images.__getitem__)
+        unnormalized = bytearray(self.group)
+        for i in range(4):
+            struct.pack_into('<H', unnormalized, 6 + 14 * i + 4, 0)
+        GUI.validate_icon(unnormalized, self.ico, self.images.__getitem__)
+
+    def test_rejects_changes_to_every_group_metadata_field(self):
+        for offset in (0, 1, 2, 3, 4, 6, 8):
+            with self.subTest(offset=offset):
+                changed = bytearray(self.group)
+                changed[6 + offset] ^= 2
+                with self.assertRaisesRegex(AssertionError, 'group metadata 0 differs'):
+                    GUI.validate_icon(changed, self.ico, self.images.__getitem__)
+
+    def test_rejects_changed_or_truncated_image_bytes(self):
+        for name in self.images:
+            original = self.images[name]
+            for value in (original[:-1], original[:-1] + bytes([original[-1] ^ 1])):
+                with self.subTest(name=name, length=len(value)):
+                    changed = dict(self.images)
+                    changed[name] = value
+                    with self.assertRaisesRegex(AssertionError, 'image bytes .* differ'):
+                        GUI.validate_icon(self.group, self.ico, changed.__getitem__)
+        with self.assertRaisesRegex(AssertionError, 'truncated'):
+            GUI.validate_icon(self.group, self.ico[:-1], self.images.__getitem__)
+
+    def test_rejects_planes_normalization_for_non_png(self):
+        changed = bytearray(self.ico)
+        changed[70] = 0
+        with self.assertRaisesRegex(AssertionError, 'group metadata 0 differs'):
+            GUI.validate_icon(self.group, changed, self.images.__getitem__)
+
+    def test_rejects_invalid_or_truncated_directories(self):
+        for group, ico in ((self.group[:5], self.ico), (self.group, self.ico[:5]),
+                           (self.group[:-1], self.ico), (self.group, self.ico[:69]),
+                           (b'\x01' + self.group[1:], self.ico)):
+            with self.subTest(group_length=len(group), ico_length=len(ico)):
+                with self.assertRaises(AssertionError):
+                    GUI.validate_icon(group, ico, self.images.__getitem__)
 
 
 class ConptyPairTests(unittest.TestCase):
