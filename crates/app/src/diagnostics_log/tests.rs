@@ -401,3 +401,46 @@ fn a_window_that_cannot_open_says_so_in_the_file_and_on_the_original() {
         );
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn capture_without_an_original_stderr_keeps_startup_errors() {
+    use std::process::Stdio;
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
+    const CASE: &str =
+        "diagnostics_log::tests::capture_without_an_original_stderr_keeps_startup_errors";
+    if std::env::var_os("IVY_LOG_NO_STDERR").is_some() {
+        let original = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+        assert_ne!(
+            unsafe { SetStdHandle(STD_ERROR_HANDLE, std::ptr::null_mut()) },
+            0
+        );
+        let capture = start_in(directory_from_parent());
+        let failed: eframe::Result = Err(eframe::Error::AppCreation("no display".into()));
+        assert_eq!(finish(failed, capture), std::process::ExitCode::FAILURE);
+        assert_ne!(unsafe { SetStdHandle(STD_ERROR_HANDLE, original) }, 0);
+        println!("no-stderr-capture-completed");
+    } else {
+        let dir = scratch("no-stderr");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([CASE, "--exact", "--nocapture"])
+            .env("IVY_LOG_NO_STDERR", "1")
+            .env(DIRECTORY, &dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for measuring in crate::MEASUREMENT_VARIABLES {
+            command.env_remove(measuring);
+        }
+        let output =
+            crate::git_process::run(command, Duration::from_secs(15), 65536, 65536).unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("no-stderr-capture-completed"));
+        assert!(
+            std::fs::read_to_string(dir.join(FILE))
+                .unwrap()
+                .contains("Error: AppCreation(\"no display\")")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

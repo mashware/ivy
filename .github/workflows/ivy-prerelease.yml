@@ -131,6 +131,24 @@ jobs:
         run: |
           python scripts/windows-test-report.py --platform windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check native console and diagnostic regressions
+        shell: pwsh
+        run: |
+          foreach ($case in @(
+            @('app', 'git_process::windows_tests::background_runner_does_not_allocate_a_console'),
+            @('panel-control', 'codex_relay::windows_console_tests::capability_command_does_not_allocate_a_console'),
+            @('app', 'diagnostics_log::tests::capture_without_an_original_stderr_keeps_startup_errors')
+          )) {
+            $name = $case[1]
+            cargo test --locked -p $case[0] --lib -- $name --exact --nocapture 2>&1 | Tee-Object -Variable printed
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if (-not ($printed -match [regex]::Escape("test $name ... ok"))) { throw "$name did not run and pass" }
+          }
+      - name: Prove background console witnesses detect regressions
+        shell: pwsh
+        run: |
+          python scripts/windows-console-mutations.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Keep named Windows startup witnesses
         shell: pwsh
         run: |

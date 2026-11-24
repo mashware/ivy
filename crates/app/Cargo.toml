@@ -252,3 +252,6 @@ test = true
 [[example]]
 name = "hinting"
 test = true
+
+[build-dependencies]
+winresource = "0.1.34"

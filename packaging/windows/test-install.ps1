@@ -92,6 +92,17 @@ if ($SoftwareOpenGL) {
 # The ordinary launch goes first: a control that fails for an unexpected reason would otherwise stop
 # the run before anyone learns whether Ivy starts at all.
 & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'normal')
+# Check the installed PE, and start it from a detached parent without changing its own flags.
+$Version = (python (Join-Path $env:GITHUB_WORKSPACE 'scripts/release.py') version).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Could not read workspace version' }
+$Info = [Diagnostics.FileVersionInfo]::GetVersionInfo($Installed)
+if ($Info.ProductName -ne 'Ivy' -or $Info.FileDescription -ne 'Ivy' -or
+    $Info.FileVersion -ne $Version -or $Info.ProductVersion -ne $Version) {
+    throw "Installed version resources differ from Ivy $Version"
+}
+python (Join-Path $PSScriptRoot 'gui-check.py') $Installed
+if ($LASTEXITCODE -ne 0) { throw 'Installed GUI witness failed' }
+
 # A separate trial keeps the established startup deadline unchanged. Each publication has an ack;
 # screenshots are sampled after acknowledgements and require review of the expected panel captions.
 & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'provenance') -TimeoutSeconds 90 -ProvenancePublisher (Join-Path $PSScriptRoot 'publish-provenance-witness.ps1')

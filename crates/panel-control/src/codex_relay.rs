@@ -198,6 +198,11 @@ fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     // A shared daemon must not inherit the first pane's identity.
     if args == ["app-server", "daemon", "start"] {
         for name in panel_contract::ENV_NAMES {
@@ -1992,3 +1997,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "codex_relay/windows_tests.rs"]
+mod windows_console_tests;

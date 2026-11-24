@@ -569,6 +569,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
+        let _output = crate::tests::isolate_output(&mut window);
         window.discoverer = crate::fonts::Discoverer::default();
         window.tabs[0]
             .panes_mut()
