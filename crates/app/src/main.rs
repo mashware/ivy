@@ -1,5 +1,7 @@
 //! Startup. All the work lives in the library, which is what the sweep bench consumes.
 
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 fn main() -> std::process::ExitCode {
     if let Some(code) = term_core::dispatch_scope_helper() {
         std::process::exit(code);

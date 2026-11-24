@@ -18,12 +18,15 @@ SPEC.loader.exec_module(PACKAGE)
 import conpty
 
 
-def pe(machine=0x8664, marker=b''):
-    data = bytearray(256)
+def pe(machine=0x8664, marker=b'', subsystem=3):
+    data = bytearray(512)
     data[:2] = b'MZ'
     struct.pack_into('<I', data, 60, 128)
     data[128:132] = b'PE\0\0'
     struct.pack_into('<H', data, 132, machine)
+    struct.pack_into('<H', data, 148, 240)
+    struct.pack_into('<H', data, 152, 0x20b)
+    struct.pack_into('<H', data, 220, subsystem)
     return bytes(data) + marker
 
 
@@ -104,13 +107,8 @@ class WindowsPackageTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.binaries = self.root / 'binaries'
         self.binaries.mkdir()
-        data = bytearray(256)
-        data[:2] = b'MZ'
-        struct.pack_into('<I', data, 60, 128)
-        data[128:132] = b'PE\0\0'
-        struct.pack_into('<H', data, 132, 0x8664)
-        for name in ('app.exe', 'panel-mcp.exe'):
-            (self.binaries / name).write_bytes(data)
+        (self.binaries / 'app.exe').write_bytes(pe(subsystem=2))
+        (self.binaries / 'panel-mcp.exe').write_bytes(pe(subsystem=3))
         (self.binaries / 'notices/fixture').mkdir(parents=True)
         (self.binaries / 'notices/fixture/LICENSE').write_bytes(b'original\r\n')
         self.payload = self.root / 'payload'
@@ -158,6 +156,20 @@ class WindowsPackageTests(unittest.TestCase):
         self.assertIn(b'Microsoft Corporation', (self.payload / 'licenses/conpty/LICENSE').read_bytes())
         with self.assertRaisesRegex(ValueError, 'already exists'):
             PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
+
+    def test_rejects_wrong_or_malformed_subsystems(self):
+        for name, value in (('app.exe', pe(subsystem=3)),
+                            ('panel-mcp.exe', pe(subsystem=2)),
+                            ('app.exe', pe()[:200]),
+                            ('app.exe', pe()[:152] + b'\x0b\x01' + pe()[154:])):
+            with self.subTest(name=name, value=value[152:154]):
+                path = self.binaries / name
+                original = path.read_bytes()
+                path.write_bytes(value)
+                with self.assertRaises(ValueError):
+                    PACKAGE.stage(self.binaries, self.payload, '0.1.0', self.conpty, self.pin)
+                self.assertFalse(self.payload.exists())
+                path.write_bytes(original)
 
     def test_rejects_foreign_architecture_and_missing_pe(self):
         path = self.binaries / 'app.exe'

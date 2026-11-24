@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -13,8 +14,20 @@ from release import RELEASE_VERSION
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def check_pe(path):
-    conpty.check_x64_pe(path.read_bytes(), path)
+def check_pe(path, expected_subsystem):
+    data = path.read_bytes()
+    conpty.check_x64_pe(data, path)
+    offset = struct.unpack_from('<I', data, 60)[0]
+    optional = offset + 24
+    if offset + 22 > len(data):
+        raise ValueError(f"invalid PE32+ optional header: {path}")
+    size = struct.unpack_from('<H', data, offset + 20)[0]
+    if (size < 70 or optional + size > len(data)
+            or struct.unpack_from('<H', data, optional)[0] != 0x20b):
+        raise ValueError(f"invalid PE32+ optional header: {path}")
+    subsystem = struct.unpack_from('<H', data, optional + 68)[0]
+    if subsystem != expected_subsystem:
+        raise ValueError(f"wrong Windows subsystem {subsystem}: {path}")
 
 
 def stage(binaries, payload, version, pair, files=None):
@@ -23,8 +36,8 @@ def stage(binaries, payload, version, pair, files=None):
         raise ValueError(f"unsupported release version: {version}")
     if payload.exists():
         raise ValueError(f"payload already exists: {payload}")
-    for name in ("app.exe", "panel-mcp.exe"):
-        check_pe(binaries / name)
+    for name, subsystem in (("app.exe", 2), ("panel-mcp.exe", 3)):
+        check_pe(binaries / name, subsystem)
     verified = conpty.verify(pair, files)
     notices = binaries / "notices"
     if not notices.is_dir() or not any(p.is_file() for p in notices.rglob("*")):
