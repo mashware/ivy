@@ -114,6 +114,7 @@ mod tests {
     fn same_window_replaces_ligature_drawing_after_size_scale_face_and_reset() {
         let ctx = egui::Context::default();
         let mut window = tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let _output = tests::isolate_output(&mut window);
         let fixture = || {
             egui::FontData::from_static(include_bytes!(
                 "../tests/fixtures/ligatures/JetBrainsMono-Regular.ttf"
@@ -202,6 +203,7 @@ mod tests {
     fn actual_window_shapes_but_copy_search_and_geometry_keep_the_source_cells() {
         let ctx = egui::Context::default();
         let mut window = tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let _output = tests::isolate_output(&mut window);
         crate::fonts::use_measurement_face(
             &mut window.discoverer,
             egui::FontData::from_static(include_bytes!(

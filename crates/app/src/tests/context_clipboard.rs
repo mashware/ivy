@@ -330,6 +330,7 @@ mod tests {
     #[test]
     fn opening_menu_preserves_unrelated_console_colors() {
         let (mut window, ctx) = warmed();
+        let _output = isolate_output(&mut window);
         let area = area_of(1280.0);
         for _ in 0..2 {
             one_frame_in(&mut window, &ctx, area, vec![]);
@@ -430,6 +431,7 @@ mod tests {
     #[test]
     fn console_menu_copy_preserves_selection_and_copies_it() {
         let (mut window, ctx) = warmed();
+        let _output = isolate_output(&mut window);
         let area = area_of(1280.0);
         one_frame_in(&mut window, &ctx, area, vec![]);
         one_frame_in(&mut window, &ctx, area, vec![]);
