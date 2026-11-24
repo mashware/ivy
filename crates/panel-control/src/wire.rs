@@ -944,6 +944,13 @@ mod tests {
                 Incoming::Request(Request::ImageOpen { path })
             );
         }
+        // The line's framing ceiling is the only path-size ceiling: a path beyond 4096 bytes
+        // still travels, without a filesystem read that would impose the host's own name limit.
+        let path = std::env::temp_dir().join("a".repeat(5000));
+        assert_eq!(
+            one(&image_open_line(&path, "")),
+            Incoming::Request(Request::ImageOpen { path })
+        );
     }
 
     /// **A `pane` sent beside an `image_open` reaches nothing**: the endpoint chose the console,

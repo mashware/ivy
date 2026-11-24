@@ -6231,6 +6231,72 @@ mod tests {
         }
     }
 
+    /// Document yields to an agent's image only while its drawer is not maximized; otherwise
+    /// the image stays marked until the person selects Image and its texture is painted.
+    #[test]
+    fn an_agents_image_switches_document_only_when_it_is_not_maximized() {
+        use crate::sidebar::{Tool, active};
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let guide = folder.0.join("guide.md");
+        std::fs::write(&guide, "# Guide\n").unwrap();
+        for maximized in [false, true] {
+            let mut window =
+                crate::tests::window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            window.chrome.enable();
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
+            painted(&mut window, &ctx, vec![]);
+            let typing = window.active().focus;
+            assert!(crate::viewer::open_document_target(
+                &mut window,
+                typing,
+                guide.clone(),
+                None
+            ));
+            painted(&mut window, &ctx, vec![]);
+            assert_eq!(active(&window), Some(Tool::Document));
+            crate::viewer::blur(&mut window);
+            if maximized {
+                crate::sidebar::toggle_maximize(&mut window);
+            }
+            let (answer, _) = agent_pass(&mut window, &ctx, vec![], typing, &path);
+            assert_eq!(
+                answer,
+                Ok(if maximized {
+                    crate::viewer::origin::MARKED_FOR_THE_PERSON
+                } else {
+                    crate::viewer::origin::SHOWN_TO_THE_PERSON
+                })
+            );
+            assert_eq!(window.active().focus, typing);
+            assert_eq!(window.sidebar.maximized, maximized);
+            assert!(
+                !window.viewer.keyboard,
+                "the drawer took the console's keys"
+            );
+            if maximized {
+                assert_eq!(active(&window), Some(Tool::Document));
+                // Once the maximized surface is put away, Document still has not shown the image.
+                crate::sidebar::toggle_maximize(&mut window);
+                let marked = (vec!["Terminal 1".to_owned()], vec![typing]);
+                for _ in 0..3 {
+                    let shapes = painted(&mut window, &ctx, vec![]);
+                    assert_eq!(active(&window), Some(Tool::Document));
+                    assert_eq!(new_image_marks(&window, &shapes), marked);
+                }
+                crate::sidebar::toggle(&mut window, Tool::Image, &ctx);
+            }
+            assert_eq!(active(&window), Some(Tool::Image));
+            assert_eq!(
+                until_an_image(&mut window, &ctx).size(),
+                egui::vec2(64.0, 32.0)
+            );
+            let shapes = painted(&mut window, &ctx, vec![]);
+            assert_eq!(new_image_marks(&window, &shapes), (vec![], vec![]));
+        }
+    }
+
     /// An agent's image in a console the person is not working in moves nothing: not the drawer,
     /// not the tab it is on, not the focus, not the tab on show, and no console's grid.
     #[test]
