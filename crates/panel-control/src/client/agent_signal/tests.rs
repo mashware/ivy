@@ -1,15 +1,36 @@
 use super::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
-struct Slow {
+struct ScriptedIo {
     reply: &'static [u8],
-    delay: Duration,
+    step: Duration,
+    clock: Rc<Cell<Instant>>,
     waits: RefCell<Vec<Duration>>,
     written: Vec<u8>,
+    flushes: usize,
+    reads: usize,
 }
-impl Read for Slow {
+impl ScriptedIo {
+    fn new(reply: &'static [u8], step: Duration, clock: Rc<Cell<Instant>>) -> Self {
+        Self {
+            reply,
+            step,
+            clock,
+            waits: RefCell::default(),
+            written: Vec::new(),
+            flushes: 0,
+            reads: 0,
+        }
+    }
+    fn advance(&self) {
+        self.clock.set(self.clock.get() + self.step);
+    }
+}
+impl Read for ScriptedIo {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        std::thread::sleep(self.delay);
+        self.advance();
+        self.reads += 1;
         if self.reply.is_empty() {
             return Ok(0);
         }
@@ -18,18 +39,19 @@ impl Read for Slow {
         Ok(1)
     }
 }
-impl Write for Slow {
+impl Write for ScriptedIo {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        std::thread::sleep(self.delay);
+        self.advance();
         self.written.push(buffer[0]);
         Ok(1)
     }
     fn flush(&mut self) -> io::Result<()> {
-        std::thread::sleep(self.delay);
+        self.advance();
+        self.flushes += 1;
         Ok(())
     }
 }
-impl TimedIo for Slow {
+impl TimedIo for ScriptedIo {
     fn receive_timeout(&self, remaining: Duration) -> io::Result<()> {
         self.waits.borrow_mut().push(remaining);
         Ok(())
@@ -42,42 +64,60 @@ impl TimedIo for Slow {
 
 #[test]
 fn delayed_write_flush_and_trickled_reply_share_one_absolute_deadline() {
-    let mut io = Slow {
-        reply: b"{\"ok\":true}\n",
-        delay: Duration::from_millis(8),
-        waits: RefCell::default(),
-        written: Vec::new(),
-    };
     let start = Instant::now();
-    let error = exchange(&mut io, b"abc", start + Duration::from_millis(70)).unwrap_err();
+    let clock = Rc::new(Cell::new(start));
+    let mut io = ScriptedIo::new(
+        b"{\"ok\":true}\n",
+        Duration::from_millis(8),
+        Rc::clone(&clock),
+    );
+    let error = exchange(&mut io, b"abc", start + Duration::from_millis(70), || {
+        clock.get()
+    })
+    .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     assert_eq!(io.written, b"abc");
-    assert!(
-        io.reply.len() > 1,
-        "the trickled reply must not finish on renewed budgets"
+    assert_eq!(io.flushes, 1);
+    assert_eq!(
+        io.reads, 5,
+        "the deadline must expire during the trickled reply"
     );
-    assert!(start.elapsed() < Duration::from_millis(250));
-    let waits = io.waits.borrow();
-    assert!(waits.len() >= 5, "exercise writes, flush and reads");
-    assert!(
-        waits.windows(2).all(|w| w[1] < w[0]),
-        "timeouts must decrease: {waits:?}"
+    assert_eq!(
+        io.reply, b":true}\n",
+        "a renewed budget would consume the complete reply"
+    );
+    assert_eq!(clock.get().duration_since(start), Duration::from_millis(72));
+    assert_eq!(
+        *io.waits.borrow(),
+        [70, 62, 54, 46, 38, 30, 22, 14, 6].map(Duration::from_millis),
+        "writes, flush and reads must receive only the same deadline's remaining budget"
     );
 }
 
 #[test]
 fn deadline_is_checked_after_a_successful_final_transfer() {
-    let mut io = Slow {
-        reply: b"\n",
-        delay: Duration::from_millis(20),
-        waits: RefCell::default(),
-        written: Vec::new(),
-    };
+    let start = Instant::now();
+    let clock = Rc::new(Cell::new(start));
+    let mut io = ScriptedIo::new(
+        b"{\"ok\":true}\n",
+        Duration::from_millis(2),
+        Rc::clone(&clock),
+    );
+    let error = exchange(&mut io, b"", start + Duration::from_millis(25), || {
+        clock.get()
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert_eq!(io.flushes, 1);
+    assert_eq!(io.reads, 12);
+    assert!(
+        io.reply.is_empty(),
+        "the final successful newline must cross the deadline"
+    );
+    assert_eq!(clock.get().duration_since(start), Duration::from_millis(26));
     assert_eq!(
-        exchange(&mut io, b"", Instant::now() + Duration::from_millis(30))
-            .unwrap_err()
-            .kind(),
-        io::ErrorKind::TimedOut
+        *io.waits.borrow(),
+        [25, 23, 21, 19, 17, 15, 13, 11, 9, 7, 5, 3, 1].map(Duration::from_millis)
     );
 }
 

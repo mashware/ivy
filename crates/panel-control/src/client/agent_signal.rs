@@ -44,7 +44,12 @@ impl Producer {
             "tool":"agent_signal", "v":1, "client":"opencode", "snapshot":snapshot
         }))?;
         line.push(b'\n');
-        exchange(&mut self.stream, &line, Instant::now() + EXCHANGE_BUDGET)
+        exchange(
+            &mut self.stream,
+            &line,
+            Instant::now() + EXCHANGE_BUDGET,
+            Instant::now,
+        )
     }
 }
 
@@ -62,9 +67,9 @@ impl TimedIo for crate::endpoint::Stream {
     }
 }
 
-fn remaining(deadline: Instant) -> io::Result<Duration> {
+fn remaining(deadline: Instant, now: Instant) -> io::Result<Duration> {
     deadline
-        .checked_duration_since(Instant::now())
+        .checked_duration_since(now)
         .filter(|d| !d.is_zero())
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "agent signal exchange timed out"))
 }
@@ -73,37 +78,38 @@ fn exchange(
     stream: &mut impl TimedIo,
     mut line: &[u8],
     deadline: Instant,
+    now: impl Fn() -> Instant,
 ) -> io::Result<SignalAnswer> {
     while !line.is_empty() {
-        stream.send_timeout(remaining(deadline)?)?;
+        stream.send_timeout(remaining(deadline, now())?)?;
         let sent = match stream.write(line) {
             Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
             result => result?,
         };
-        remaining(deadline)?;
+        remaining(deadline, now())?;
         if sent == 0 {
             return Err(io::ErrorKind::WriteZero.into());
         }
         line = &line[sent..];
     }
     loop {
-        stream.send_timeout(remaining(deadline)?)?;
+        stream.send_timeout(remaining(deadline, now())?)?;
         match stream.flush() {
             Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
             result => result?,
         }
-        remaining(deadline)?;
+        remaining(deadline, now())?;
         break;
     }
     let mut reply = Vec::new();
     loop {
-        stream.receive_timeout(remaining(deadline)?)?;
+        stream.receive_timeout(remaining(deadline, now())?)?;
         let mut byte = [0];
         let count = match stream.read(&mut byte) {
             Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
             result => result?,
         };
-        remaining(deadline)?;
+        remaining(deadline, now())?;
         if count == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }

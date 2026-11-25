@@ -31,8 +31,8 @@ def main():
         (
             "whole-exchange-deadline",
             root / "crates/panel-control/src/client/agent_signal.rs",
-            "deadline\n        .checked_duration_since(Instant::now())",
-            "(Instant::now() + EXCHANGE_BUDGET)\n        .checked_duration_since(Instant::now())",
+            "deadline\n        .checked_duration_since(now)",
+            "(now + EXCHANGE_BUDGET)\n        .checked_duration_since(now)",
             cargo + ["--lib", "delayed_write_flush_and_trickled_reply_share_one_absolute_deadline"],
             "delayed_write_flush_and_trickled_reply_share_one_absolute_deadline",
         ),
@@ -72,7 +72,9 @@ def main():
         ))
     for name, path, before, after, command, test_name in cases:
         original = path.read_bytes()
-        needle = before.encode()
+        newline = b"\r\n" if b"\r\n" in original else b"\n"
+        needle = before.encode().replace(b"\n", newline)
+        replacement = after.encode().replace(b"\n", newline)
         count = 2 if name == "native-private-directory" else 1
         if original.count(needle) != count:
             raise SystemExit(f"{name}: expected {count} production mutation anchors")
@@ -82,7 +84,7 @@ def main():
             sys.stdout.buffer.write(baseline.stdout)
             raise SystemExit(f"{name}: baseline must pass")
         try:
-            path.write_bytes(original.replace(needle, after.encode(), count))
+            path.write_bytes(original.replace(needle, replacement, count))
             result = subprocess.run(command, cwd=root, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, timeout=180, check=False)
             output = result.stdout.decode("utf-8", errors="replace")
