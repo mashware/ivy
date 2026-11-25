@@ -96,6 +96,35 @@ def run_case(package: str, target: list[str], case: str, label: str, directory: 
     return run.returncode
 
 
+def owner_case(label: str, directory: Path) -> subprocess.CompletedProcess[str]:
+    run = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         str(ROOT / "packaging/windows/test-codex-route-owner.ps1"), "-Repo", str(ROOT)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+    )
+    (directory / f"{label}.log").write_text(run.stdout + run.stderr, encoding="utf-8")
+    return run
+
+
+def mutate_owner(directory: Path) -> None:
+    path = ROOT / "crates/panel-contract/src/windows_security.rs"
+    original = path.read_bytes()
+    needle = b"unsafe { EqualSid(owner, user.User.Sid) } == 0"
+    if original.count(needle) != 1:
+        raise RuntimeError("Expected exactly one owner validation guard")
+    baseline = owner_case("owner-baseline", directory)
+    if baseline.returncode != 0 or "PASS foreign-owner route file rejected" not in baseline.stdout:
+        raise RuntimeError("Native owner baseline failed; see owner-baseline.log")
+    try:
+        path.write_bytes(original.replace(needle, b"false"))
+        mutant = owner_case("owner-mutant", directory)
+        if mutant.returncode == 0 or "Foreign-owner refusal failed" not in mutant.stdout + mutant.stderr:
+            raise RuntimeError("Owner mutation was not detected by the opener; see owner-mutant.log")
+    finally:
+        path.write_bytes(original)
+    print("PASS mutation owner: foreign-owned readable file was accepted only by the mutant")
+
+
 def main() -> None:
     if sys.platform != "win32":
         raise SystemExit("These witnesses require native Windows; cross-compilation is not execution.")
@@ -117,7 +146,8 @@ def main() -> None:
         finally:
             path.write_bytes(original)
         print(f"PASS mutation {number}: {case}")
-    print(f"All {len(CASES)} Windows Codex route mutations were detected.")
+    mutate_owner(directory)
+    print(f"All {len(CASES) + 1} Windows Codex route mutations were detected.")
 
 
 if __name__ == "__main__":
