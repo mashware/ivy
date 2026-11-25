@@ -24,9 +24,13 @@ feature_id: feat_term-core_nx0g1r
 ---
 
 ## What it does
-
-egui 0.36 default ScrollStyle::floating uses zero dormant handle/background opacity independently of ScrollBarVisibility. AlwaysVisible alone cannot establish an idle position indicator; a custom selection-owned drag also suppresses ScrollArea hover activation. Test settled visible painted handles and real handle-driven document motion, rather than checking the visibility enum or scroll extents.
+ egui 0.36 default ScrollStyle::floating uses zero dormant handle/background opacity
+independently of ScrollBarVisibility. AlwaysVisible alone cannot establish an idle
+position indicator; a custom selection-owned drag also suppresses ScrollArea hover
+activation. Test settled visible painted handles and real handle-driven document motion,
+rather than checking the visibility enum or scroll extents.
 
 ## Where it lives
 
-crates/app/src/viewer/code.rs, crates/app/src/ui/style.rs; symbols: show. Evidence: issue 245 regression tests and targeted mutation checks (November 2026).
+crates/app/src/viewer/code.rs, crates/app/src/ui/style.rs; symbols: show. Evidence:
+issue 245 regression tests and targeted mutation checks (November 2026).

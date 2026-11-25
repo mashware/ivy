@@ -23,9 +23,14 @@ feature_id: feat_term-core_nx0g1r
 ---
 
 ## What it does
-
-Pipe-driven interactive shell fixtures can hang when cargo itself runs inside a real terminal: five zsh children were observed with pipe stdin fd0, /dev/tty fd10 and n_tty_read, while over2300 other tests completed. Starting those test shell children in a fresh session before exec prevents borrowing cargo's controlling terminal; the same unchanged shell-input/assertion fixtures then complete in the actual Ivy auxiliary console. A no-TTY CI or agent-shell run cannot reproduce this failure mode.
+ Pipe-driven interactive shell fixtures can hang when cargo itself runs inside a real
+terminal: five zsh children were observed with pipe stdin fd0, /dev/tty fd10 and
+n_tty_read, while over2300 other tests completed. Starting those test shell children in
+a fresh session before exec prevents borrowing cargo's controlling terminal; the same
+unchanged shell-input/assertion fixtures then complete in the actual Ivy auxiliary
+console. A no-TTY CI or agent-shell run cannot reproduce this failure mode.
 
 ## Where it lives
 
-crates/app/src/shell_integration.rs; symbols: pipe_driven_shell. Evidence: issue 245 regression tests and targeted mutation checks (November 2026).
+crates/app/src/shell_integration.rs; symbols: pipe_driven_shell. Evidence: issue 245
+regression tests and targeted mutation checks (November 2026).

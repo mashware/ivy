@@ -25,9 +25,16 @@ feature_id: feat_term-core_nx0g1r
 ---
 
 ## What it does
-
-egui popup frame drawing may be nested in Shape::Vec. A test inspecting only top-level Rect shapes accidentally selected the 900x600 root frame as the menu, so its text-to-frame padding assertion stayed green when menu padding was deliberately removed. Flatten the shape tree, identify the bounded popup, and compare its frame with actual AccessKit button bounds plus painted label bounds; the same padding mutation then failed.
+ egui popup frame drawing may be nested in Shape::Vec. A test inspecting only top-level
+Rect shapes accidentally selected the 900x600 root frame as the menu, so its
+text-to-frame padding assertion stayed green when menu padding was deliberately removed.
+Flatten the shape tree, identify the bounded popup, and compare its frame with actual
+AccessKit button bounds plus painted label bounds; the same padding mutation then
+failed.
 
 ## Where it lives
 
-crates/app/src/viewer/code_header/tests.rs, crates/app/src/viewer/code_header/tests/window.rs; symbols: painted_shapes, the_actual_menu_paints_both_wrap_states_and_keeps_comfortable_padding. Evidence: issue 245 regression tests and targeted mutation checks (November 2026).
+crates/app/src/viewer/code_header/tests.rs,
+crates/app/src/viewer/code_header/tests/window.rs; symbols: painted_shapes,
+the_actual_menu_paints_both_wrap_states_and_keeps_comfortable_padding. Evidence: issue
+245 regression tests and targeted mutation checks (November 2026).

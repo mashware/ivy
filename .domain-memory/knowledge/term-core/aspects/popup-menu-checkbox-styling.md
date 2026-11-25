@@ -27,9 +27,14 @@ feature_id: feat_term-core_nx0g1r
 ---
 
 ## What it does
-
-egui 0.36 Popup::menu applies menu_style after a custom frame: it overwrites button padding to (2,0) and clears widget strokes. In Ivy a standard unchecked Checkbox then has the same roles.raised fill as the popup and no border, so it disappears at rest while the checked tick remains. Verify actual popup output with pointer away from the checkbox; testing only toggle behavior misses this.
+ egui 0.36 Popup::menu applies menu_style after a custom frame: it overwrites button
+padding to (2,0) and clears widget strokes. In Ivy a standard unchecked Checkbox then
+has the same roles.raised fill as the popup and no border, so it disappears at rest
+while the checked tick remains. Verify actual popup output with pointer away from the
+checkbox; testing only toggle behavior misses this.
 
 ## Where it lives
 
-crates/app/src/viewer/code_header.rs, crates/app/src/ui/floating.rs, crates/app/src/ui/style.rs; symbols: menu, menu_frame. Evidence: issue 245 regression tests and targeted mutation checks (November 2026).
+crates/app/src/viewer/code_header.rs, crates/app/src/ui/floating.rs,
+crates/app/src/ui/style.rs; symbols: menu, menu_frame. Evidence: issue 245 regression
+tests and targeted mutation checks (November 2026).
