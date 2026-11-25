@@ -145,3 +145,35 @@ for(const platform of ['win32','linux']) test(`${platform} rejected withdrawal r
   reply(c,{ok:true});await t.drain()
  }finally{await t.close();await f.remove()}
 })
+
+
+test('helper rejects malformed readiness and normal reply shapes before accepting state',async()=>{
+ const cases=[
+  {startup:true,frame:{ok:true,ready:true,v:1,error:'unexpected'}},
+  {startup:true,frame:{ok:true,ready:true,v:1,retryable:true}},
+  {startup:true,frame:{ok:true,ready:true,v:1,extra:true}},
+  {startup:true,frame:{ok:false,ready:true,v:1,retryable:true}},
+  {startup:true,frame:{ok:false,ready:true,v:1,error:'missing retryability'}},
+  {startup:true,frame:{ok:false,ready:true,v:1,error:'bad',retryable:true,extra:true}},
+  {startup:false,frame:{ok:true,error:'unexpected'}},
+  {startup:false,frame:{ok:true,retryable:true}},
+  {startup:false,frame:{ok:true,extra:true}},
+  {startup:false,frame:{ok:false}},
+  {startup:false,frame:{ok:false,retryable:true}},
+  {startup:false,frame:{ok:false,error:7}},
+  {startup:false,frame:{ok:false,error:'bad',retryable:'yes'}},
+  {startup:false,frame:{ok:false,error:'bad',extra:true}},
+  {startup:false,frame:{ok:true,ready:true,v:1}},
+ ]
+ for(const {startup,frame}of cases) {
+  const f=await fixture();const t=f.open()
+  try {
+   const c=f.state.children[0]
+   if(!startup){reply(c,{ok:true,ready:true,v:1});t.send(snapshot('wait'))}
+   reply(c,frame)
+   assert.equal(c.killed,true,`invalid ${startup?'readiness':'reply'} shape must terminate: ${JSON.stringify(frame)}`)
+   assert.equal(f.state.refreshes,startup?0:1,'invalid frame cannot refresh current state')
+   await pause(0);assert.ok([...f.timers.values()].some(timer=>timer.delay===1000),'malformed refusal is a connection loss, not a permanent refusal')
+  }finally{await t.close();await f.remove()}
+ }
+})

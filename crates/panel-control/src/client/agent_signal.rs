@@ -20,8 +20,13 @@ pub enum SignalAnswer {
     Refused {
         ok: bool,
         error: String,
+        #[serde(skip_serializing_if = "is_false")]
         retryable: bool,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl Producer {

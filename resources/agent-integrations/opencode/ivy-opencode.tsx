@@ -24,6 +24,18 @@ function helperPath(value: string | undefined) {
     && !value.slice(2).includes(":") && /\.exe$/i.test(value)
 }
 
+function validReply(reply: any, startup: boolean) {
+  if (!reply || typeof reply !== "object" || Array.isArray(reply) || typeof reply.ok !== "boolean") return false
+  const allowed = startup ? ["ok", "ready", "v"] : ["ok"]
+  if (startup && (reply.ready !== true || reply.v !== 1)) return false
+  if (!reply.ok) {
+    allowed.push("error", "retryable")
+    if (typeof reply.error !== "string") return false
+    if (startup ? typeof reply.retryable !== "boolean" : reply.retryable !== undefined && typeof reply.retryable !== "boolean") return false
+  }
+  return Object.keys(reply).every(key => allowed.includes(key))
+}
+
 // D80: one in flight, one latest replacement; losing a connection is not an answer.
 function channel(dir: string, connected: () => void) {
   let socket: Connection | undefined, child: ChildProcessWithoutNullStreams | undefined
@@ -99,11 +111,8 @@ function channel(dir: string, connected: () => void) {
         let reply: any
         try { reply = JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(line)) }
         catch { current.destroy(); return }
-        if (!reply || typeof reply !== "object" || typeof reply.ok !== "boolean"
-          || (reply.ok === false && ((reply.retryable !== undefined && typeof reply.retryable !== "boolean")
-            || (reply.error !== undefined && typeof reply.error !== "string")))) { current.destroy(); return }
+        if (!validReply(reply, !ready && windows)) { current.destroy(); return }
         if (!ready && windows) {
-          if (reply.ready !== true || reply.v !== 1) { current.destroy(); return }
           clearDeadline()
           if (!reply.ok) { if (reply.retryable !== true) stopped = true; current.destroy(); return }
           ready = true; current.connecting = false; connected(); continue

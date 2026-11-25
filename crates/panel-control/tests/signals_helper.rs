@@ -104,6 +104,16 @@ fn native_helper_preserves_refusals_and_explicit_withdrawal_on_one_connection() 
     let output = child.wait_with_output().unwrap();
     server.join().unwrap();
     assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        output.stdout,
+        concat!(
+            "{\"ok\":true,\"ready\":true,\"v\":1}\n",
+            "{\"ok\":false,\"error\":\"try again\",\"retryable\":true}\n",
+            "{\"ok\":false,\"error\":\"disabled\"}\n",
+            "{\"ok\":true}\n",
+        )
+        .as_bytes()
+    );
     let replies: Vec<serde_json::Value> = output
         .stdout
         .split(|b| *b == b'\n')
@@ -115,7 +125,7 @@ fn native_helper_preserves_refusals_and_explicit_withdrawal_on_one_connection() 
         vec![
             serde_json::json!({"ok":true,"ready":true,"v":1}),
             serde_json::json!({"ok":false,"error":"try again","retryable":true}),
-            serde_json::json!({"ok":false,"error":"disabled","retryable":false}),
+            serde_json::json!({"ok":false,"error":"disabled"}),
             serde_json::json!({"ok":true})
         ]
     );

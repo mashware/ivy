@@ -113,3 +113,20 @@ fn replies_preserve_explicit_retryability_and_reject_other_protocol_shapes() {
         assert!(decode(line.as_bytes()).is_err(), "accepted {line}");
     }
 }
+
+#[test]
+fn helper_replies_serialize_the_exact_approved_shapes() {
+    for line in [
+        br#"{"ok":true}"#.as_slice(),
+        br#"{"ok":false,"error":"disabled"}"#.as_slice(),
+        br#"{"ok":false,"error":"busy","retryable":true}"#.as_slice(),
+    ] {
+        let answer = decode(line).unwrap();
+        assert_eq!(serde_json::to_vec(&answer).unwrap(), line);
+    }
+    let explicit_false = decode(br#"{"ok":false,"error":"disabled","retryable":false}"#).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&explicit_false).unwrap(),
+        br#"{"ok":false,"error":"disabled"}"#
+    );
+}
