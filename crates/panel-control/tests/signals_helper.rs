@@ -254,8 +254,10 @@ fn native_helper_rejects_invalid_input_without_forwarding_any_signal() {
     ] {
         let panel = PanelDir::create().unwrap();
         let bound = endpoint::bind(panel.path(), panel.id()).unwrap();
+        let (configured_sender, configured_receiver) = std::sync::mpsc::sync_channel(1);
         let server = std::thread::spawn(move || {
             let mut stream = accept(bound);
+            configured_sender.send(()).unwrap();
             assert_eq!(
                 stream.read(&mut [0]).unwrap(),
                 0,
@@ -263,7 +265,16 @@ fn native_helper_rejects_invalid_input_without_forwarding_any_signal() {
             );
         });
         let mut child = spawn(&panel);
-        let _ = child.stdin.take().unwrap().write_all(&input);
+        let mut helper_input = child.stdin.take().unwrap();
+        // Darwin rejects setsockopt after shutdown; keep stdin open until accept is configured.
+        let configured = configured_receiver.recv_timeout(Duration::from_secs(5));
+        if configured.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        configured.expect("native endpoint was not accepted and configured before invalid input");
+        let _ = helper_input.write_all(&input);
+        drop(helper_input);
         wait(&mut child, Duration::from_secs(5));
         let output = child.wait_with_output().unwrap();
         server.join().unwrap();
