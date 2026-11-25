@@ -647,6 +647,7 @@ mod tests {
     }
     #[test]
     fn blocked_filesystem_reader_leaves_frames_and_console_input_progressing() {
+        let diagnostics = crate::tests::windows_fixture::Diagnostics::new();
         use crate::tests::{one_frame_in, window_of_tabs};
         let temp = TempDir::new();
         let marker = temp.0.join("console-input");
@@ -673,7 +674,8 @@ mod tests {
             one_frame_in(&mut window, &ctx, area, vec![]);
             assert!(
                 Instant::now() < ready,
-                "input fixture did not open its witness"
+                "input fixture did not open its witness: {}",
+                diagnostics.report(&mut window)
             );
             thread::sleep(Duration::from_millis(10));
         }
