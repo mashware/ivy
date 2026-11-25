@@ -117,7 +117,7 @@ fn native_helper_unsafe_directory_sends_zero_bytes_before_failed_readiness() {
     endpoint::private_to_this_user(panel.path()).unwrap();
     assert_eq!(
         observed,
-        (1, [b'!']),
+        (1, *b"!"),
         "unsafe helper reached the native endpoint"
     );
     assert!(!output.status.success());
