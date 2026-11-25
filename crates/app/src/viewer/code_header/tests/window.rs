@@ -111,93 +111,96 @@ crate::windows_unix_omission!(
 #[cfg(target_os = "linux")]
 #[test]
 fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
-    let tree = Tree::new(&["r/src/a.ts"]);
-    let root = tree.at("r");
-    let script = format!("cd '{}' && exec sleep 30", root.display());
-    let mut window = crate::tests::window_of_tabs([[script.as_str(), "sleep 30"]]);
-    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
-    let pane = window.active().panes()[0].name;
-    let ctx = crate::ui::icons::installed_for_tests(1.0);
-    ctx.global_style_mut(|style| style.animation_time = 0.0);
-    let mut time = 0.0;
-    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
-    until(
-        &mut window,
-        &ctx,
-        &mut time,
-        "Files reaching the console's folder",
-        |w, _| crate::explorer::root_of(w, pane).as_ref() == Some(&root),
-    );
-    assert!(crate::viewer::open_document_target(
-        &mut window,
-        pane,
-        tree.at("r/src/a.ts"),
-        None
-    ));
-    let painted = until(&mut window, &ctx, &mut time, "the header", |w, p| {
-        w.sidebar.last_dock.is_some_and(|dock| {
-            p.texts
-                .iter()
-                .any(|(t, r)| t == "›" && dock.contains(r.center()))
-        })
-    });
-    drop(painted);
-    // The drawer at its shortest, where the menu has the least room under the header.
-    window.sidebar.set_height(0.0);
-    window_pass(&mut window, &ctx, &mut time, vec![]);
-    let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
-    let dock = window.sidebar.last_dock.expect("the drawer is placed");
-    assert!(dock.height() <= 170.0, "the drawer stayed tall: {dock:?}");
-
-    // A menu item over the drawer: it copies, and the focus stays where it was.
-    let focused = window.active().focus;
-    let more = painted.at_in(egui_phosphor::regular::CARET_DOWN, dock);
-    window_click(&mut window, &ctx, &mut time, more);
-    let menu = window_pass(&mut window, &ctx, &mut time, vec![]);
-    for item in [
-        "Open in File Manager",
-        "Copy absolute path",
-        "Copy relative path",
-        "Wrap lines",
-    ] {
-        let at = menu.at(item);
-        assert!(
-            dock.contains(at),
-            "{item} at {at:?} is outside the drawer {dock:?}"
+    for zoom in [1.0, 1.25, 1.5] {
+        let tree = Tree::new(&["r/src/a.ts"]);
+        let root = tree.at("r");
+        let script = format!("cd '{}' && exec sleep 30", root.display());
+        let mut window = crate::tests::window_of_tabs([[script.as_str(), "sleep 30"]]);
+        crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+        let pane = window.active().panes()[0].name;
+        let ctx = crate::ui::icons::installed_for_tests(zoom);
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut time = 0.0;
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        until(
+            &mut window,
+            &ctx,
+            &mut time,
+            "Files reaching the console's folder",
+            |w, _| crate::explorer::root_of(w, pane).as_ref() == Some(&root),
         );
-    }
-    let item = menu.at("Copy relative path");
-    let copied = window_click(&mut window, &ctx, &mut time, item);
-    assert_eq!(copied, ["src/a.ts"]);
-    assert_eq!(window.active().focus, focused);
+        assert!(crate::viewer::open_document_target(
+            &mut window,
+            pane,
+            tree.at("r/src/a.ts"),
+            None
+        ));
+        let painted = until(&mut window, &ctx, &mut time, "the header", |w, p| {
+            w.sidebar.last_dock.is_some_and(|dock| {
+                p.texts
+                    .iter()
+                    .any(|(t, r)| t == "›" && dock.contains(r.center()))
+            })
+        });
+        drop(painted);
+        // The drawer at its shortest, where the menu has the least room under the header.
+        window.sidebar.set_height(0.0);
+        window_pass(&mut window, &ctx, &mut time, vec![]);
+        let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
+        let dock = window.sidebar.last_dock.expect("the drawer is placed");
+        assert!(dock.height() <= 170.0, "the drawer stayed tall: {dock:?}");
 
-    // With Files closed, a folder of the path opens Files, shows the folder expanded and
-    // selected inside the tree it already had, and the file stays in the drawer.
-    crate::sidebar::close_files(&mut window);
-    window_pass(&mut window, &ctx, &mut time, vec![]);
-    let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
-    assert!(!crate::sidebar::files_visible(&window));
-    let dock = window.sidebar.last_dock.expect("the drawer is placed");
-    window_click(&mut window, &ctx, &mut time, painted.at_in("src", dock));
-    let painted = until(
-        &mut window,
-        &ctx,
-        &mut time,
-        "Files showing the folder",
-        |w, _| crate::explorer::selected_of(w, pane) == Some((root.join("src"), true)),
-    );
-    assert_eq!(
-        crate::explorer::root_of(&window, pane),
-        Some(root.clone()),
-        "the folder's root moved"
-    );
-    assert!(crate::sidebar::files_visible(&window));
-    let dock = window
-        .sidebar
-        .last_dock
-        .expect("the drawer is still placed");
-    painted.at_in("a.ts", dock);
+        // A menu item over the drawer: it copies, and the focus stays where it was.
+        let focused = window.active().focus;
+        let more = painted.at_in(egui_phosphor::regular::CARET_DOWN, dock);
+        window_click(&mut window, &ctx, &mut time, more);
+        let menu = window_pass(&mut window, &ctx, &mut time, vec![]);
+        for item in [
+            "Open in File Manager",
+            "Copy absolute path",
+            "Copy relative path",
+            "Wrap lines",
+        ] {
+            let at = menu.at(item);
+            assert!(
+                dock.contains(at),
+                "{item} at {at:?} is outside the drawer {dock:?}"
+            );
+        }
+        let item = menu.at("Copy relative path");
+        let copied = window_click(&mut window, &ctx, &mut time, item);
+        assert_eq!(copied, ["src/a.ts"]);
+        assert_eq!(window.active().focus, focused);
+
+        // With Files closed, a folder of the path opens Files, shows the folder expanded and
+        // selected inside the tree it already had, and the file stays in the drawer.
+        crate::sidebar::close_files(&mut window);
+        window_pass(&mut window, &ctx, &mut time, vec![]);
+        let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
+        assert!(!crate::sidebar::files_visible(&window));
+        let dock = window.sidebar.last_dock.expect("the drawer is placed");
+        window_click(&mut window, &ctx, &mut time, painted.at_in("src", dock));
+        let painted = until(
+            &mut window,
+            &ctx,
+            &mut time,
+            "Files showing the folder",
+            |w, _| crate::explorer::selected_of(w, pane) == Some((root.join("src"), true)),
+        );
+        assert_eq!(
+            crate::explorer::root_of(&window, pane),
+            Some(root.clone()),
+            "the folder's root moved"
+        );
+        assert!(crate::sidebar::files_visible(&window));
+        let dock = window
+            .sidebar
+            .last_dock
+            .expect("the drawer is still placed");
+        painted.at_in("a.ts", dock);
+    }
 }
+
 crate::windows_unix_omission!(
     a_folder_of_the_path_under_a_linked_root_shows_inside_the_tree,
     "unix-only: tests filesystem symlink path resolution in the Linux file tree"
