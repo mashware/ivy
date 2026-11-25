@@ -29,22 +29,10 @@ function global:prompt {
 if (Get-Command codex -CommandType Alias,Function -ErrorAction Ignore) {
     [Console]::Error.WriteLine('Ivy: existing codex alias or function preserved; automatic panel routing is inactive.')
 } elseif ($env:IVY_CODEX_HELPER) {
-    function global:codex {
-        $ivyReal = $null
-        foreach ($ivyName in 'codex.exe', 'codex.cmd', 'codex.bat') {
-            $ivyReal = Get-Command $ivyName -CommandType Application -ErrorAction Ignore | Select-Object -First 1
-            if ($ivyReal) { break }
-        }
-        if (-not $ivyReal) {
-            [Console]::Error.WriteLine('Ivy: codex executable not found in PATH.')
-            $global:LASTEXITCODE = 127
-            return
-        }
-        if (Test-Path -LiteralPath $env:IVY_CODEX_HELPER -PathType Leaf) {
-            & $env:IVY_CODEX_HELPER $ivyReal.Source @args
-        } else {
-            [Console]::Error.WriteLine('Ivy: codex helper unavailable; automatic panel routing is inactive.')
-            & $ivyReal.Source @args
-        }
+    $ivyNativeLauncher = Join-Path (Split-Path -Parent $env:IVY_CODEX_HELPER) 'ivy-codex-shell.exe'
+    if (Test-Path -LiteralPath $ivyNativeLauncher -PathType Leaf) {
+        Set-Alias -Name codex -Value $ivyNativeLauncher -Scope Global
+    } else {
+        [Console]::Error.WriteLine('Ivy: native Codex launcher unavailable; automatic panel routing is inactive.')
     }
 }

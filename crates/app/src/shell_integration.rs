@@ -254,7 +254,7 @@ mod powershell {
                     r#"
 Set-Location -LiteralPath (Join-Path $env:IVY_TEST_ROOT 'work % # café')
 prompt
-'WRAPPED:' + [bool](Get-Command codex -CommandType Function -ErrorAction Ignore)
+'WRAPPED:' + [bool](Get-Command codex -CommandType Alias,Function -ErrorAction Ignore)
 Set-Location Env:
 prompt
 "#,
@@ -303,53 +303,6 @@ codex
                         "{err}"
                     );
                 }
-            }
-        }
-
-        #[cfg(windows)]
-        #[test]
-        fn windows_powershell_codex_chooses_application_over_ps1_and_passes_arguments() {
-            for program in programs() {
-                let root = Temp::new();
-                let helper = root.0.join("helper.cmd");
-                std::fs::write(
-                    &helper,
-                    "@echo off\r\necho HELPER:%~1:%~2:%~3\r\nexit /b 37\r\n",
-                )
-                .unwrap();
-                std::fs::write(
-                    root.0.join("codex.cmd"),
-                    "@echo off\r\necho DIRECT_CLIENT\r\nexit /b 19\r\n",
-                )
-                .unwrap();
-                std::fs::write(root.0.join("codex.ps1"), "throw 'wrong executable'").unwrap();
-                let (out, err) = run(
-                    &program,
-                    "",
-                    r#"
-$env:PATH = $env:IVY_TEST_ROOT + ';' + $env:PATH
-codex resume 'session one'
-'EXIT:' + $LASTEXITCODE
-Remove-Item -LiteralPath $env:IVY_CODEX_HELPER
-codex
-'FALLBACK:' + $LASTEXITCODE
-"#,
-                    Some(&helper),
-                    &root.0,
-                );
-                assert!(
-                    out.contains(&format!(
-                        "HELPER:{}:resume:session one",
-                        root.0.join("codex.cmd").display()
-                    )),
-                    "{out}"
-                );
-                assert!(out.contains("EXIT:37"), "{out}");
-                assert!(
-                    out.contains("DIRECT_CLIENT") && out.contains("FALLBACK:19"),
-                    "{out}"
-                );
-                assert!(err.contains("codex helper unavailable"), "{err}");
             }
         }
     }
