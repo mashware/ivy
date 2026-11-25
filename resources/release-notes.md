@@ -1,6 +1,18 @@
-# Ivy 0.1.0-alpha.21
+# Ivy 0.1.0-alpha.22
 
 ## New in this alpha
+
+- Select text beyond the visible part of a code document: holding the pointer above or below the view scrolls it without losing the selection's starting point. Scrollbars remain visible, and the Open menu has clearer spacing and a visible Wrap lines checkbox.
+- The Board gives project sections more room, keeps controls aligned and reveals tasks on demand.
+- Codex stays connected when opening its plugins screen.
+- On Windows, PowerShell reports its current directory to Ivy for project identity, new splits, Review and relative links. Its native Codex entry preserves arguments and exit status.
+- On Windows, OpenCode can publish working, permission and question indicators through Ivy's bundled helper. Installed-client desktop verification and session recovery remain pending.
+- Windows Codex route records use private storage. Shared mobile/panel conversations remain unavailable there; ordinary launches explain the limitation and preserve Codex's original behavior.
+- Shell startup failures on Windows remain visible instead of closing Ivy silently.
+
+Desktop appearance, operating-system clipboard copying and the reported code-toolbar alignment still need manual verification. Downloads remain unsigned and experimental.
+
+## Previously in 0.1.0-alpha.21
 
 - On Windows, launching Ivy and refreshing project or Git views no longer opens extra console windows. Ivy carries its own application icon and version.
 - Windows installers include the session helpers and recovery adapters needed by agent integration.
@@ -172,12 +184,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.21_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha21-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.21-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.21-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.21-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.22_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha22-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.22-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.22-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.22-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.21/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.22/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
