@@ -12,6 +12,20 @@ use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
 type Spawned = (Pty, Receiver<Vec<u8>>);
 
+#[derive(Debug)]
+pub(crate) struct StartupFailure {
+    pub program: String,
+    pub reason: String,
+}
+
+impl std::fmt::Display for StartupFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.program, self.reason)
+    }
+}
+
+impl std::error::Error for StartupFailure {}
+
 struct Ready {
     spawned: Spawned,
     startup: Vec<u8>,
@@ -31,6 +45,7 @@ fn prepare(spawned: Spawned) -> Ready {
 #[cfg(test)]
 thread_local! {
     static TEST_LAUNCHER: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_SPAWN_PROGRAM: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_os = "linux")]
@@ -59,6 +74,7 @@ pub(crate) struct Process {
     refused: bool,
     refusals: u64,
     pub(crate) failure: Option<String>,
+    pub(crate) startup_failure: Option<StartupFailure>,
     delivery_failed: bool,
     pub(crate) dismissed: bool,
 }
@@ -83,6 +99,7 @@ impl From<Pty> for Process {
             refused: false,
             refusals: 0,
             failure: None,
+            startup_failure: None,
             delivery_failed: false,
             dismissed: false,
         }
@@ -106,6 +123,7 @@ impl Process {
             refused: false,
             refusals: 0,
             failure: Some("the program could not be started".into()),
+            startup_failure: None,
             delivery_failed: false,
             dismissed: false,
         }
@@ -177,8 +195,18 @@ impl Process {
             });
         }
         let _ = (wake, reads);
-        let spawn = |program, args: &[&str]| {
+        let spawn = |program: &str, args: &[&str]| {
+            #[cfg(test)]
+            let replacement = TEST_SPAWN_PROGRAM.with(|value| value.borrow().clone());
+            #[cfg(test)]
+            let program = replacement.as_deref().unwrap_or(program);
             Pty::spawn_with_env_in(program, args, request.size, request.env, request.directory)
+                .map_err(|error| -> term_core::Error {
+                    Box::new(StartupFailure {
+                        program: program.to_owned(),
+                        reason: error.to_string(),
+                    })
+                })
         };
         let (pty, output) = match spawn(request.program, request.args) {
             Err(error)
@@ -195,6 +223,28 @@ impl Process {
             result => result?,
         };
         Ok((pty.into(), output))
+    }
+
+    pub(crate) fn failed(error: StartupFailure) -> (Self, Receiver<Vec<u8>>) {
+        let (sender, output) = std::sync::mpsc::channel();
+        drop(sender);
+        let process = Self {
+            live: None,
+            terminal: term_core::Termination::Ordinary,
+            cost: std::time::Duration::ZERO,
+            context: None,
+            pending: None,
+            input: Vec::new(),
+            startup: 0,
+            input_since: None,
+            refused: false,
+            refusals: 0,
+            failure: Some(error.to_string()),
+            startup_failure: Some(error),
+            delivery_failed: false,
+            dismissed: false,
+        };
+        (process, output)
     }
 
     pub(crate) fn live(&self) -> Option<&Pty> {
@@ -505,6 +555,7 @@ fn start_worker(
             refused: false,
             refusals: 0,
             failure: None,
+            startup_failure: None,
             delivery_failed: false,
             dismissed: false,
         },

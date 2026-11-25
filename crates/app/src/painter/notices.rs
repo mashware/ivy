@@ -402,19 +402,11 @@ fn the_silence_box_under(
 ) -> Option<Rect> {
     let silence = what_the_silence_is(console)?;
     let margin = metrics.width();
-    let wrap = (area.width() - 4.0 * margin).max(metrics.width());
-    let sentence = painter
-        .layout(
-            what_the_silence_says(console, silence),
-            metrics.font(),
-            theme.foreground(),
-            wrap,
-        )
-        .size();
     // Under the paste's boxes when there are any, and a margin below the console's top when there
     // are not. Asked of the one place that decides them, so the two cannot disagree about where they
     // end.
     let top = above.map_or(area.top() + margin, |paste| paste.bottom() + margin);
+    let sentence = silence_galley(painter, console, theme, metrics, area, top, silence).size();
     let box_of_it = Rect::from_min_size(
         pos2(area.left() + margin, top),
         vec2(sentence.x + 2.0 * margin, sentence.y + 2.0 * margin),
@@ -432,6 +424,73 @@ fn the_silence_box_under(
     (inside_the_ceiling && wide_enough).then_some(box_of_it)
 }
 
+fn silence_galley(
+    painter: &Painter,
+    console: &crate::Pane,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    area: Rect,
+    top: f32,
+    silence: Silence,
+) -> std::sync::Arc<eframe::egui::Galley> {
+    let layout = |text| {
+        painter.layout(
+            text,
+            metrics.font(),
+            theme.foreground(),
+            (area.width() - 4.0 * metrics.width()).max(metrics.width()),
+        )
+    };
+    let headline = what_the_silence_says(console, silence);
+    let Some(failure) = console
+        .pty
+        .startup_failure
+        .as_ref()
+        .filter(|_| silence == Silence::Termination)
+    else {
+        return layout(headline);
+    };
+    // D124: diagnostic length cannot decide whether the failure itself is visible.
+    let height = area.top() + area.height() * NOTICE_SHARE - top - 2.0 * metrics.width();
+    let candidate = |budget| {
+        layout(format!(
+            "{headline}\nProgram: {}\nReason: {}\nFull details: Settings > diagnostic log.",
+            middle_preview(&failure.program, budget),
+            middle_preview(&failure.reason, budget),
+        ))
+    };
+    let mut best = layout(headline.clone());
+    let (mut low, mut high) = (1, 256);
+    while low <= high {
+        let budget = (low + high) / 2;
+        let galley = candidate(budget);
+        if galley.size().y <= height {
+            best = galley;
+            low = budget + 1;
+        } else {
+            high = budget - 1;
+        }
+    }
+    best
+}
+
+fn middle_preview(text: &str, budget: usize) -> String {
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if chars.len() <= budget {
+        return chars.into_iter().collect();
+    }
+    let prefix = budget / 3;
+    let suffix = budget - prefix;
+    chars[..prefix]
+        .iter()
+        .chain(std::iter::once(&'…'))
+        .chain(chars[chars.len() - suffix..].iter())
+        .collect()
+}
+
 /// Says, over the console, that it stopped receiving.
 ///
 /// It is painted **over the grid and not into it**, for the reason the sibling notice gives: the
@@ -446,11 +505,14 @@ fn paint_the_silence_over_it(
     (box_of_it, silence): (Rect, Silence),
 ) {
     let margin = metrics.width();
-    let sentence = painter.layout(
-        what_the_silence_says(console, silence),
-        metrics.font(),
-        theme.foreground(),
-        (area.width() - 4.0 * margin).max(metrics.width()),
+    let sentence = silence_galley(
+        painter,
+        console,
+        theme,
+        metrics,
+        area,
+        box_of_it.top(),
+        silence,
     );
     // **The box was measured from a layout of its own, and nothing tied the two together** — the
     // sibling notice carries the same guard for the same reason. Diverge and the clip shows half a

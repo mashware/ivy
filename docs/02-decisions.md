@@ -12393,3 +12393,34 @@ control for the inspector. Named native tests and individual flag-removal mutati
 background launch paths. The existing interactive launch trial remains independent. These witnesses
 cover the inspected process and named paths, not every possible visible process; native results are
 not claimed until the Windows CI run completes.
+
+## D124 — A shell that cannot start leaves a visible failed console
+
+**Decided for #202.** After the existing startup and restoration attempts have failed to open a
+shell, Ivy keeps its window open with one failed console. The application explains which program
+was attempted and why it could not start. The notice belongs to the application, above the console,
+and is never written as terminal output or producer-owned panel content. D40's retained failure and
+D41's click dismissal apply: dismissing the explanation neither recovers the program nor makes the
+window close automatically. Existing application close controls remain the way to close it.
+
+The fixed failure headline must not disappear because a path or operating-system error is long.
+Program and reason previews fit within the notice's upper-half allowance, with explicit Unicode-safe
+elision retaining identifying context and the native error's cause. Complete diagnostics stay in
+D114's existing log, accessible from Settings. The notice points there for full details.
+
+**Why.** A person starting Ivy from the Windows Start menu cannot see standard error. Closing the
+window over a failed first shell gives them no actionable explanation. Keeping a failed console
+also lets the existing controls remain available without pretending that a program is running.
+
+**Boundary.** Recovery belongs after the existing startup attempts. Strict launch errors still
+belong to callers that retry a saved directory, fall back from a saved client, or retain the current
+console when a replacement cannot start. This decision changes neither shell selection nor those
+retry policies, and unrelated initialization errors are not reported as failed shell launches.
+
+| Discarded | Why |
+|---|---|
+| Show a native message and exit | The owner chose to keep Ivy open with the explanation on its console. |
+| Record only the log | A log preserves evidence but does not explain the disappearing window to the person opening it. |
+| Wrap the full diagnostic in the existing all-or-nothing notice | Long executable paths can make the whole notice exceed its ceiling and hide even the failure headline. |
+| Convert every launch error into a successful failed pane | Existing callers need the error to choose their directory and client fallbacks. |
+| Start a helper program to print the error | No working shell is available, and the application already has a failed-console lifecycle. |

@@ -220,13 +220,15 @@ impl Window {
         // damage the format version exists to avoid. It is installed here, after building, instead
         // of being pushed down through the three constructors: the factory one is called by
         // thirty-three tests that save nothing.
-        opened.map(|mut window| {
-            window.persistence = persistence;
-            if let Some(reason) = do_not_overwrite {
-                window.persistence.forbid_overwrite(reason);
-            }
-            window
-        })
+        opened
+            .or_else(|error| failed_window(ctx, size, error))
+            .map(|mut window| {
+                window.persistence = persistence;
+                if let Some(reason) = do_not_overwrite {
+                    window.persistence.forbid_overwrite(reason);
+                }
+                window
+            })
     }
 
     /// The rest of the window, which is the same whether it was restored or not.
@@ -629,7 +631,7 @@ fn launch(
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     let launch_waker = ctx.clone();
-    let (mut pty, output) = crate::launch::Process::start(
+    let (pty, output) = crate::launch::Process::start(
         std::sync::Arc::new(move || launch_waker.request_repaint()),
         reads.clone(),
         crate::launch::Request {
@@ -642,6 +644,26 @@ fn launch(
         },
     )?;
 
+    Ok(assemble_pane(
+        ctx,
+        name,
+        reads,
+        panel,
+        integration,
+        pty,
+        output,
+    ))
+}
+
+fn assemble_pane(
+    ctx: &egui::Context,
+    name: usize,
+    reads: control::ReadActivity,
+    panel: Option<PanelDir>,
+    integration: Option<shell_integration::Prepared>,
+    mut pty: crate::launch::Process,
+    output: std::sync::mpsc::Receiver<Vec<u8>>,
+) -> Pane {
     pty.context = Some(ctx.clone());
 
     #[cfg(test)]
@@ -663,7 +685,7 @@ fn launch(
         .foreground_scope()
         .map(panel::provenance_route::inspector)
         .unwrap_or_else(|_| panel::provenance_route::unavailable());
-    let (panel_state, control) = if pty.pending() {
+    let (panel_state, control) = if pty.pending() || pty.failure.is_some() {
         (panel::PanelState::default(), None)
     } else {
         panel::pane::state_and_control_with_authority(
@@ -678,7 +700,7 @@ fn launch(
         )
     };
 
-    Ok(Pane {
+    Pane {
         signals: Default::default(),
         name,
         label: None,
@@ -709,7 +731,30 @@ fn launch(
         panel_width: panel::DEFAULT_WIDTH,
         folded: false,
         taken_over: None,
-    })
+    }
+}
+
+fn failed_window(
+    ctx: &egui::Context,
+    size: Option<egui::Vec2>,
+    error: term_core::Error,
+) -> term_core::Result<Window> {
+    // D124: recovery here leaves the directory and saved-client retry paths their errors.
+    let failure = error.downcast::<crate::launch::StartupFailure>()?;
+    crate::pty_output::say(&format!("console could not be started: {failure}"));
+    let control = control::WindowActivity::default();
+    let (process, output) = crate::launch::Process::failed(*failure);
+    let pane = assemble_pane(ctx, 0, control.read_activity(), None, None, process, output);
+    let layout = OpeningLayout {
+        columns: 1,
+        rows: 1,
+    };
+    Window::with_these_tabs(
+        ctx,
+        vec![Tab::with_panes(vec![pane], &layout, 0)],
+        size,
+        control,
+    )
 }
 
 /// Which layout the environment variable asks for, if it asks for a valid one.
@@ -872,6 +917,312 @@ pub(crate) fn insist_on_size(window: &mut Window, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MissingProgram;
+
+    impl MissingProgram {
+        fn new() -> Self {
+            let missing = std::env::temp_dir().join(format!(
+                "ivy-no-shell-{}.exe",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            crate::launch::TEST_SPAWN_PROGRAM
+                .with(|value| *value.borrow_mut() = Some(missing.to_string_lossy().into_owned()));
+            Self
+        }
+    }
+
+    impl Drop for MissingProgram {
+        fn drop(&mut self) {
+            crate::launch::TEST_SPAWN_PROGRAM.with(|value| value.borrow_mut().take());
+        }
+    }
+
+    fn failed_start(ctx: &egui::Context) -> Window {
+        let _missing = MissingProgram::new();
+        Window::opening(
+            ctx,
+            OpenWith::Factory {
+                tabs: 1,
+                layout: OpeningLayout {
+                    columns: 1,
+                    rows: 1,
+                },
+            },
+            "unused-factory-argument",
+            None,
+            session::Persistence::at(None),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn shell_startup_failure_keeps_the_real_window_open_and_paints_its_cause() {
+        let ctx = egui::Context::default();
+        let mut window = failed_start(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        for _ in 0..3 {
+            let logic = ctx.run_logic(&Default::default(), |ctx| {
+                eframe::App::logic(&mut window, ctx, &mut frame)
+            });
+            assert!(
+                !logic
+                    .viewport_commands
+                    .get(&egui::ViewportId::ROOT)
+                    .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close))
+            );
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(&mut window, ui, &mut frame),
+            );
+            let text: String = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            assert!(
+                text.contains("This console's program could not be started."),
+                "{text}"
+            );
+            assert!(text.contains("ivy-no-shell-"), "{text}");
+            assert!(text.contains("Reason:"), "{text}");
+            assert!(text.contains("diagnostic log"), "{text}");
+        }
+        let pane = window.active_mut().panes_mut().remove(0);
+        assert!(pane.pty.write(b"must not run\n").is_err());
+        assert!(pane.screen.to_text().trim().is_empty());
+        assert!(
+            pane.control.is_none(),
+            "a nonexistent program acquired a control listener"
+        );
+    }
+
+    #[test]
+    fn shell_startup_failure_does_not_turn_a_strict_launch_into_success() {
+        let ctx = egui::Context::default();
+        let missing = std::env::temp_dir().join("ivy-nonexistent-exact-shell-202.exe");
+        assert!(!missing.exists());
+        let result = launch_exact(
+            &ctx,
+            Launch {
+                program: missing.to_str().unwrap(),
+                args: &[],
+                directory: None,
+                path: None,
+            },
+            None,
+            0,
+            Default::default(),
+        );
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(
+            error
+                .downcast_ref::<crate::launch::StartupFailure>()
+                .is_some()
+        );
+        assert!(failed_window(&ctx, None, "not a shell startup error".into()).is_err());
+    }
+
+    #[test]
+    fn shell_startup_failure_of_first_choice_still_runs_the_fallback() {
+        let missing = std::env::temp_dir().join("ivy-nonexistent-fallback-shell-202.exe");
+        assert!(!missing.exists());
+        let (mut process, output) = crate::launch::Process::start(
+            std::sync::Arc::new(|| {}),
+            Default::default(),
+            crate::launch::Request {
+                program: missing.to_str().unwrap(),
+                args: &[],
+                size: INITIAL_GRID,
+                env: &[],
+                directory: None,
+                fallback: true,
+            },
+        )
+        .unwrap();
+        let command = if cfg!(windows) {
+            "echo IVY^_FALLBACK_OK\r\n"
+        } else {
+            "printf IVY%s _FALLBACK_OK\\n\n"
+        };
+        process.write(command.as_bytes()).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(30);
+        let mut seen = String::new();
+        let mut answered = 0;
+        while !seen.contains("IVY_FALLBACK_OK") {
+            assert!(
+                Instant::now() < deadline,
+                "fallback did not execute: {seen}"
+            );
+            if let Ok(bytes) = output.recv_timeout(std::time::Duration::from_millis(20)) {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            let asked = seen.matches("\x1b[6n").count();
+            for _ in answered..asked {
+                process.write(b"\x1b[1;1R").unwrap();
+            }
+            answered = asked;
+        }
+    }
+
+    #[test]
+    fn shell_startup_failure_dismissal_keeps_the_window_and_explicit_close_still_works() {
+        let ctx = egui::Context::default();
+        let mut window = failed_start(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let input = || egui::RawInput {
+            screen_rect: Some(area),
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input(), |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let at = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text)
+                if text
+                    .galley
+                    .text()
+                    .contains("This console's program could not be started.") =>
+            {
+                Some(text.pos + egui::vec2(5.0, 5.0))
+            }
+            _ => None,
+        });
+        output.drop_without_applying_deltas();
+        let at = at.expect("failure notice was not painted");
+        for pressed in [true, false] {
+            let mut raw = input();
+            raw.events = vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            ctx.run_ui(raw, |ui| eframe::App::ui(&mut window, ui, &mut frame))
+                .drop_without_applying_deltas();
+        }
+        let output = ctx.run_ui(input(), |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let still_visible = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("This console's program could not be started.")));
+        output.drop_without_applying_deltas();
+        assert!(!still_visible);
+        let logic = ctx.run_logic(&Default::default(), |ctx| {
+            eframe::App::logic(&mut window, ctx, &mut frame)
+        });
+        assert!(
+            !logic
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close))
+        );
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let closed = ctx.run_logic(&Default::default(), |ctx| {
+            window.apply(WindowRequest::CloseTab, ctx, area, &metrics)
+        });
+        assert!(
+            closed
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close))
+        );
+    }
+
+    #[test]
+    fn shell_startup_failure_after_restore_cannot_overwrite_the_saved_layout() {
+        let ctx = egui::Context::default();
+        let initial = failed_start(&ctx);
+        let document = initial.describe();
+        let bytes = session::serialize(&document).unwrap().into_bytes();
+        let snapshot = std::env::temp_dir().join(format!(
+            "ivy-startup-snapshot-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&snapshot, &bytes).unwrap();
+        let mut persistence = session::Persistence::at(Some(snapshot.clone()));
+        let saved = persistence.load().unwrap();
+        let _missing = MissingProgram::new();
+        let mut window = Window::opening(
+            &ctx,
+            OpenWith::Restored(saved),
+            "missing-restored-shell",
+            None,
+            persistence,
+        )
+        .unwrap();
+        window.active_mut().panes_mut()[0].label = Some("A changed failed console".into());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+        let actual = std::fs::read(&snapshot).unwrap();
+        std::fs::remove_file(snapshot).unwrap();
+        assert_eq!(
+            actual, bytes,
+            "failed-start fallback overwrote the saved layout"
+        );
+    }
+
+    #[test]
+    fn shell_startup_failure_long_unicode_details_keep_a_visible_headline_and_native_cause() {
+        let ctx = egui::Context::default();
+        let mut window = failed_start(&ctx);
+        let theme = window.theme;
+        let pane = window.active_mut().panes_mut().remove(0);
+        let failure = pane.pty.startup_failure.as_mut().unwrap();
+        failure.program = format!("C:\\{}\\missing-shell.exe", "日本語é\\".repeat(200));
+        failure.reason = format!(
+            "CreateProcessW {}: missing interpreter (os error 2)",
+            "長い原因".repeat(400)
+        );
+        for width in [300.0, 1000.0] {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let area =
+                    egui::Rect::from_min_size(egui::pos2(30.0, 50.0), egui::vec2(width, 700.0));
+                let metrics =
+                    CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+                let boxes = painter::notices::the_boxes(ui.painter(), pane, &theme, &metrics, area);
+                assert!(boxes.silence.is_some());
+                assert!(boxes.silence.unwrap().bottom() <= area.center().y);
+                painter::notices::paint_them_over_it(
+                    ui.painter(),
+                    pane,
+                    &theme,
+                    &metrics,
+                    area,
+                    painter::Keys::Elsewhere,
+                );
+            });
+            let text: String = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            assert!(text.contains("This console's program could not be started."));
+            assert!(text.contains("missing-shell.exe"), "{text}");
+            assert!(text.contains("os error 2"), "{text}");
+            assert!(text.contains('…'));
+            assert!(!text.contains('�'));
+        }
+    }
 
     fn viewport(enabled: bool, macos: bool) -> egui::ViewportBuilder {
         chrome_viewport_on(egui::ViewportBuilder::default(), enabled, macos)
