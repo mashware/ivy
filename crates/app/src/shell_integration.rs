@@ -334,7 +334,7 @@ mod powershell {
 
         #[cfg(windows)]
         #[test]
-        #[ignore = "requires the bundled ConPTY pair beside the test binary"]
+        #[ignore = "needs the ConPTY pair beside the test binary (scripts/conpty.py); run explicitly in Windows CI"]
         fn windows_powershell_prepared_startup_reports_cwd_through_bundled_conpty() {
             use std::time::{Duration, Instant};
             let exe = std::env::current_exe().unwrap();
