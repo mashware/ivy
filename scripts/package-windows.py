@@ -48,6 +48,8 @@ def stage(binaries, payload, version, pair, files=None):
     shutil.copyfile(binaries / "panel-mcp.exe", payload / "panel-mcp.exe")
     for name in ("ivy-session.exe", "ivy-codex.exe"):
         shutil.copyfile(binaries / name, payload / name)
+    # D124: the native shell entry has a distinct name but shares the validated helper bytes.
+    shutil.copyfile(binaries / "ivy-codex.exe", payload / "ivy-codex-shell.exe")
     shutil.copytree(ROOT / "integrations/session-recovery", payload / "session-recovery")
     # Flat beside Ivy.exe: the library is found by name in the application directory, and it
     # starts the host beside itself (D112).

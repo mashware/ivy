@@ -339,6 +339,7 @@ fn publish_directory(window: &mut crate::Window, pane: usize, uri: &str) {
 
 #[test]
 fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
+    let diagnostics = crate::tests::windows_fixture::Diagnostics::new();
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let worktrees = Worktrees::new();
@@ -370,7 +371,8 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
         frame(&mut window, &ctx, area, vec![]);
         assert!(
             Instant::now() < ready,
-            "input fixture did not open its witness"
+            "input fixture did not open its witness: {}",
+            diagnostics.report(&mut window)
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -1172,6 +1174,7 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
 
 #[test]
 fn scrolling_files_keeps_console_paint_and_geometry_stable() {
+    let diagnostics = crate::tests::windows_fixture::Diagnostics::new();
     fn colors(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> Vec<egui::Color32> {
         shapes
             .iter()
@@ -1226,7 +1229,8 @@ fn scrolling_files_keeps_console_paint_and_geometry_stable() {
         }
         assert!(
             Instant::now() < ready,
-            "paint producer did not reach its read gate: {text}"
+            "paint producer did not reach its read gate: {text}\n{}",
+            diagnostics.report(&mut window)
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }

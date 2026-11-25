@@ -117,6 +117,7 @@ version = "0.1.0-alpha.21"
 dependencies = [
  "arboard",
  "async-io",
+ "base64 0.22.1",
  "dunce",
  "eframe",
  "egui-phosphor",

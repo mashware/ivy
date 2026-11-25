@@ -450,7 +450,7 @@ fn silence_galley(
     else {
         return layout(headline);
     };
-    // D124: diagnostic length cannot decide whether the failure itself is visible.
+    // D125: diagnostic length cannot decide whether the failure itself is visible.
     let height = area.top() + area.height() * NOTICE_SHARE - top - 2.0 * metrics.width();
     let candidate = |budget| {
         layout(format!(

@@ -669,7 +669,7 @@ fn failed_window(
     size: Option<egui::Vec2>,
     error: term_core::Error,
 ) -> term_core::Result<Window> {
-    // D124: recovery here leaves the directory and saved-client retry paths their errors.
+    // D125: recovery here leaves the directory and saved-client retry paths their errors.
     let failure = error.downcast::<crate::launch::StartupFailure>()?;
     crate::pty_output::say(&format!("console could not be started: {failure}"));
     let control = control::WindowActivity::default();
