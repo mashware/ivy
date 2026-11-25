@@ -240,6 +240,34 @@ fn held_edge_drag_requests_frames_until_release_or_document_boundary() {
         std::time::Duration::MAX,
         "holding at the document boundary keeps waking an idle window"
     );
+    delay(&mut state, vec![pointer_button(up, false)]);
+    let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+    let start = texts
+        .iter()
+        .find(|(s, _, _)| s == "let x2 = 2;")
+        .unwrap()
+        .1
+        .left_center();
+    for events in [
+        vec![egui::Event::PointerMoved(start)],
+        vec![pointer_button(start, true)],
+        vec![egui::Event::PointerMoved(down)],
+    ] {
+        delay(&mut state, events);
+    }
+    for _ in 0..400 {
+        delay(&mut state, vec![]);
+    }
+    let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+    assert!(
+        texts.iter().any(|(s, _, _)| s == "let x200 = 200;"),
+        "held drag must reach the lower boundary"
+    );
+    assert_eq!(
+        delay(&mut state, vec![]),
+        std::time::Duration::MAX,
+        "holding below the last line keeps waking an idle window"
+    );
 }
 
 #[test]
