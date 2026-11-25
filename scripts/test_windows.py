@@ -256,6 +256,7 @@ class WindowsPackageTests(unittest.TestCase):
         for before, after in (('app.exe', 'Ivy.exe'), ('panel-mcp.exe', 'panel-mcp.exe'),
                               ('ivy-session.exe', 'ivy-session.exe'),
                               ('ivy-codex.exe', 'ivy-codex.exe'),
+                              ('ivy-codex.exe', 'ivy-codex-shell.exe'),
                               ('notices/fixture/LICENSE', 'licenses/cargo/fixture/LICENSE')):
             self.assertEqual((self.binaries / before).read_bytes(), (self.payload / after).read_bytes())
         self.assertEqual((self.payload / 'Ivy.ico').read_bytes()[:4], b'\0\0\1\0')

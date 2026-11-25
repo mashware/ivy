@@ -28,7 +28,8 @@ function Install-Candidate {
     $Process = Start-Process $Installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$Destination`"") -Wait -PassThru
     if ($Process.ExitCode -ne 0) { throw "Installer exited $($Process.ExitCode)" }
     foreach ($Pair in @(@('app.exe', 'Ivy.exe'), @('panel-mcp.exe', 'panel-mcp.exe'),
-                        @('ivy-session.exe', 'ivy-session.exe'), @('ivy-codex.exe', 'ivy-codex.exe'))) {
+                        @('ivy-session.exe', 'ivy-session.exe'), @('ivy-codex.exe', 'ivy-codex.exe'),
+                        @('ivy-codex.exe', 'ivy-codex-shell.exe'))) {
         if ((Get-FileHash (Join-Path $BinaryDir $Pair[0])).Hash -ne (Get-FileHash (Join-Path $Destination $Pair[1])).Hash) {
             throw "Installed executable differs: $($Pair[1])"
         }
@@ -136,7 +137,7 @@ if ($SoftwareOpenGL) {
 Install-Candidate
 $Process = Start-Process (Join-Path $Destination 'unins000.exe') -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
 if ($Process.ExitCode -ne 0) { throw "Uninstaller exited $($Process.ExitCode)" }
-foreach ($Name in @('Ivy.exe', 'panel-mcp.exe', 'ivy-session.exe', 'ivy-codex.exe', 'session-recovery') + $ConsoleHost) {
+foreach ($Name in @('Ivy.exe', 'panel-mcp.exe', 'ivy-session.exe', 'ivy-codex.exe', 'ivy-codex-shell.exe', 'session-recovery') + $ConsoleHost) {
     if (Test-Path (Join-Path $Destination $Name)) { throw "Uninstall retained $Name" }
 }
 if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Ivy.lnk')) { throw 'Uninstall retained shortcut' }
