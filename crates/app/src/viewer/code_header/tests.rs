@@ -60,6 +60,7 @@ fn opened(file: &Path, root: Option<&Path>) -> State {
 struct Painted {
     texts: Vec<(String, egui::Rect)>,
     copied: Vec<String>,
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Painted {
@@ -164,8 +165,13 @@ impl Drawer {
                 _ => None,
             })
             .collect();
+        let shapes = output.shapes.clone();
         output.drop_without_applying_deltas();
-        Painted { texts, copied }
+        Painted {
+            texts,
+            copied,
+            shapes,
+        }
     }
 
     /// Frames until the header knows where the file lives.
@@ -513,3 +519,66 @@ fn a_binary_file_keeps_its_header() {
 }
 
 mod window;
+
+#[test]
+fn the_actual_menu_paints_both_wrap_states_and_keeps_comfortable_padding() {
+    let tree = Tree::new(&["r/a.sql"]);
+    let mut state = opened(&tree.at("r/a.sql"), Some(&tree.at("r")));
+    let mut drawer = Drawer::new();
+    for checked in [false, true] {
+        state.code.wrap = checked;
+        let paint = drawer.settled(&mut state);
+        drawer.click(&mut state, paint.at(egui_phosphor::regular::CARET_DOWN));
+        let paint = drawer.frame(
+            &mut state,
+            vec![egui::Event::PointerMoved(egui::pos2(0.0, 0.0))],
+        );
+        let label = paint.at("Wrap lines");
+        let square = paint
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r)
+                    if (12.0..=24.0).contains(&r.rect.width())
+                        && (r.rect.width() - r.rect.height()).abs() < 0.1
+                        && (r.rect.center().y - label.y).abs() < 2.0
+                        && r.rect.right() < label.x =>
+                {
+                    Some(r)
+                }
+                _ => None,
+            })
+            .expect("the wrap control has a painted square");
+        assert!(
+            square.stroke.width > 0.0 && square.stroke.color.a() > 0,
+            "unchecked border must remain visible even away from hover"
+        );
+        let tick = paint.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.points.len() == 3 && p.points.iter().all(|at| square.rect.contains(*at))));
+        assert_eq!(tick, checked, "the tick distinguishes the two states");
+        let first = paint.at("Open in File Manager");
+        let menu = paint
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r)
+                    if r.rect.contains(first) && r.rect.contains(label) && r.stroke.width > 0.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.area().total_cmp(&b.area()))
+            .expect("the popup frame is painted");
+        let text = paint
+            .texts
+            .iter()
+            .find(|(s, _)| s == "Open in File Manager")
+            .unwrap()
+            .1;
+        assert!(
+            text.left() - menu.left() >= 14.0,
+            "menu text has room at the edge: {text:?} in {menu:?}"
+        );
+        drawer.click(&mut state, egui::pos2(0.0, 0.0));
+    }
+}

@@ -498,3 +498,171 @@ fn heights_answer_before_anything_is_placed() {
     assert_eq!(heights.line_at(120.0), 0);
     assert_eq!(heights.total(), 0.0);
 }
+
+fn pointer_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[test]
+fn a_stationary_edge_drag_scrolls_and_copies_beyond_the_initial_viewport() {
+    for wrap in [false, true] {
+        let document = CodeDocument::parse(Path::new("selection.sql"), &file(200));
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut state = CodeState {
+            wrap,
+            ..Default::default()
+        };
+        frame(&ctx, &document, &mut state, vec![]);
+        let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+        let start = texts
+            .iter()
+            .find(|(s, _, _)| s == "let x2 = 2;")
+            .unwrap()
+            .1
+            .left_center();
+        let down = egui::pos2(start.x + 50.0, 330.0);
+        for events in [
+            vec![egui::Event::PointerMoved(start)],
+            vec![pointer_button(start, true)],
+            vec![egui::Event::PointerMoved(start + egui::vec2(8.0, 0.0))],
+            vec![egui::Event::PointerMoved(down)],
+        ] {
+            frame(&ctx, &document, &mut state, events);
+        }
+        for _ in 0..120 {
+            frame(&ctx, &document, &mut state, vec![]);
+        }
+        let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+        assert!(
+            !texts.iter().any(|(s, _, _)| s == "let x2 = 2;"),
+            "viewport did not advance, wrap={wrap}"
+        );
+        frame(
+            &ctx,
+            &document,
+            &mut state,
+            vec![pointer_button(down, false)],
+        );
+        let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
+        let copied = &copied[0];
+        assert!(
+            copied.starts_with("let x2 = 2;\n"),
+            "anchor moved: {copied}"
+        );
+        assert!(
+            copied.lines().count() > 30,
+            "copied only {} lines",
+            copied.lines().count()
+        );
+
+        // Start a fresh selection in the now-scrolled document and hold above its top edge.
+        let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+        let start = texts
+            .iter()
+            .find(|(s, rect, _)| {
+                s.starts_with("let x") && rect.center().y > 60.0 && rect.center().y < 250.0
+            })
+            .unwrap()
+            .1
+            .left_center();
+        let up = egui::pos2(start.x + 30.0, -30.0);
+        for events in [
+            vec![egui::Event::PointerMoved(start)],
+            vec![pointer_button(start, true)],
+            vec![egui::Event::PointerMoved(up)],
+        ] {
+            frame(&ctx, &document, &mut state, events);
+        }
+        for _ in 0..180 {
+            frame(&ctx, &document, &mut state, vec![]);
+        }
+        let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+        assert!(
+            texts.iter().any(|(s, _, _)| s == "let x1 = 1;"),
+            "upward drag never returned to the top"
+        );
+        frame(&ctx, &document, &mut state, vec![pointer_button(up, false)]);
+        let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
+        assert!(copied[0].starts_with("let x1 = 1;"));
+    }
+}
+
+fn navigation_output(
+    ctx: &egui::Context,
+    document: &CodeDocument,
+    state: &mut CodeState,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(600.0, 300.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| show(document, state, ui, &palette()),
+    )
+}
+
+#[test]
+fn overflow_scrollbars_stay_painted_at_rest_and_drag_the_document() {
+    let text = (0..200)
+        .map(|n| format!("row{n} {}\n", "wide ".repeat(100)))
+        .collect::<String>();
+    let document = CodeDocument::parse(Path::new("scroll.json"), &text);
+    for wrap in [false, true] {
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut state = CodeState {
+            wrap,
+            ..Default::default()
+        };
+        for _ in 0..6 {
+            navigation_output(&ctx, &document, &mut state, vec![]).drop_without_applying_deltas();
+        }
+        let out = navigation_output(&ctx, &document, &mut state, vec![]);
+        let bars: Vec<_> = out
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r)
+                    if r.fill.a() > 0
+                        && r.rect.width() <= 12.0
+                        && r.rect.height() >= 12.0
+                        && r.rect.height() < 290.0
+                        && r.rect.left() > 580.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+        let vertical = *bars
+            .first()
+            .expect("a visible vertical scrollbar handle at rest");
+        let horizontal = out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill.a() > 0 && r.rect.height() <= 12.0 && r.rect.width() >= 12.0 && r.rect.width() < 580.0 && r.rect.top() > 280.0));
+        assert_eq!(horizontal, !wrap, "horizontal overflow follows wrapping");
+        out.drop_without_applying_deltas();
+        let from = vertical.center();
+        let to = egui::pos2(from.x, 220.0);
+        for events in press_drag_release(from, to) {
+            navigation_output(&ctx, &document, &mut state, events).drop_without_applying_deltas();
+        }
+        let out = navigation_output(&ctx, &document, &mut state, vec![]);
+        assert!(
+            !out.shapes.iter().any(
+                |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text().starts_with("row0 "))
+            ),
+            "dragging the visible handle must move the document"
+        );
+        out.drop_without_applying_deltas();
+    }
+}

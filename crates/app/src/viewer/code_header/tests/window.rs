@@ -51,8 +51,13 @@ fn window_pass(
             _ => None,
         })
         .collect();
+    let shapes = output.shapes.clone();
     output.drop_without_applying_deltas();
-    Painted { texts, copied }
+    Painted {
+        texts,
+        copied,
+        shapes,
+    }
 }
 
 /// Run window passes until `done` holds, or fail saying `what` never happened.

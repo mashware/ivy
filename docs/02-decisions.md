@@ -9523,6 +9523,9 @@ evidence that it is necessary). Automatic client configuration remains outside t
 Ordinary supported shells install a console-local `codex` function after user startup and delegate to the bundled `ivy-codex` launcher. The launcher checks client capability before adding `--no-daemon` to local interactive launches. Existing aliases and functions retain precedence; explicit bypasses remain available. MCP identity forwarding is still required. This avoids changing global shell or Codex configuration and leaves existing recovery intact.
 
 
+
+**Code-document navigation —25 November2026, #245.** A text selection held beyond the top or bottom advances the viewport until the person returns inside, releases, or reaches the document boundary. The anchor stays in document coordinates. Overflowing code documents use opaque scrollbars with their own space; wrapped text reserves the vertical bar and disables horizontal overflow. Discarded: enabling scrollbar visibility without changing the floating style, whose dormant opacity still hides the position indicator, and relying on ScrollArea to infer autoscroll from a custom selection widget. The code-file menu restores comfortable item padding and an outlined Wrap lines checkbox locally because the generic menu style removes both; the shared menu system stays unchanged. Toolbar alignment remains an observed report to verify visually: centered headless fixtures are not evidence that the native symptom is fixed.
+
 ---
 
 ## D74 — Ivy is public free software under GPLv3

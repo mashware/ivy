@@ -166,13 +166,20 @@ pub(super) fn show(
                         ink,
                     );
                     egui::Popup::menu(&more)
-                        .frame(crate::ui::floating::menu_frame(&roles))
+                        // The drawer owns these clicks; let viewport clamping keep a short
+                        // drawer's menu on-screen instead of flipping it over a console (D72).
+                        .align_alternatives(&[])
+                        .frame(crate::ui::floating::menu_frame(&roles).inner_margin(8))
                         .show(|ui| {
+                            // Popup::menu replaces the parent's padding with its compact defaults.
+                            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                            ui.set_min_width(220.0);
                             let copy = Copies {
                                 absolute: &absolute,
                                 relative: &relative,
                             };
-                            menu(ui, &mut header.desktop, &mut code.wrap, path, &copy);
+                            menu(ui, &mut header.desktop, &mut code.wrap, path, &copy, &roles);
                         });
                     let open =
                         ui.button("Open")
@@ -208,6 +215,7 @@ fn menu(
     wrap: &mut bool,
     path: &Path,
     copy: &Copies,
+    roles: &crate::theme::Roles,
 ) {
     if ui.button("Open in File Manager").clicked() {
         desktop.reveal(path);
@@ -230,7 +238,18 @@ fn menu(
     {
         ui.ctx().copy_text(text);
     }
-    ui.checkbox(wrap, "Wrap lines");
+    ui.scope(|ui| {
+        // Menu rows discard widget borders; the unchecked box needs its outline back.
+        let widgets = &mut ui.visuals_mut().widgets;
+        for visual in [
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
+            visual.bg_stroke = egui::Stroke::new(1.0, roles.line2);
+        }
+        ui.checkbox(wrap, "Wrap lines");
+    });
 }
 
 /// The text a Copy item puts on the clipboard, literally, or why it puts nothing: a line break
