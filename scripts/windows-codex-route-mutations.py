@@ -1,6 +1,7 @@
 """Run native route witnesses, then prove their individual guards can turn them red."""
 
 from pathlib import Path
+import os
 import subprocess
 import sys
 
@@ -97,10 +98,14 @@ def run_case(package: str, target: list[str], case: str, label: str, directory: 
 
 
 def owner_case(label: str, directory: Path) -> subprocess.CompletedProcess[str]:
+    # Windows PowerShell needs its own module path after pwsh -> Python -> powershell.exe.
+    # https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_psmodulepath
+    environment = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
     run = subprocess.run(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
          str(ROOT / "packaging/windows/test-codex-route-owner.ps1"), "-Repo", str(ROOT)],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+        cwd=ROOT, env=environment, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=300,
     )
     (directory / f"{label}.log").write_text(run.stdout + run.stderr, encoding="utf-8")
     return run
