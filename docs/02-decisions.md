@@ -12356,3 +12356,16 @@ control for the inspector. Named native tests and individual flag-removal mutati
 background launch paths. The existing interactive launch trial remains independent. These witnesses
 cover the inspected process and named paths, not every possible visible process; native results are
 not claimed until the Windows CI run completes.
+
+
+## D124 — PowerShell reports its directory at the prompt and routes Codex in its own shell
+
+**Decision.** Recognise shell executable stems, including `.exe`. Start PowerShell with `-NoExit -EncodedCommand` containing UTF-16LE base64 startup text. Leave profile loading and execution policy unchanged. Wrap the profile-defined prompt, calling it first so its error-status inputs survive, then emit OSC 7 before returning its text. FileSystem paths use percent-encoded segments; other providers clear the report, and UNC reports retain their remote authority. The directory report works without the Codex helper.
+
+When the helper exists, a shell-local Codex function resolves the native application at call time, preferring `codex.exe`, then `.cmd` and `.bat`, and passes its path and arguments to `ivy-codex.exe`. Preserve user functions and aliases with a diagnostic. Git Bash resolves `.exe` or `.cmd` instead of the extensionless npm shim. The inherited helper variable is removed when no helper is available.
+
+**Why.** Directory consumers already speak OSC 7; the shell knows its location without interpreting its screen or reading another process. The desktop PATH can differ from the configured shell PATH. The installed helper is optional for directory reporting.
+
+**Discarded.** A `.ps1` startup file is blocked by Windows PowerShells default Restricted policy. ExecutionPolicy Bypass would also change the users profile policy. A PATH shim changes every child and still loses to aliases. A native PEB directory reader belongs to native process discovery. cmd integration and shared-conversation relay remain separate work.
+
+**Limits.** Only a returned prompt reports a changed location; a framework redefining prompt afterward can replace the wrapper. Rusts normal restrictions on batch-file arguments apply when the resolved client is `.cmd` or `.bat`. Windows desktop badge, split, Review and link behavior requires native verification. No frame-performance claim is made.
