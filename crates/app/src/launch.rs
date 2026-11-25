@@ -16,6 +16,7 @@ type Spawned = (Pty, Receiver<Vec<u8>>);
 pub(crate) struct StartupFailure {
     pub program: String,
     pub reason: String,
+    source: term_core::Error,
 }
 
 impl std::fmt::Display for StartupFailure {
@@ -24,7 +25,11 @@ impl std::fmt::Display for StartupFailure {
     }
 }
 
-impl std::error::Error for StartupFailure {}
+impl std::error::Error for StartupFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
 
 struct Ready {
     spawned: Spawned,
@@ -205,6 +210,7 @@ impl Process {
                     Box::new(StartupFailure {
                         program: program.to_owned(),
                         reason: error.to_string(),
+                        source: error,
                     })
                 })
         };

@@ -1100,6 +1100,10 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
     (
+        "app/src/opening/pane.rs",
+        include_str!("../src/opening/pane.rs"),
+    ),
+    (
         "app/src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
     ),
