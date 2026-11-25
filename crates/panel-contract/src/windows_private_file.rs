@@ -200,7 +200,7 @@ mod tests {
         let raw = unsafe {
             CreateFileW(
                 name.as_ptr(),
-                READ_CONTROL | WRITE_DAC,
+                READ_CONTROL | WRITE_DAC | WRITE_OWNER,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 null(),
                 OPEN_EXISTING,
@@ -211,6 +211,39 @@ mod tests {
         assert_ne!(raw, INVALID_HANDLE_VALUE);
         let handle = OwnedHandle(raw);
         let security = descriptor(false).unwrap();
+        let (_token, bytes) = crate::windows_security::token_user().unwrap();
+        let user = unsafe { &*bytes.as_ptr().cast::<TOKEN_USER>() }.User.Sid;
+        let owner_matches_user = || {
+            let (mut actual_owner, mut raw_descriptor) = (null_mut(), null_mut());
+            assert_eq!(
+                unsafe {
+                    GetSecurityInfo(
+                        handle.0,
+                        SE_FILE_OBJECT,
+                        OWNER_SECURITY_INFORMATION,
+                        &mut actual_owner,
+                        null_mut(),
+                        null_mut(),
+                        null_mut(),
+                        &mut raw_descriptor,
+                    )
+                },
+                ERROR_SUCCESS
+            );
+            let _descriptor = crate::windows_security::OwnedDescriptor(raw_descriptor);
+            assert!(!actual_owner.is_null());
+            unsafe { EqualSid(actual_owner, user) != 0 }
+        };
+        eprintln!(
+            "symlink default owner matches token user: {}",
+            owner_matches_user()
+        );
+        let (mut owner, mut owner_defaulted) = (null_mut(), 0);
+        assert_ne!(
+            unsafe { GetSecurityDescriptorOwner(security.0, &mut owner, &mut owner_defaulted) },
+            0
+        );
+        assert!(!owner.is_null());
         let (mut present, mut defaulted, mut acl) = (0, 0, null_mut());
         assert_ne!(
             unsafe {
@@ -224,14 +257,20 @@ mod tests {
                 SetSecurityInfo(
                     handle.0,
                     SE_FILE_OBJECT,
-                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                    null_mut(),
+                    OWNER_SECURITY_INFORMATION
+                        | DACL_SECURITY_INFORMATION
+                        | PROTECTED_DACL_SECURITY_INFORMATION,
+                    owner,
                     null_mut(),
                     acl,
                     null_mut(),
                 )
             },
             ERROR_SUCCESS
+        );
+        assert!(
+            owner_matches_user(),
+            "symlink fixture owner must be the current token user"
         );
         validate_acl(handle.0, &link, false)
             .expect("symlink fixture must otherwise pass ACL validation");
