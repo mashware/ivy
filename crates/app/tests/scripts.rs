@@ -688,6 +688,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/code/tests.rs"),
     ),
     (
+        "app/src/viewer/code/tests/navigation.rs",
+        include_str!("../src/viewer/code/tests/navigation.rs"),
+    ),
+    (
         "app/src/viewer/code/rows.rs",
         include_str!("../src/viewer/code/rows.rs"),
     ),
