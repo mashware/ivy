@@ -1915,8 +1915,7 @@ mod tests {
     mod settings_chrome;
     mod settings_editor;
     mod title_typography;
-    #[cfg(windows)]
-    mod windows_fixture;
+    pub(crate) mod windows_fixture;
 
     // **The tests reach further into the two modules than the code above does**, and this is
     // where that is said. They build tilings and weights directly to assert the arithmetic;

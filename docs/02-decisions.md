@@ -12393,3 +12393,18 @@ control for the inspector. Named native tests and individual flag-removal mutati
 background launch paths. The existing interactive launch trial remains independent. These witnesses
 cover the inspected process and named paths, not every possible visible process; native results are
 not claimed until the Windows CI run completes.
+
+
+## D124 — PowerShell reports its directory at the prompt and calls Codex through a native alias
+
+**Decision.** Recognise shell executable stems, including `.exe`. Start PowerShell with `-NoExit -EncodedCommand` containing UTF-16LE base64 startup text. Leave profile loading and execution policy unchanged. Wrap the profile-defined prompt, calling it first so its error-status inputs survive, then emit OSC 7 before returning its text. FileSystem paths use percent-encoded segments; other providers clear the report, and UNC reports retain their remote authority. The directory report works without the Codex helper.
+
+When available, install a global PowerShell alias to the absolute sibling `ivy-codex-shell.exe`, a byte-identical installed copy of `ivy-codex.exe`. The executable name selects shell discovery: resolve native applications from the PATH at call time, searching absolute directories for `.exe` before `.cmd` and `.bat`, and pass all original arguments through the existing launch path. The explicit `ivy-codex.exe <client> [args]` contract stays unchanged. Preserve user functions and aliases with a diagnostic. Git Bash resolves `.exe` or `.cmd` instead of the extensionless npm shim. Remove inherited `IVY_CODEX_HELPER` when no helper is available.
+
+**Why.** Directory consumers already speak OSC 7; the shell knows its location without interpreting its screen or reading another process. The desktop PATH can differ from the configured shell PATH. Native invocation preserves PowerShell success/failure, exit code and conditional chaining. Absolute PATH entries exclude a launcher planted only in the current repository.
+
+**Revised after runtime evidence.** The first implementation used a shell function. In PowerShell7.7 a client exiting37 produced `LASTEXITCODE=37` but caller `$?=True`, allowing a following `&&` command to run. The user chose to redesign rather than accept that limitation. A distinct installed name separates native shell discovery from explicit helper invocation without an inherited mode variable or a per-console executable copy.
+
+**Discarded.** An advanced function consumes native options such as `-V` as common parameters. Throwing on a nonzero exit changes script control flow. A per-console executable copy adds synchronous I/O and deletion while Windows may still hold the file. A PATH shim changes every child and still loses to aliases. A `.ps1` startup file is blocked by Windows PowerShell Restricted policy; ExecutionPolicy Bypass would change the profile policy too. A native PEB directory reader belongs to native process discovery. cmd integration and shared-conversation relay remain separate work.
+
+**Limits.** Only a returned prompt reports a changed location; a framework redefining prompt afterward can replace the wrapper. Native arguments follow the PowerShell version itself (5.1 may drop empty native arguments); batch targets retain Rust command-line escaping restrictions and fail visibly where an argument is unsafe. Relative-only PATH installations are not resolved. A missing native entry leaves Codex unwrapped with a warning; removing an aliased executable later fails natively. Windows desktop badge, split, Review and link behavior requires native verification. No frame-performance claim is made.

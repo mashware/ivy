@@ -1,5 +1,108 @@
 //! The small fixture vocabulary used by cross-platform console tests.
 
+use std::{cell::RefCell, path::PathBuf};
+
+thread_local! {
+    static DIAGNOSTICS: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+pub(crate) struct Diagnostics {
+    directory: panel_contract::PanelDir,
+    previous: Option<PathBuf>,
+}
+
+impl Diagnostics {
+    pub(crate) fn new() -> Self {
+        let directory = panel_contract::PanelDir::create().unwrap();
+        let previous = DIAGNOSTICS.with(|root| root.replace(Some(directory.path().to_owned())));
+        Self {
+            directory,
+            previous,
+        }
+    }
+
+    fn traces(&self) -> String {
+        std::fs::read_dir(self.directory.path())
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == "trace")
+                {
+                    format!("{path:?}: {:?}\n", std::fs::read_to_string(&path))
+                } else {
+                    String::new()
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn report(&self, window: &mut crate::Window) -> String {
+        let mut report = self.traces();
+        for pane in window.all_panes_mut() {
+            report.push_str(&format!(
+                "pane {}: exit_success={:?}, ending={:?}, screen={:?}\n",
+                pane.name,
+                pane.pty.exit_success(),
+                pane.pty.ending(),
+                pane.screen.to_text()
+            ));
+        }
+        report
+    }
+}
+
+impl Drop for Diagnostics {
+    fn drop(&mut self) {
+        DIAGNOSTICS.with(|root| *root.borrow_mut() = self.previous.take());
+        for entry in std::fs::read_dir(self.directory.path()).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(path).unwrap();
+            } else {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+}
+
+fn trace_command(command: String, path: &std::path::Path) -> String {
+    let source = CONSOLE_INPUT
+        .replace(
+            "static IntPtr input;",
+            r#"static IntPtr input;
+    public static string TracePath;
+    static void Trace(string stage) {
+        System.IO.File.AppendAllText(TracePath, DateTime.UtcNow.ToString("O") + " " + stage + "\n");
+    }"#,
+        )
+        .replace(
+            "input = GetStdHandle(-10);",
+            "Trace(\"before-input-mode\"); input = GetStdHandle(-10);",
+        )
+        .replace(
+            "PrepareOutput();",
+            "Trace(\"after-input-mode\"); PrepareOutput();",
+        )
+        .replace(
+            "IntPtr output = GetStdHandle(-11);",
+            "Trace(\"before-output-mode\"); IntPtr output = GetStdHandle(-11);",
+        );
+    let source = source.replace(
+        "            throw new Win32Exception(Marshal.GetLastWin32Error());\n    }\n    public static string ReadLine()",
+        "            throw new Win32Exception(Marshal.GetLastWin32Error());\n        Trace(\"after-output-mode\");\n    }\n    public static string ReadLine()",
+    );
+    let command = command.replace(CONSOLE_INPUT, &format!(
+        "Write-IvyFixtureTrace 'before-add-type'; {source}Write-IvyFixtureTrace 'after-add-type'; [IvyFixtureInput]::TracePath = {}; ",
+        literal(path.to_str().unwrap())
+    ));
+    format!(
+        "function Write-IvyFixtureTrace([string]$stage) {{ [IO.File]::AppendAllText({}, ([DateTime]::UtcNow.ToString('O') + ' pid=' + $PID + ' ' + $stage + [char]10)) }}; try {{ Write-IvyFixtureTrace 'powershell-entered'; {command} }} catch {{ Write-IvyFixtureTrace ('ERROR: ' + $_.Exception.ToString() + ' STACK: ' + $_.ScriptStackTrace); throw }} finally {{ Write-IvyFixtureTrace 'powershell-finally' }}",
+        literal(path.to_str().unwrap())
+    )
+}
+
 // Windows cooked input waits for CR, while the original fixtures send LF. Read the child's
 // real console in VT character mode and recognize either terminator ourselves; ReadConsoleW
 // preserves Unicode without depending on PowerShell's input code page. Disable echo too,
@@ -75,6 +178,7 @@ pub(super) fn directory(program: &str) -> Option<&str> {
 
 /// Translate only fixtures whose behavior is witnessed by the caller, never arbitrary shell code.
 pub(super) fn command(program: &str) -> String {
+    let original = program;
     let mut prefix = "$ErrorActionPreference = 'Stop'; ".to_owned();
     let program = if let Some(rest) = program.strip_prefix("cd '") {
         let (folder, program) = rest
@@ -155,9 +259,99 @@ pub(super) fn command(program: &str) -> String {
         panic!("unsupported Windows test fixture: {program}");
     };
     prefix.push_str(&body);
-    prefix
+    DIAGNOSTICS.with(|root| {
+        if let Some(root) = root.borrow().as_ref() {
+            let mut nonce = [0; 8];
+            getrandom::fill(&mut nonce).unwrap();
+            let path = root.join(format!("child-{:x}.trace", u64::from_ne_bytes(nonce)));
+            std::fs::write(&path, format!("command-created: {original:?}\n")).unwrap();
+            trace_command(prefix, &path)
+        } else {
+            prefix
+        }
+    })
 }
 
+#[cfg(unix)]
+#[test]
+fn diagnostics_keep_each_childs_stages_and_exception_outside_its_output() {
+    fn run(
+        program: &std::ffi::OsStr,
+        root: &std::path::Path,
+        script: &str,
+    ) -> std::process::Output {
+        use std::process::{Command, Output, Stdio};
+        use std::time::{Duration, Instant};
+        let stdout = root.join("stdout");
+        let stderr = root.join("stderr");
+        let mut child = Command::new(program)
+            .env("XDG_CACHE_HOME", root)
+            .env("XDG_CONFIG_HOME", root)
+            .env("XDG_DATA_HOME", root)
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .stdin(Stdio::null())
+            .stdout(std::fs::File::create(&stdout).unwrap())
+            .stderr(std::fs::File::create(&stderr).unwrap())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let cleanup_deadline = Instant::now() + Duration::from_millis(100);
+                while child.try_wait().unwrap().is_none() && Instant::now() < cleanup_deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                panic!("PowerShell diagnostic fixture timed out");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        Output {
+            status,
+            stdout: std::fs::read(stdout).unwrap(),
+            stderr: std::fs::read(stderr).unwrap(),
+        }
+    }
+    let Some(program) = std::env::var_os("IVY_TEST_PWSH") else {
+        return;
+    };
+    let diagnostics = Diagnostics::new();
+    let root = diagnostics.directory.path().to_owned();
+    assert_eq!(directory("cd '/fixture' && cat"), Some("/fixture"));
+    let success = run(&program, &root, &command("printf child-output"));
+    assert!(
+        success.status.success(),
+        "{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    assert_eq!(success.stdout, b"child-output");
+    assert!(success.stderr.is_empty());
+    // Linux can compile the exact C# helper, then rejects its first Windows native call.
+    // That failure exercises the diagnostic path without pretending to test console modes.
+    let failed = run(&program, &root, &command("cat"));
+    assert!(!failed.status.success());
+    assert!(!failed.stderr.is_empty());
+    let traces = diagnostics.traces();
+    for stage in [
+        "powershell-entered",
+        "before-add-type",
+        "after-add-type",
+        "before-input-mode",
+        "ERROR:",
+        "powershell-finally",
+    ] {
+        assert!(traces.contains(stage), "missing {stage}: {traces}");
+    }
+    assert!(!traces.contains("after-input-mode"), "{traces}");
+    assert_eq!(traces.matches("command-created:").count(), 2);
+    drop(diagnostics);
+    assert!(!root.exists());
+}
+
+#[cfg(windows)]
 #[test]
 fn directory_and_input_fixtures_set_cwd_and_record_received_utf8_without_bom() {
     use super::*;
@@ -195,6 +389,7 @@ fn directory_and_input_fixtures_set_cwd_and_record_received_utf8_without_bom() {
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn gated_output_is_written_only_after_the_child_receives_input() {
     use super::*;

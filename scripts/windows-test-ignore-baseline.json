@@ -1,5 +1,11 @@
 [
   {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "shell_integration::powershell::tests::windows_powershell_prepared_startup_reports_cwd_through_bundled_conpty",
+    "reason": "needs the ConPTY pair beside the test binary (scripts/conpty.py); run explicitly in Windows CI"
+  },
+  {
     "platform": "linux",
     "binary": "app/app:lib",
     "name": "control::tests::measure_off_frame_document_reads",
