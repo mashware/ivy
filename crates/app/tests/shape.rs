@@ -455,6 +455,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/board/milestones/projection.rs"),
     ),
     (
+        "src/board/milestones/sections.rs",
+        include_str!("../src/board/milestones/sections.rs"),
+    ),
+    (
         "src/board/milestones/state.rs",
         include_str!("../src/board/milestones/state.rs"),
     ),

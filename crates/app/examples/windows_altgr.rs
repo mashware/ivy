@@ -1,6 +1,46 @@
 //! Native keyboard witness: real SendInput -> winit -> vendored egui-winit -> terminal bytes.
 //! Run only on a disposable Windows desktop; it temporarily changes keyboard layouts and focus.
 
+#[cfg(any(windows, test))]
+struct TrialCases<T: 'static> {
+    trials: &'static [T],
+    completed: usize,
+}
+
+#[cfg(any(windows, test))]
+impl<T> TrialCases<T> {
+    fn current(&self) -> Option<&T> {
+        self.trials.get(self.completed)
+    }
+
+    fn advance(&mut self) {
+        assert!(self.current().is_some(), "No active trial to complete");
+        self.completed += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrialCases;
+
+    #[test]
+    fn callbacks_after_the_last_trial_have_no_active_case() {
+        let mut cases = TrialCases {
+            trials: &["first", "last"],
+            completed: 0,
+        };
+        assert_eq!(cases.current(), Some(&"first"));
+        cases.advance();
+        assert_eq!(cases.current(), Some(&"last"));
+        cases.advance();
+        // winit may still call both window_event and about_to_wait after exit is requested.
+        for _callback in 0..2 {
+            assert_eq!(cases.current(), None);
+        }
+        assert_eq!(cases.completed, 2);
+    }
+}
+
 #[cfg(not(windows))]
 fn main() {
     eprintln!("This witness requires a disposable Windows desktop.");
@@ -14,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(windows)]
 mod native {
+    use super::TrialCases;
     use std::time::{Duration, Instant};
 
     use app::keyboard::{CursorKeys, bytes};
@@ -175,7 +216,7 @@ mod native {
         window: Option<Window>,
         adapter: Option<egui_winit::State>,
         original_layout: windows_sys::Win32::UI::Input::KeyboardAndMouse::HKL,
-        case: usize,
+        cases: TrialCases<Case>,
         sent: bool,
         next: Instant,
         deadline: Instant,
@@ -212,6 +253,10 @@ mod native {
         }
 
         fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+            // winit can deliver queued callbacks after exit was requested by the last case.
+            let Some(case) = self.cases.current() else {
+                return;
+            };
             let window = self.window.as_ref().unwrap();
             let adapter = self.adapter.as_mut().unwrap();
             if let WindowEvent::KeyboardInput {
@@ -222,12 +267,12 @@ mod native {
                 && event.state == ElementState::Pressed
                 && self.sent
             {
-                if event.physical_key == CASES[self.case].physical_key() {
+                if event.physical_key == case.physical_key() {
                     self.keys += 1;
                 }
                 println!(
                     "{} raw key={:?} text={:?} system={:?}",
-                    CASES[self.case].name,
+                    case.name,
                     event.logical_key,
                     event.text,
                     event.text_with_all_modifiers()
@@ -237,13 +282,13 @@ mod native {
             let input = adapter.take_egui_input(window);
             for event in &input.events {
                 if self.sent {
-                    println!("{} egui={event:?}", CASES[self.case].name);
+                    println!("{} egui={event:?}", case.name);
                     if let Some(bytes) = bytes(event, CursorKeys::Normal) {
                         self.observed.extend_from_slice(&bytes);
                     }
-                    if !CASES[self.case].modifiers.is_empty()
-                        && CASES[self.case].expected.iter().all(|b| *b >= 32)
-                        && !CASES[self.case].expected.is_empty()
+                    if !case.modifiers.is_empty()
+                        && case.expected.iter().all(|b| *b >= 32)
+                        && !case.expected.is_empty()
                     {
                         assert!(
                             !matches!(
@@ -262,6 +307,9 @@ mod native {
         }
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            let Some(case) = self.cases.current() else {
+                return;
+            };
             assert!(
                 Instant::now() < self.deadline,
                 "Native keyboard witness timed out"
@@ -283,13 +331,9 @@ mod native {
                     event_loop.set_control_flow(ControlFlow::WaitUntil(self.next));
                     return;
                 }
-                let layout: Vec<u16> = CASES[self.case]
-                    .layout
-                    .encode_utf16()
-                    .chain(Some(0))
-                    .collect();
+                let layout: Vec<u16> = case.layout.encode_utf16().chain(Some(0)).collect();
                 let loaded = unsafe { LoadKeyboardLayoutW(layout.as_ptr(), KLF_ACTIVATE) };
-                assert!(!loaded.is_null(), "Cannot load {}", CASES[self.case].layout);
+                assert!(!loaded.is_null(), "Cannot load {}", case.layout);
                 assert_eq!(
                     unsafe { GetKeyboardLayout(0) },
                     loaded,
@@ -298,10 +342,9 @@ mod native {
                 self.observed.clear();
                 self.keys = 0;
                 self.sent = true;
-                send(&CASES[self.case]);
+                send(case);
                 self.next = Instant::now() + Duration::from_millis(500);
             } else {
-                let case = &CASES[self.case];
                 assert!(
                     self.keys > 0,
                     "{} received no native target key press",
@@ -318,8 +361,8 @@ mod native {
                     return;
                 }
                 println!("PASS {} bytes={:?}", case.name, self.observed);
-                self.case += 1;
-                if self.case == CASES.len() {
+                self.cases.advance();
+                if self.cases.current().is_none() {
                     println!("PASS all {} native keyboard cases", CASES.len());
                     event_loop.exit();
                     return;
@@ -342,7 +385,10 @@ mod native {
             window: None,
             adapter: None,
             original_layout: unsafe { GetKeyboardLayout(0) },
-            case: 0,
+            cases: TrialCases {
+                trials: CASES,
+                completed: 0,
+            },
             sent: false,
             next: now + Duration::from_millis(300),
             deadline: now + Duration::from_secs(25),
@@ -355,7 +401,7 @@ mod native {
             return Err(std::io::Error::other(failure).into());
         }
         assert_eq!(
-            witness.case,
+            witness.cases.completed,
             CASES.len(),
             "Event loop ended without all native cases"
         );

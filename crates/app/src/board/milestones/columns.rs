@@ -1,7 +1,8 @@
 use super::{
     CardPainter,
     projection::{Class, Projection},
-    state::{Action, Identity, Key, Reader, Target},
+    sections::{self, Group},
+    state::{Identity, Key, Reader, Target},
     strip,
 };
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     },
     theme::Roles,
 };
-use eframe::egui::{self, FontId, Rect, Stroke, pos2, vec2};
+use eframe::egui::{self, Rect, Stroke, pos2, vec2};
 use panel_contract::plan::Plan;
 
 struct ColumnSpec {
@@ -22,12 +23,6 @@ struct ColumnSpec {
     collapsed: bool,
     card: bool,
 }
-const CAPTIONS: [&str; 4] = [
-    "IN PROGRESS",
-    "READY TO START",
-    "OFF THE PLAN",
-    "OPENED BY YOU",
-];
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::board) fn paint(
@@ -75,7 +70,7 @@ pub(in crate::board) fn paint(
             specs.push(ColumnSpec {
                 index: Some(i),
                 group: if show_all { 0 } else { group.unwrap_or(3) },
-                full: show_all || p.full.contains(id) || group == Some(3),
+                full: show_all || p.full.contains(id),
                 collapsed: !show_all && *class == Class::Ready && !p.full.contains(id),
                 card: !placed.milestones[i].loose.is_empty()
                     || placed.milestones[i].items.iter().any(|x| !x.is_empty()),
@@ -102,6 +97,19 @@ pub(in crate::board) fn paint(
     if !show_all {
         specs.sort_by_key(|s| s.group);
     }
+    reader.dividers.retain(|d| d.project != project);
+    if !show_all {
+        let populated: Vec<_> = specs.iter().map(|s| Group::ALL[s.group]).collect();
+        let p = reader.project(&project);
+        if p.sections
+            .maximized
+            .is_some_and(|g| !populated.contains(&g))
+        {
+            p.sections.maximized = None;
+        }
+        specs.retain(|s| p.sections.shows(Group::ALL[s.group]));
+        sections::recovery(ui, &project, reader, roles);
+    }
     if projection.classes.iter().all(|c| *c == Class::Done) && !show_all {
         ui.label(
             egui::RichText::new("All milestones done · Show all to review")
@@ -120,7 +128,32 @@ pub(in crate::board) fn paint(
         .filter(|s| s[0].group != s[1].group)
         .count();
     let sizes: Vec<_> = specs.iter().map(|s| (s.collapsed, s.card)).collect();
-    let widths = super::projection::widths(ui.available_width(), &sizes, separators);
+    let widths = if show_all {
+        super::projection::widths(ui.available_width(), &sizes, separators)
+    } else {
+        let columns: Vec<_> = specs
+            .iter()
+            .map(|s| (s.group, s.collapsed, s.card))
+            .collect();
+        sections::widths(
+            ui.available_width(),
+            &columns,
+            &reader.project(&project).sections,
+        )
+    };
+    let mut group_widths = [0.0; 4];
+    let mut group_minima = [0.0; 4];
+    let mut group_counts = [0; 4];
+    for (spec, width) in specs.iter().zip(&widths) {
+        if group_counts[spec.group] > 0 {
+            group_widths[spec.group] += 20.0;
+            group_minima[spec.group] += 20.0;
+        }
+        group_counts[spec.group] += 1;
+        group_widths[spec.group] += width;
+        group_minima[spec.group] += if spec.collapsed { 190.0 } else { 240.0 };
+    }
+    let maximized = reader.project(&project).sections.maximized.is_some();
     let total = widths.iter().sum::<f32>()
         + 20.0 * specs.len().saturating_sub(1) as f32
         + 4.0 * separators as f32;
@@ -135,13 +168,14 @@ pub(in crate::board) fn paint(
         .show(ui, |ui| {
             ui.set_min_width(total);
             let mut boundaries = Vec::new();
+            let mut captions = Vec::new();
             let row = ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (n, (spec, width)) in specs.iter().zip(&widths).enumerate() {
                     if n > 0 {
                         if specs[n - 1].group != spec.group {
                             let at = ui.next_widget_position();
-                            boundaries.push(at.x + 12.0);
+                            boundaries.push((at.x + 12.0, specs[n - 1].group, spec.group));
                             ui.add_space(24.0);
                         } else {
                             ui.add_space(20.0);
@@ -157,24 +191,19 @@ pub(in crate::board) fn paint(
                             project: project.clone(),
                             milestone: Identity::Outside,
                         });
+                    if !show_all && (n == 0 || specs[n - 1].group != spec.group) {
+                        captions.push((
+                            Rect::from_min_size(start, vec2(group_widths[spec.group], 24.0)),
+                            spec.group,
+                        ));
+                    }
                     let response = ui.allocate_ui_with_layout(
                         vec2(*width, 0.0),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             ui.set_width(*width);
                             ui.set_clip_rect(bounds.intersect(ui.clip_rect()));
-                            let (caption, _) =
-                                ui.allocate_exact_size(vec2(*width, 24.0), egui::Sense::hover());
-                            if !show_all && (n == 0 || specs[n - 1].group != spec.group) {
-                                strip::text(
-                                    ui,
-                                    caption,
-                                    CAPTIONS[spec.group],
-                                    FontId::proportional(11.0),
-                                    roles.tx3,
-                                    1,
-                                );
-                            }
+                            ui.allocate_exact_size(vec2(*width, 26.0), egui::Sense::hover());
                             let mut row = 0;
                             if let Some(i) = spec.index {
                                 let m = &plan.milestones[i];
@@ -213,56 +242,24 @@ pub(in crate::board) fn paint(
                                     let claim = super::projection::claim(
                                         placed.milestones[i].items[item].iter().map(|e| column(e)),
                                     );
-                                    super::details::item_row(
-                                        ui,
-                                        &m.items[item].text,
-                                        m.items[item].mark,
-                                        claim,
-                                        &k,
-                                        item,
-                                        reader,
-                                        roles,
-                                    );
+                                    if spec.full {
+                                        super::details::item_row(
+                                            ui,
+                                            &m.items[item].text,
+                                            m.items[item].mark,
+                                            claim,
+                                            &k,
+                                            item,
+                                            reader,
+                                            roles,
+                                        );
+                                    }
                                     for entry in &placed.milestones[i].items[item] {
                                         card(
                                             ui, entry, &k, n, &mut row, *width, reader, filter,
                                             column, roles, paint_card,
                                         );
                                     }
-                                }
-                                let (pending, done) =
-                                    super::projection::hidden_counts(&m.items, &visible, spec.full);
-                                if spec.full || pending + done > 0 {
-                                    let label = if spec.full {
-                                        "Show less ▴".into()
-                                    } else if spec.collapsed {
-                                        format!("{} ▸", pending + done)
-                                    } else {
-                                        [
-                                            if pending > 0 {
-                                                Some(format!("{pending} pending"))
-                                            } else {
-                                                None
-                                            },
-                                            if done > 0 {
-                                                Some(format!("{done} done"))
-                                            } else {
-                                                None
-                                            },
-                                        ]
-                                        .into_iter()
-                                        .flatten()
-                                        .collect::<Vec<_>>()
-                                        .join(" · ")
-                                            + " ▾"
-                                    };
-                                    super::details::button(
-                                        ui,
-                                        &label,
-                                        Action::ToggleItems(k.clone()),
-                                        reader,
-                                        roles,
-                                    );
                                 }
                             } else {
                                 super::details::off_header(
@@ -291,19 +288,6 @@ pub(in crate::board) fn paint(
                                         ui, &item.text, item.mark, None, &k, i, reader, roles,
                                     );
                                 }
-                                if spec.full || visible.len() < plan.outside.len() {
-                                    super::details::button(
-                                        ui,
-                                        &if spec.full {
-                                            "Show less ▴".into()
-                                        } else {
-                                            format!("{} more ▾", plan.outside.len() - visible.len())
-                                        },
-                                        Action::ToggleItems(k.clone()),
-                                        reader,
-                                        roles,
-                                    );
-                                }
                             }
                             rows = rows.max(row + 1);
                         },
@@ -313,9 +297,49 @@ pub(in crate::board) fn paint(
                     }
                 }
             });
-            for x in boundaries {
-                ui.painter()
-                    .vline(x, row.response.rect.y_range(), Stroke::new(1.0, roles.line));
+            for (rect, group) in captions {
+                sections::caption(
+                    ui,
+                    rect,
+                    &project,
+                    Group::ALL[group],
+                    maximized,
+                    reader,
+                    roles,
+                );
+            }
+            for (x, left, right) in boundaries {
+                let height = row.response.rect.height();
+                let line =
+                    Rect::from_min_size(pos2(x - 4.0, row.response.rect.top()), vec2(8.0, height));
+                let hit = line.intersect(ui.clip_rect());
+                let hovered = ui.rect_contains_pointer(hit);
+                ui.painter().vline(
+                    x,
+                    line.y_range(),
+                    Stroke::new(
+                        if hovered { 2.0 } else { 1.0 },
+                        if hovered { roles.accent } else { roles.line },
+                    ),
+                );
+                if !maximized && !show_all {
+                    // ScrollArea must see the same drag owner as Board, including on touch devices.
+                    ui.interact(
+                        line,
+                        ui.id().with(("section-divider", &project, left, right)),
+                        egui::Sense::drag(),
+                    );
+                    if hovered || reader.resizing() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+                    reader.dividers.push(sections::Divider {
+                        rect: hit,
+                        project: project.clone(),
+                        groups: [Group::ALL[left], Group::ALL[right]],
+                        widths: [group_widths[left], group_widths[right]],
+                        minima: [group_minima[left], group_minima[right]],
+                    });
+                }
             }
         });
     if reveal.is_some() {

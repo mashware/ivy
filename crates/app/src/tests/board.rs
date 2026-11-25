@@ -1236,6 +1236,10 @@ mod tests {
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         arrange_by_milestone(&mut window, &ctx);
         let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(!the_text_queued_up(&shapes, "Feature"));
+        let header = text_point(&shapes, "H3 · Build").expect("milestone header");
+        frame(&mut window, &ctx, click_at(header));
+        let shapes = frame(&mut window, &ctx, vec![]);
         for expected in [
             "roadmap.md",
             "published ",
@@ -1339,7 +1343,11 @@ mod tests {
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let published_shapes = loop {
             let shapes = frame(&mut window, &ctx, vec![]);
-            if the_text_queued_up(&shapes, "published task") {
+            if let Some(header) = text_point(&shapes, "P · Published only") {
+                assert!(!the_text_queued_up(&shapes, "published task"));
+                frame(&mut window, &ctx, click_at(header));
+                let shapes = frame(&mut window, &ctx, vec![]);
+                assert!(the_text_queued_up(&shapes, "published task"));
                 break shapes;
             }
             assert!(Instant::now() < deadline, "published plan was not painted");
@@ -1371,6 +1379,11 @@ mod tests {
                 }
                 assert!(!the_text_queued_up(&shapes, "published task"));
                 break;
+            }
+            if extension == "json"
+                && let Some(header) = text_point(&shapes, "H3 · Build")
+            {
+                frame(&mut window, &ctx, click_at(header));
             }
             assert!(
                 Instant::now() < deadline,
@@ -1530,6 +1543,10 @@ mod tests {
             text_point(&shapes, "By milestone").expect("the arrangement toggle is painted");
         frame(&mut window, &ctx, click_at(toggle));
         frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(!the_text_queued_up(&shapes, "Feature"));
+        let header = text_point(&shapes, "H3 · Build").expect("milestone header");
+        frame(&mut window, &ctx, click_at(header));
         let shapes = frame(&mut window, &ctx, vec![]);
         for expected in [
             "H3 · Build",

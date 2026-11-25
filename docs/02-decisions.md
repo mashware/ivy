@@ -10574,6 +10574,24 @@ or wrapped strip (loses the overview); drawing the whole producer body in each m
 serial delivery with no durable independent part). No native desktop or performance claim follows
 from synthetic geometry tests; existing Board spans account for the new work once.
 
+**Reader controls correction, 25 November 2026 — #250.** The owner's annotated screenshot asks
+for consistent header padding, removes roadmap preview rows because the header already exposes
+them, and makes caption groups adjustable. Milestone headers inset title, badge, count and progress
+by eight points. Default bodies retain every attached console card and its literal producer excerpt;
+only explicitly expanded headers (or Show all) expose roadmap item rows and closing criteria.
+The preview counts below cards are removed. Discarded: retaining two pending previews (the reported
+duplication) or removing access to roadmap details (the header is the requested access).
+
+In progress, Ready to start, Off the plan and Opened by you are reader-owned groups. Adjacent
+separators transfer width between their two neighbors, bounded by existing column minima. Hidden
+groups have named restore controls outside the horizontal scroller. Maximization is an override
+that leaves normal widths and visibility untouched; restoring recovers that state. These choices
+have Reader's session lifetime, independently per project. Show all retains its flat roadmap order
+and temporarily bypasses these group preferences. Discarded: per-milestone controls (the screenshot
+marks group boundaries), a second saved layout snapshot (duplicates normal state), and a new disk
+format (not requested). New input/layout/paint stays inside the existing Board timing spans;
+no performance or native validation claim follows from this decision.
+
 ## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
 
 **New signal, 15 November 2026 — #93.** The owner commissioned a redesign in Claude Design and asked

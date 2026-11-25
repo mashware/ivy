@@ -96,6 +96,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/board/milestones/sections.rs",
+        include_str!("../src/board/milestones/sections.rs"),
+        1,
+    ),
+    (
         "src/board/milestones/state.rs",
         include_str!("../src/board/milestones/state.rs"),
         1,

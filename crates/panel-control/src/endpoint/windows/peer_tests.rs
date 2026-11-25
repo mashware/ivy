@@ -31,40 +31,17 @@ fn child_connection() -> (Stream, ChildGuard, StopSignal) {
         };
         let _ = accepted.send(result);
     });
-    // A real child speaks the public upgrade, then stays alive until its parent closes stdin.
-    let script = format!(
-        r#"
-$ErrorActionPreference = 'Stop'
-function Connect-Pipe([string]$name) {{
-    $s = [System.IO.Pipes.NamedPipeClientStream]::new('.', $name, [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::Asynchronous)
-    $s.Connect(2000)
-    return $s
-}}
-function Read-Line([System.IO.Stream]$stream) {{
-    $r = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $false, 256, $true)
-    return $r.ReadLine()
-}}
-$bootstrap = Connect-Pipe 'ivy-{}'
-$hello = [System.Text.Encoding]::UTF8.GetBytes('{{"tool":"peer_hello","v":1}}' + [char]10)
-$bootstrap.Write($hello, 0, $hello.Length)
-$redirect = (Read-Line $bootstrap) | ConvertFrom-Json
-$fresh = Connect-Pipe $redirect.peer.name
-$ready = (Read-Line $fresh) | ConvertFrom-Json
-if ($ready.peer.mode -ne 'verified') {{ throw 'peer was not verified' }}
-[Console]::In.ReadLine() | Out-Null
-$fresh.Dispose()
-$bootstrap.Dispose()
-"#,
-        dir.id()
-    );
-    let child = Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &script,
-        ])
+    // Keep shell/runtime module initialization outside the strict pipe-upgrade deadline:
+    // the former PowerShell fixture first called ConvertFrom-Json after sending its hello.
+    let fixture = format!("{}::peer_child_fixture", module_path!())
+        .split_once("::")
+        .unwrap()
+        .1
+        .to_owned();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &fixture, "--nocapture"])
+        .env("IVY_PEER_TEST_ID", dir.id())
+        .env("IVY_PEER_TEST_SERVER", std::process::id().to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
@@ -83,6 +60,29 @@ $bootstrap.Dispose()
     let stream = received.unwrap().unwrap();
     server.join().unwrap();
     (stream, child, stop)
+}
+
+#[test]
+fn peer_child_fixture() {
+    let Ok(id) = std::env::var("IVY_PEER_TEST_ID") else {
+        return;
+    };
+    let server = std::env::var("IVY_PEER_TEST_SERVER")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_ne!(server, std::process::id(), "fixture must be a real child");
+    let stream = connect_verified(
+        std::path::Path::new(""),
+        &id,
+        server,
+        std::time::Instant::now() + negotiation::DEADLINE,
+    )
+    .unwrap();
+    // Keep the connector and its process alive until the parent closes stdin or kills it.
+    let mut release = [0];
+    std::io::Read::read(&mut std::io::stdin(), &mut release).unwrap();
+    drop(stream);
 }
 
 #[test]

@@ -162,6 +162,7 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
 
 /// Release Board input ownership while leaving its global view state intact.
 pub(crate) fn suspend(window: &mut crate::Window) {
+    window.board.surface.milestones.cancel_resize();
     window.board.open = false;
     window.board.keyboard_focus = false;
     // The field's focus is part of the Board's keyboard focus and leaves with it.

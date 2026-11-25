@@ -204,33 +204,9 @@ pub(super) fn visible_items(
     if full {
         return (0..items.len()).collect();
     }
-    if collapsed {
-        return items
-            .iter()
-            .position(|i| !matches!(i.mark, Some(Mark::Done)))
-            .into_iter()
-            .collect();
-    }
-    let relevant = |i: usize| {
-        attached.get(i).copied().unwrap_or(false)
-            || matches!(
-                items[i].mark,
-                Some(Mark::Current | Mark::Wait | Mark::Block)
-            )
-    };
-    let last = (0..items.len()).rev().find(|&i| relevant(i));
-    let mut pending = 0;
+    let _ = collapsed;
     (0..items.len())
-        .filter(|&i| {
-            if relevant(i) {
-                return true;
-            }
-            if last.is_none_or(|last| i > last) && !matches!(items[i].mark, Some(Mark::Done)) {
-                pending += 1;
-                return pending <= 2;
-            }
-            false
-        })
+        .filter(|&i| attached.get(i).copied().unwrap_or(false))
         .collect()
 }
 
@@ -264,28 +240,4 @@ pub(super) fn widths(available: f32, columns: &[(bool, bool)], separators: usize
             }
         })
         .collect()
-}
-
-/// Visible indices are in roadmap order, so one merge counts the hidden items in linear time.
-/// Full expansion has no hidden items and never walks the item list for its summary.
-pub(super) fn hidden_counts(
-    items: &[panel_contract::plan::Item],
-    visible: &[usize],
-    full: bool,
-) -> (usize, usize) {
-    if full {
-        return (0, 0);
-    }
-    let mut shown = visible.iter().peekable();
-    let (mut pending, mut done) = (0, 0);
-    for (index, item) in items.iter().enumerate() {
-        if shown.peek().is_some_and(|shown| **shown == index) {
-            shown.next();
-        } else if item.mark == Some(Mark::Done) {
-            done += 1;
-        } else {
-            pending += 1;
-        }
-    }
-    (pending, done)
 }
