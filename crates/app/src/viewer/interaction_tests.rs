@@ -145,7 +145,7 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
         );
     };
     git(&["init", "-q"]);
-    fs::write(path.join("example.txt"), "base\n").unwrap();
+    fs::write(path.join("example.txt"), "BASE_WITNESS\n").unwrap();
     git(&["add", "example.txt"]);
     git(&[
         "-c",
@@ -158,9 +158,10 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
         "-qm",
         "base",
     ]);
-    fs::write(path.join("example.txt"), "staged\n").unwrap();
+    fs::write(path.join("example.txt"), "INDEX_WITNESS\n").unwrap();
     git(&["add", "example.txt"]);
-    fs::write(path.join("example.txt"), "unstaged\n").unwrap();
+    fs::write(path.join("example.txt"), "WORKTREE_WITNESS\n").unwrap();
+    let _prepared_diffs = load::PreparedControlDiffs::new(&path, "main");
 
     let script = format!("cd '{}' && sleep 30", path.display());
     let mut window = window_of_tabs([["sleep 30", script.as_str()]]);
@@ -208,16 +209,24 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
             .iter()
             .any(|(text, _)| text == "Repository directory")
     );
-    let wait_for = |window: &mut crate::Window, expected: &str| {
+    let wait_for = |window: &mut crate::Window, kind: Kind, expected: [&str; 2], absent: &str| {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let painted = frame(window, &ctx, vec![]);
-            if painted.iter().any(|(text, _)| text.contains(expected)) {
+            if expected
+                .iter()
+                .all(|expected| painted.iter().any(|(text, _)| text.contains(expected)))
+            {
+                assert_eq!(window.viewer.kind, kind);
+                assert!(
+                    !painted.iter().any(|(text, _)| text.contains(absent)),
+                    "unexpected {absent}: {painted:?}"
+                );
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "missing {expected}; message={:?}, requested={:?}, loading={}",
+                "missing {expected:?}; message={:?}, requested={:?}, loading={}",
                 window.viewer.message,
                 window.viewer.requested,
                 window.viewer.job.is_some()
@@ -225,12 +234,27 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
             std::thread::sleep(Duration::from_millis(10));
         }
     };
-    wait_for(&mut window, "unstaged");
+    wait_for(
+        &mut window,
+        Kind::Local,
+        ["BASE_WITNESS", "WORKTREE_WITNESS"],
+        "INDEX_WITNESS",
+    );
     choose_comparison(&mut window, &ctx, "Staged changes");
-    wait_for(&mut window, "staged");
+    wait_for(
+        &mut window,
+        Kind::Staged,
+        ["BASE_WITNESS", "INDEX_WITNESS"],
+        "WORKTREE_WITNESS",
+    );
     assert_eq!(window.viewer.kind, Kind::Staged);
     choose_comparison(&mut window, &ctx, "Unstaged changes");
-    wait_for(&mut window, "unstaged");
+    wait_for(
+        &mut window,
+        Kind::Unstaged,
+        ["INDEX_WITNESS", "WORKTREE_WITNESS"],
+        "BASE_WITNESS",
+    );
 }
 
 #[test]

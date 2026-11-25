@@ -62,6 +62,61 @@ pub(super) struct Job<T = Loaded> {
     finished: Cell<bool>,
 }
 
+#[cfg(test)]
+type ControlDiffs = Option<(PathBuf, String, Vec<(Kind, Loaded)>)>;
+#[cfg(test)]
+thread_local! {
+    static CONTROL_DIFFS: std::cell::RefCell<ControlDiffs> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) struct PreparedControlDiffs;
+#[cfg(test)]
+impl PreparedControlDiffs {
+    pub(super) fn new(path: &Path, base: &str) -> Self {
+        // Prepare real Git data before timing control painting; process setup has its own
+        // deadlines, so the interaction budget must not include that backend work.
+        CONTROL_DIFFS.with(|fixtures| assert!(fixtures.borrow().is_none()));
+        let responses = [Kind::Local, Kind::Staged, Kind::Unstaged]
+            .into_iter()
+            .map(|kind| {
+                let job = Job::start_with_base(
+                    path.to_owned(),
+                    kind,
+                    base.to_owned(),
+                    egui::Context::default(),
+                )
+                .unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    if let Some(loaded) = job.poll() {
+                        break (kind, loaded.unwrap());
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "Git fixture loader did not finish: {kind:?}"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+            })
+            .collect();
+        CONTROL_DIFFS.with(|fixtures| {
+            assert!(
+                fixtures
+                    .replace(Some((path.to_owned(), base.to_owned(), responses)))
+                    .is_none()
+            );
+        });
+        Self
+    }
+}
+#[cfg(test)]
+impl Drop for PreparedControlDiffs {
+    fn drop(&mut self) {
+        CONTROL_DIFFS.with(|fixtures| *fixtures.borrow_mut() = None);
+    }
+}
+
 /// What decoding an image yields: the original at full resolution, and a copy no side of which
 /// exceeds the GPU's largest texture, which the viewer hands over once and does not keep.
 pub(crate) struct Picture {
@@ -87,6 +142,28 @@ impl Job {
         base: String,
         ctx: egui::Context,
     ) -> Result<Self, String> {
+        #[cfg(test)]
+        if let Some(loaded) = CONTROL_DIFFS.with(|fixtures| {
+            let mut fixtures = fixtures.borrow_mut();
+            let (expected_path, expected_base, responses) = fixtures.as_mut()?;
+            assert_eq!(
+                &path, expected_path,
+                "controls requested a different repository"
+            );
+            assert_eq!(&base, expected_base, "controls requested a different base");
+            let index = responses
+                .iter()
+                .position(|(prepared, _)| *prepared == kind)
+                .expect("controls requested an unprepared comparison");
+            Some(responses.remove(index).1)
+        }) {
+            let (job, sender) = stalled();
+            sender
+                .send(Ok(loaded))
+                .unwrap_or_else(|_| panic!("prepared diff receiver vanished"));
+            ctx.request_repaint();
+            return Ok(job);
+        }
         spawn(ctx, move || match kind {
             Kind::Markdown => read_markdown(&path).and_then(|text| {
                 let markdown = Some(super::markdown::MarkdownDocument::parse(&text)?);
