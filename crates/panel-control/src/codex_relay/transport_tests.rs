@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Portable transport regressions using the production upstream handshake and routing.
 use super::*;
 use tungstenite::client::IntoClientRequest;
