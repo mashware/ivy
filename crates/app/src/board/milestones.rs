@@ -2,6 +2,7 @@ mod columns;
 pub(super) mod compact;
 mod details;
 mod projection;
+pub(super) mod sections;
 pub(super) mod state;
 mod strip;
 // «By milestone»: each project's roadmap as columns, a console's card under the deliverable its
