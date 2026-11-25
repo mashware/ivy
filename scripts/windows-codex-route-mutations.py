@@ -10,6 +10,13 @@ FILE = "crates/panel-contract/src/windows_private_file.rs"
 CASES = [
     (
         "crates/panel-control/src/codex_route.rs", "panel-control",
+        ["--test", "codex_route_windows_privacy"],
+        "every_created_registry_object_has_an_independently_verified_private_descriptor",
+        "panel_contract::windows_private_file::create_new(path)",
+        "std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(path)",
+    ),
+    (
+        "crates/panel-control/src/codex_route.rs", "panel-control",
         ["--test", "codex_route_windows_sharing"],
         "route_replacement_with_external_reader_is_atomic_or_preserves_previous_state",
         "fs::rename(&temp, path)",

@@ -37,3 +37,6 @@ DACL. Insecure existing storage is refused, not repaired automatically. Runtime 
 their directory cannot be reparse-backed (including cloud/filter-backed storage); choose an ordinary
 local Codex home. The route JSON stays at version 1. Experimental session recovery is outside this
 storage support; no session-transfer or restore behavior is added.
+
+See [native route verification](../../../docs/windows-codex-route-checks.md) for CI commands and
+the privileged wrong-owner check.

@@ -2096,6 +2096,10 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 /// the same delivery and nothing was left watching them either.
 const DOCUMENTS: &[(&str, &str)] = &[
     (
+        "docs/windows-codex-route-checks.md",
+        include_str!("../../../docs/windows-codex-route-checks.md"),
+    ),
+    (
         "docs/console-glyph-hinting.md",
         include_str!("../../../docs/console-glyph-hinting.md"),
     ),
