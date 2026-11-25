@@ -26,8 +26,16 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-Manual Board pointer capture does not stop egui ScrollArea content dragging after a touchscreen has been detected. Register the same stable divider identity as a Sense::drag widget, so the resize gesture is not also treated as horizontal/vertical scrolling or release inertia.
+Manual Board pointer capture does not stop egui ScrollArea content dragging after a
+touchscreen has been detected. Register the same stable divider identity as a
+Sense::drag widget, so the resize gesture is not also treated as horizontal/vertical
+scrolling or release inertia.
 
 ## Where it lives
 
-Evidence: egui 0.36.1 RawInput reproduction scrolled 0 -> 50 -> 100 then 133 after release without child ownership. divider_raw_input_never_pans_overflowing_scroll_areas_after_touch_detection passes with the divider interaction and fails at x=-50 instead of 0 when it is removed. Synthetic runtime evidence, not an agent-operated native desktop claim. Issue #250; branch 250-board-section-controls.
+Evidence: egui 0.36.1 RawInput reproduction scrolled 0 -> 50 -> 100 then 133 after
+release without child ownership.
+divider_raw_input_never_pans_overflowing_scroll_areas_after_touch_detection passes
+with the divider interaction and fails at x=-50 instead of 0 when it is removed.
+Synthetic runtime evidence, not an agent-operated native desktop claim.
+Issue #250; branch 250-board-section-controls.
