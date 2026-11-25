@@ -498,3 +498,5 @@ fn heights_answer_before_anything_is_placed() {
     assert_eq!(heights.line_at(120.0), 0);
     assert_eq!(heights.total(), 0.0);
 }
+
+mod navigation;

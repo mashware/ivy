@@ -792,6 +792,22 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
 
+    fn pipe_driven_shell(program: &str) -> Command {
+        use std::os::unix::process::CommandExt;
+        let mut command = Command::new(program);
+        // An interactive zsh prefers /dev/tty to the fixture pipe when cargo has a terminal.
+        // Isolate the child session so the supplied script is its only source of input.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        command
+    }
+
     fn executable(path: &Path, body: &str) {
         std::fs::write(path, body).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -820,7 +836,7 @@ mod tests {
             let prepared = Prepared::prepare("bash.exe", Some(&helper))
                 .unwrap()
                 .unwrap();
-            let mut command = Command::new("/bin/bash");
+            let mut command = pipe_driven_shell("/bin/bash");
             command
                 .args(prepared.args())
                 .args(["-i", "-c", "codex resume 'session one'"])
@@ -933,7 +949,7 @@ mod tests {
             let prepared = Prepared::prepare_with_zdotdir(shell, Some(&helper), None)
                 .unwrap()
                 .unwrap();
-            let mut command = Command::new(shell);
+            let mut command = pipe_driven_shell(shell);
             command
                 .args(prepared.args())
                 .arg("-i")
@@ -1024,7 +1040,7 @@ mod tests {
             let prepared = Prepared::prepare_with_zdotdir("/usr/bin/zsh", Some(&helper), inherited)
                 .unwrap()
                 .unwrap();
-            let mut cmd = Command::new("/usr/bin/zsh");
+            let mut cmd = pipe_driven_shell("/usr/bin/zsh");
             cmd.arg("-i")
                 .current_dir(&home)
                 .env("HOME", &home)
@@ -1116,7 +1132,7 @@ mod tests {
                     Prepared::prepare_with_zdotdir(shell, Some(Path::new("/bin/sh")), None)
                         .unwrap()
                         .unwrap();
-                let mut command = Command::new(shell);
+                let mut command = pipe_driven_shell(shell);
                 command
                     .args(prepared.args())
                     .arg("-i")
@@ -1171,7 +1187,7 @@ mod tests {
             Prepared::prepare_with_zdotdir("/usr/bin/zsh", Some(Path::new("/bin/sh")), None)
                 .unwrap()
                 .unwrap();
-        let mut command = Command::new("/usr/bin/zsh");
+        let mut command = pipe_driven_shell("/usr/bin/zsh");
         command
             .arg("-i")
             .current_dir(&home)
@@ -1234,7 +1250,7 @@ mod tests {
         let prepared = Prepared::prepare_with_zdotdir(&fish, Some(&helper), None)
             .unwrap()
             .unwrap();
-        let mut command = Command::new(&fish);
+        let mut command = pipe_driven_shell(&fish);
         command
             .args(prepared.args())
             .arg("-i")
@@ -1321,7 +1337,7 @@ mod tests {
                     &bin.join("codex"),
                     "#!/bin/sh\nprintf '%s\\0' \"$PANEL_ID\" \"$PANEL_DIR\" \"$@\" > \"$LOG\"\nexit 37\n",
                 );
-                let mut command = Command::new(shell);
+                let mut command = pipe_driven_shell(shell);
                 if let Some(prepared) = &prepared {
                     command.args(prepared.args());
                     for (key, value) in prepared.env() {
@@ -1382,7 +1398,7 @@ mod tests {
                 Prepared::prepare_with_zdotdir("/bin/sh", Some(Path::new("/bin/sh")), None)
                     .unwrap();
             assert!(prepared.is_none());
-            let mut command = Command::new("/bin/sh");
+            let mut command = pipe_driven_shell("/bin/sh");
             command
                 .arg("-i")
                 .stdin(Stdio::piped())

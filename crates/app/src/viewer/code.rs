@@ -142,11 +142,18 @@ pub(super) fn show(
     }
     let width =
         text_left + (document.widest as f32 * glyph).max(state.widest_seen.1) + mark + 2.0 * PAD;
+    let previous_scroll = ui.spacing().scroll;
+    // A position indicator must survive both idle time and the selection owning the pointer.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle {
+        foreground_color: true,
+        ..egui::style::ScrollStyle::solid()
+    };
     // Wrapped, the text takes what the view leaves after the gutter, never less than a few
     // characters.
-    let wrap = state
-        .wrap
-        .then(|| (ui.available_width() - text_left - 2.0 * PAD).max(glyph * 8.0));
+    let wrap = state.wrap.then(|| {
+        (ui.available_width() - ui.spacing().scroll.allocated_width() - text_left - 2.0 * PAD)
+            .max(glyph * 8.0)
+    });
     state.heights.prepare(&document.lines, wrap, row, glyph);
     let height = state.heights.total() + 2.0 * PAD;
     let select_all = ui.input(|i| {
@@ -243,21 +250,47 @@ pub(super) fn show(
                 Place { line, byte }
             };
             let pointer = ui.input(|i| i.pointer.interact_pos());
+            let visible = viewport.translate(content.min.to_vec2());
+            let endpoint = pointer.map(|pos| {
+                egui::pos2(
+                    pos.x,
+                    pos.y
+                        .clamp(visible.top(), (visible.bottom() - 0.5).max(visible.top())),
+                )
+            });
             // A drag is only recognised once the pointer has travelled, so it is anchored where
             // the press happened, not where the pointer is by then.
             let pressed_at = ui.input(|i| i.pointer.press_origin());
             if response.drag_started()
-                && let (Some(from), Some(pos)) = (pressed_at, pointer)
+                && let (Some(from), Some(pos)) = (pressed_at, endpoint)
             {
                 state.selection = Some((place_at(from), place_at(pos)));
             } else if response.dragged()
-                && let (Some(pos), Some((anchor, _))) = (pointer, state.selection)
+                && let (Some(pos), Some((anchor, _))) = (endpoint, state.selection)
             {
                 state.selection = Some((anchor, place_at(pos)));
             } else if response.clicked() {
                 state.selection = None;
             }
+            if response.dragged_by(egui::PointerButton::Primary)
+                && state.selection.is_some()
+                && let Some(pos) = pointer
+            {
+                let distance = pos.y - pos.y.clamp(visible.top(), visible.bottom());
+                let can_scroll = (distance < 0.0 && viewport.min.y > 0.0)
+                    || (distance > 0.0 && viewport.max.y < height);
+                if can_scroll {
+                    let dt = ui.input(|i| i.stable_dt.min(0.05));
+                    let delta = distance.clamp(-80.0, 80.0) * 8.0 * dt;
+                    ui.scroll_with_delta_animation(
+                        egui::vec2(0.0, -delta),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                    ui.ctx().request_repaint();
+                }
+            }
         });
+    ui.spacing_mut().scroll = previous_scroll;
     let copy = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
     if copy && let Some((from, to)) = state.selection.filter(|(a, b)| a != b) {
         ui.ctx().copy_text(document.text_between(from, to));

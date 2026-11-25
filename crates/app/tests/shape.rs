@@ -352,6 +352,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/code/tests.rs"),
     ),
     (
+        "src/viewer/code/tests/navigation.rs",
+        include_str!("../src/viewer/code/tests/navigation.rs"),
+    ),
+    (
         "src/viewer/code/rows.rs",
         include_str!("../src/viewer/code/rows.rs"),
     ),
