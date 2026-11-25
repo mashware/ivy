@@ -562,6 +562,196 @@ mod tests {
         assert!(!state.surface.milestones.resizing());
     }
 
+    fn section_headers_for_cancellation(ctx: &egui::Context, state: &mut State) -> Vec<egui::Rect> {
+        use super::super::milestones::{self, state::Target};
+        let plan = panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"Active","items":[{"text":"a","mark":"current"}]},{"id":"B","title":"Ready","items":[{"text":"b"}]}],"outside":["outside"]}"#).unwrap().0;
+        let section = super::super::model::Section {
+            key: None,
+            kind: super::super::model::Kind::Repository {
+                name: "Test".into(),
+            },
+            entries: Vec::new(),
+            roadmap: None,
+            ink: None,
+        };
+        let roles = crate::theme::Roles::of(&crate::theme::Theme::default());
+        state.surface.milestones.begin_frame();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1500.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                milestones::paint_plan_with(
+                    ui,
+                    &section,
+                    &plan,
+                    &roles,
+                    &mut state.surface.milestones,
+                    &Default::default(),
+                    &|_| super::super::observation::Column::Idle,
+                    &mut |_, _, _, _, _| {},
+                );
+            },
+        )
+        .drop_without_applying_deltas();
+        state
+            .surface
+            .milestones
+            .targets
+            .iter()
+            .filter_map(|(target, rect)| matches!(target, Target::Header(_)).then_some(*rect))
+            .collect()
+    }
+
+    fn section_cancellation_input(
+        window: &mut Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1500.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let metrics = CellMetrics::measure(ctx, egui::FontId::monospace(window.font_size));
+                before_keys(window, ui, &metrics, false);
+            },
+        )
+        .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn window_focus_loss_ends_section_resize_before_later_pointer_motion() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        toggle(&mut window, &ctx);
+        let before = section_headers_for_cancellation(&ctx, &mut window.board);
+        let at = window.board.surface.milestones.dividers[0].rect.center();
+        pointer(&mut window.board, at, true);
+        window.board.pointer_owned = true;
+        window
+            .board
+            .surface
+            .milestones
+            .resize(at - egui::vec2(60.0, 0.0));
+        let resized = section_headers_for_cancellation(&ctx, &mut window.board);
+        assert!(resized[0].width() < before[0].width());
+        section_cancellation_input(&mut window, &ctx, vec![egui::Event::WindowFocused(false)]);
+        assert!(!window.board.surface.milestones.resizing());
+        assert!(!window.board.pointer_owned);
+        section_cancellation_input(
+            &mut window,
+            &ctx,
+            vec![
+                egui::Event::WindowFocused(true),
+                egui::Event::PointerMoved(at + egui::vec2(120.0, 0.0)),
+                egui::Event::PointerButton {
+                    pos: at + egui::vec2(120.0, 0.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board),
+            resized
+        );
+        assert!(window.board.activate.is_none());
+        assert!(window.board.is_open());
+    }
+
+    #[test]
+    fn board_close_cancels_section_drag_and_reopen_preserves_hidden_maximized_and_resized_groups() {
+        use super::super::milestones::{sections::Group, state::Action};
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        toggle(&mut window, &ctx);
+        let before = section_headers_for_cancellation(&ctx, &mut window.board);
+        let divider = window.board.surface.milestones.dividers[0].clone();
+        let project = window
+            .board
+            .surface
+            .milestones
+            .hits
+            .iter()
+            .find_map(|(_, action)| match action {
+                Action::HideGroup(project, _) => Some(project.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let at = divider.rect.center();
+        pointer(&mut window.board, at, true);
+        window.board.pointer_owned = true;
+        window
+            .board
+            .surface
+            .milestones
+            .resize(at - egui::vec2(60.0, 0.0));
+        // Escape takes the actual Board dismissal route while the separator is captured.
+        section_cancellation_input(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!window.board.is_open());
+        assert!(!window.board.surface.milestones.resizing());
+        toggle(&mut window, &ctx);
+        let resized = section_headers_for_cancellation(&ctx, &mut window.board);
+        assert!((resized[0].width() - (before[0].width() - 60.0)).abs() < 0.1);
+        assert!((resized[1].width() - (before[1].width() + 60.0)).abs() < 0.1);
+        window
+            .board
+            .surface
+            .milestones
+            .apply(&Action::HideGroup(project.clone(), Group::Outside));
+        let hidden = section_headers_for_cancellation(&ctx, &mut window.board);
+        assert_eq!(hidden.len(), 2);
+        window
+            .board
+            .surface
+            .milestones
+            .apply(&Action::MaximizeGroup(project.clone(), Group::Active));
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board).len(),
+            1
+        );
+        toggle(&mut window, &ctx);
+        assert!(!window.board.is_open());
+        toggle(&mut window, &ctx);
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board).len(),
+            1
+        );
+        window
+            .board
+            .surface
+            .milestones
+            .apply(&Action::RestoreLayout(project));
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board),
+            hidden
+        );
+        assert!(window.board.activate.is_none());
+    }
+
     #[test]
     fn release_keeps_the_pressed_identity_even_when_cards_reorder() {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));

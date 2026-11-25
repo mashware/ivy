@@ -130,26 +130,15 @@ impl Reader {
     pub(in crate::board) fn apply(&mut self, action: &Action) {
         match action {
             Action::HideGroup(project, group) => {
-                let p = self.project(project);
-                p.sections.hidden[*group as usize] = true;
-                if p.sections.maximized == Some(*group) {
-                    p.sections.maximized = None;
-                }
+                self.project(project).sections.hide(*group);
                 self.cancel_resize();
             }
             Action::ShowGroup(project, group) => {
-                let p = self.project(project);
-                p.sections.hidden[*group as usize] = false;
-                p.sections.maximized = None;
+                self.project(project).sections.show(*group);
                 self.cancel_resize();
             }
             Action::MaximizeGroup(project, group) => {
-                let p = self.project(project);
-                p.sections.maximized = if p.sections.maximized == Some(*group) {
-                    None
-                } else {
-                    Some(*group)
-                };
+                self.project(project).sections.toggle_maximized(*group);
                 self.cancel_resize();
             }
             Action::RestoreLayout(project) => {
@@ -197,6 +186,11 @@ impl Reader {
             }
         }
     }
+    pub(in crate::board) fn begin_frame(&mut self) {
+        self.dividers.clear();
+        self.hits.clear();
+        self.targets.clear();
+    }
     pub(in crate::board) fn begin_resize(&mut self, pos: egui::Pos2) -> bool {
         let Some(divider) = self.dividers.iter().find(|d| d.rect.contains(pos)).cloned() else {
             return false;
@@ -211,11 +205,9 @@ impl Reader {
         let Some(drag) = self.drag.clone() else {
             return;
         };
-        let d = &drag.divider;
-        let delta = (pos.x - drag.x).clamp(d.minima[0] - d.widths[0], d.widths[1] - d.minima[1]);
-        let layout = &mut self.project(&d.project).sections;
-        layout.widths[d.groups[0] as usize] = Some(d.widths[0] + delta);
-        layout.widths[d.groups[1] as usize] = Some(d.widths[1] - delta);
+        self.project(&drag.divider.project)
+            .sections
+            .resize(&drag, pos.x);
     }
     pub(in crate::board) fn cancel_resize(&mut self) {
         self.drag = None;

@@ -118,10 +118,8 @@ fn paint_contents(
     ui.set_clip_rect(area);
     super::style::apply(&mut ui, &theme);
     ui.painter().rect_filled(area, 0.0, roles.base);
-    window.board.surface.milestones.dividers.clear();
     window.board.surface.child_hits.clear();
-    window.board.surface.milestones.hits.clear();
-    window.board.surface.milestones.targets.clear();
+    window.board.surface.milestones.begin_frame();
     super::bar::paint(
         &mut ui,
         area.width(),

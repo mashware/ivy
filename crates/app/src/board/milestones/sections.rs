@@ -29,6 +29,29 @@ pub(super) struct Layout {
     pub(super) maximized: Option<Group>,
 }
 impl Layout {
+    pub(super) fn hide(&mut self, group: Group) {
+        self.hidden[group as usize] = true;
+        if self.maximized == Some(group) {
+            self.maximized = None;
+        }
+    }
+    pub(super) fn show(&mut self, group: Group) {
+        self.hidden[group as usize] = false;
+        self.maximized = None;
+    }
+    pub(super) fn toggle_maximized(&mut self, group: Group) {
+        self.maximized = if self.maximized == Some(group) {
+            None
+        } else {
+            Some(group)
+        };
+    }
+    pub(super) fn resize(&mut self, drag: &Drag, x: f32) {
+        let d = &drag.divider;
+        let delta = (x - drag.x).clamp(d.minima[0] - d.widths[0], d.widths[1] - d.minima[1]);
+        self.widths[d.groups[0] as usize] = Some(d.widths[0] + delta);
+        self.widths[d.groups[1] as usize] = Some(d.widths[1] - delta);
+    }
     pub(super) fn shows(&self, group: Group) -> bool {
         self.maximized
             .map_or(!self.hidden[group as usize], |g| g == group)
