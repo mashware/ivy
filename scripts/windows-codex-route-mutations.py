@@ -9,6 +9,20 @@ ROOT = Path(__file__).resolve().parents[1]
 FILE = "crates/panel-contract/src/windows_private_file.rs"
 CASES = [
     (
+        "crates/panel-control/src/codex_route.rs", "panel-control",
+        ["--test", "codex_route_windows_sharing"],
+        "route_replacement_with_external_reader_is_atomic_or_preserves_previous_state",
+        "fs::rename(&temp, path)",
+        "fs::copy(&temp, path).map(|_| ())",
+    ),
+    (
+        "crates/panel-control/src/codex_route.rs", "panel-control",
+        ["--test", "codex_route_windows_sharing"],
+        "mapping_replacement_with_external_reader_is_atomic_or_restores_displaced_routes",
+        "fs::rename(&temp, &mapping)?;",
+        "fs::copy(&temp, &mapping)?;",
+    ),
+    (
         "crates/panel-control/src/codex_route.rs", "panel-control", ["--lib"],
         "codex_route::tests::held_reader_observes_old_record_and_mapping_after_replacement",
         "fs::rename(&temp, path)",
