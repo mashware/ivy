@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 semver = "1"
 # Header truncation preserves grapheme clusters while fitting the font’s measured width.

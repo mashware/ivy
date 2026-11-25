@@ -3,6 +3,358 @@ use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod powershell {
+    use super::Prepared;
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::path::Path;
+
+    const SCRIPT: &str =
+        include_str!("../../../resources/agent-integrations/codex/shell/powershell.ps1");
+
+    pub(super) fn prepare(helper: Option<&Path>) -> Prepared {
+        let helper = helper.filter(|path| path.is_absolute() && path.is_file());
+        // D124: inline startup leaves the user's profile execution policy intact.
+        let bytes: Vec<u8> = SCRIPT.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        Prepared {
+            dir: None,
+            file: None,
+            args: vec![
+                "-NoExit".into(),
+                "-EncodedCommand".into(),
+                STANDARD.encode(bytes),
+            ],
+            env: vec![(
+                "IVY_CODEX_HELPER",
+                helper.map(|path| path.as_os_str().to_owned()),
+            )],
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::path::PathBuf;
+
+        #[test]
+        fn windows_powershell_preparation_recognises_executables_and_keeps_profiles_enabled() {
+            for shell in [
+                "pwsh.exe",
+                "powershell.exe",
+                r"C:\Program Files\PowerShell\7\PWSH.EXE",
+            ] {
+                let prepared = Prepared::prepare(shell, None).unwrap().unwrap();
+                assert_eq!(&prepared.args()[..2], ["-NoExit", "-EncodedCommand"]);
+                let bytes = STANDARD.decode(&prepared.args()[2]).unwrap();
+                let decoded = String::from_utf16(
+                    &bytes
+                        .chunks_exact(2)
+                        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+                assert_eq!(decoded, SCRIPT);
+                assert!(prepared.args()[2].len() + shell.len() + 64 < 32_767);
+                assert!(prepared.dir.is_none() && prepared.file.is_none());
+                assert_eq!(prepared.env(), [("IVY_CODEX_HELPER", None)]);
+            }
+            let exe = std::env::current_exe().unwrap();
+            let prepared = Prepared::prepare("powershell.exe", Some(&exe))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                prepared.env(),
+                [("IVY_CODEX_HELPER", Some(exe.as_os_str()))]
+            );
+            let prepared = Prepared::prepare("bash.exe", Some(&exe)).unwrap().unwrap();
+            assert_eq!(prepared.args()[0], "--rcfile");
+            let expected = if cfg!(windows) {
+                "ivy-codex.exe"
+            } else {
+                "ivy-codex"
+            };
+            assert_eq!(
+                super::super::helper_path().unwrap().file_name().unwrap(),
+                expected
+            );
+        }
+
+        #[cfg(windows)]
+        #[test]
+        #[ignore = "requires the bundled ConPTY pair beside the test binary"]
+        fn windows_powershell_prepared_startup_reports_cwd_through_bundled_conpty() {
+            use std::time::{Duration, Instant};
+            let exe = std::env::current_exe().unwrap();
+            for name in ["conpty.dll", "OpenConsole.exe"] {
+                assert!(exe.with_file_name(name).is_file(), "missing {name}");
+            }
+            for program in programs() {
+                let root = Temp::new();
+                let directory = root.0.join("changed folder");
+                std::fs::create_dir(&directory).unwrap();
+                let prepared = Prepared::prepare(program.to_str().unwrap(), None)
+                    .unwrap()
+                    .unwrap();
+                let args = prepared
+                    .args()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>();
+                let mut env = prepared.env();
+                env.push(("IVY_TEST_ROOT", Some(directory.as_os_str())));
+                let (mut pty, output) = term_core::Pty::spawn_with_env(
+                    program.to_str().unwrap(),
+                    &args,
+                    term_core::Size::default(),
+                    &env,
+                )
+                .unwrap();
+                pty.write(b"Set-Location -LiteralPath $env:IVY_TEST_ROOT\r")
+                    .unwrap();
+                let mut screen = term_core::Screen::new(term_core::Size::default());
+                let deadline = Instant::now() + Duration::from_secs(30);
+                let mut seen = String::new();
+                let mut answered = 0;
+                while screen.working_directory() != Some(directory.as_path()) {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    assert!(
+                        !left.is_zero(),
+                        "no directory report from {program:?}: {seen:?}"
+                    );
+                    if let Ok(bytes) = output.recv_timeout(left) {
+                        screen.advance(&bytes);
+                        seen.push_str(&String::from_utf8_lossy(&bytes));
+                    }
+                    let asked = seen.matches("\x1b[6n").count();
+                    for _ in answered..asked {
+                        pty.write(b"\x1b[1;1R").unwrap();
+                    }
+                    answered = answered.max(asked);
+                }
+            }
+        }
+
+        fn programs() -> Vec<PathBuf> {
+            #[cfg(windows)]
+            {
+                let mut paths = vec![
+                    PathBuf::from(super::super::windows_cmd(
+                        &super::super::WindowsSession::read(),
+                    ))
+                    .parent()
+                    .unwrap()
+                    .join("WindowsPowerShell/v1.0/powershell.exe"),
+                ];
+                for directory in
+                    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                {
+                    let pwsh = directory.join("pwsh.exe");
+                    if pwsh.is_file() {
+                        paths.push(pwsh);
+                        break;
+                    }
+                }
+                assert!(
+                    paths.iter().all(|path| path.is_file()),
+                    "Windows PowerShell is required: {paths:?}"
+                );
+                paths
+            }
+            #[cfg(not(windows))]
+            {
+                std::env::var_os("IVY_TEST_PWSH")
+                    .map(PathBuf::from)
+                    .into_iter()
+                    .collect()
+            }
+        }
+
+        struct Temp(PathBuf);
+        impl Temp {
+            fn new() -> Self {
+                let mut id = [0; 8];
+                getrandom::fill(&mut id).unwrap();
+                let path = std::env::temp_dir()
+                    .join(format!("ivy-powershell-{:x}", u64::from_ne_bytes(id)));
+                std::fs::create_dir(&path).unwrap();
+                Self(path)
+            }
+        }
+        impl Drop for Temp {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn run(
+            program: &Path,
+            prelude: &str,
+            body: &str,
+            helper: Option<&Path>,
+            root: &Path,
+        ) -> (String, String) {
+            use std::process::{Command, Stdio};
+            use std::time::{Duration, Instant};
+            let script = format!("{prelude}\n{SCRIPT}\n{body}");
+            let encoded = STANDARD.encode(
+                script
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<_>>(),
+            );
+            let out = root.join("stdout");
+            let err = root.join("stderr");
+            let mut command = Command::new(program);
+            command
+                .args(["-NoLogo", "-NoProfile", "-EncodedCommand", &encoded])
+                .env("XDG_CACHE_HOME", root)
+                .env("XDG_CONFIG_HOME", root)
+                .env("XDG_DATA_HOME", root)
+                .env("IVY_TEST_ROOT", root)
+                .env("TERM", "dumb")
+                .stdout(std::fs::File::create(&out).unwrap())
+                .stderr(std::fs::File::create(&err).unwrap())
+                .stdin(Stdio::null());
+            if let Some(helper) = helper {
+                command.env("IVY_CODEX_HELPER", helper);
+            } else {
+                command.env_remove("IVY_CODEX_HELPER");
+            }
+            let mut child = command.spawn().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                if Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "PowerShell did not complete: {}",
+                        std::fs::read_to_string(&err).unwrap()
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            let out = String::from_utf8_lossy(&std::fs::read(out).unwrap()).into_owned();
+            let err = String::from_utf8_lossy(&std::fs::read(err).unwrap()).into_owned();
+            assert!(status.success(), "{program:?}: {out}\n{err}");
+            (out, err)
+        }
+
+        #[test]
+        fn windows_powershell_reports_encoded_directories_without_a_helper_and_clears_other_providers()
+         {
+            for program in programs() {
+                let root = Temp::new();
+                let dir = root.0.join("work % # café");
+                std::fs::create_dir(&dir).unwrap();
+                let (out, err) = run(
+                    &program,
+                    "function prompt { 'CUSTOM_PROMPT' }",
+                    r#"
+Set-Location -LiteralPath (Join-Path $env:IVY_TEST_ROOT 'work % # café')
+prompt
+'WRAPPED:' + [bool](Get-Command codex -CommandType Function -ErrorAction Ignore)
+Set-Location Env:
+prompt
+"#,
+                    None,
+                    &root.0,
+                );
+                assert!(out.contains("%20%25%20%23%20caf%C3%A9"), "{out}");
+                let mut screen = term_core::Screen::new(term_core::Size::default());
+                let first_end = out.find("CUSTOM_PROMPT").unwrap();
+                screen.advance(&out.as_bytes()[..first_end]);
+                assert_eq!(screen.working_directory(), Some(dir.as_path()), "{out}");
+                screen.advance(&out.as_bytes()[first_end..]);
+                assert_eq!(screen.working_directory(), None, "{out}");
+                assert!(out.contains("WRAPPED:False"), "{out}");
+                assert!(err.is_empty(), "{err}");
+            }
+        }
+
+        #[test]
+        fn windows_powershell_preserves_prompt_error_status_and_user_codex_commands() {
+            for program in programs() {
+                for definition in [
+                    "function codex { 'USER_CODEX' }",
+                    "function user_codex { 'USER_CODEX' }; Set-Alias codex user_codex",
+                ] {
+                    let root = Temp::new();
+                    let helper = std::env::current_exe().unwrap();
+                    let prelude =
+                        format!("function prompt {{ \"STATUS:$?:$LASTEXITCODE\" }}; {definition}");
+                    let (out, err) = run(
+                        &program,
+                        &prelude,
+                        r#"
+$global:LASTEXITCODE = 37
+Write-Error 'expected failure' -ErrorAction SilentlyContinue
+prompt
+codex
+"#,
+                        Some(&helper),
+                        &root.0,
+                    );
+                    assert!(out.contains("STATUS:False:37"), "{out}");
+                    assert!(out.contains("USER_CODEX"), "{out}");
+                    assert!(
+                        err.contains("existing codex alias or function preserved"),
+                        "{err}"
+                    );
+                }
+            }
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn windows_powershell_codex_chooses_application_over_ps1_and_passes_arguments() {
+            for program in programs() {
+                let root = Temp::new();
+                let helper = root.0.join("helper.cmd");
+                std::fs::write(
+                    &helper,
+                    "@echo off\r\necho HELPER:%~1:%~2:%~3\r\nexit /b 37\r\n",
+                )
+                .unwrap();
+                std::fs::write(
+                    root.0.join("codex.cmd"),
+                    "@echo off\r\necho DIRECT_CLIENT\r\nexit /b 19\r\n",
+                )
+                .unwrap();
+                std::fs::write(root.0.join("codex.ps1"), "throw 'wrong executable'").unwrap();
+                let (out, err) = run(
+                    &program,
+                    "",
+                    r#"
+$env:PATH = $env:IVY_TEST_ROOT + ';' + $env:PATH
+codex resume 'session one'
+'EXIT:' + $LASTEXITCODE
+Remove-Item -LiteralPath $env:IVY_CODEX_HELPER
+codex
+'FALLBACK:' + $LASTEXITCODE
+"#,
+                    Some(&helper),
+                    &root.0,
+                );
+                assert!(
+                    out.contains(&format!(
+                        "HELPER:{}:resume:session one",
+                        root.0.join("codex.cmd").display()
+                    )),
+                    "{out}"
+                );
+                assert!(out.contains("EXIT:37"), "{out}");
+                assert!(
+                    out.contains("DIRECT_CLIENT") && out.contains("FALLBACK:19"),
+                    "{out}"
+                );
+                assert!(err.contains("codex helper unavailable"), "{err}");
+            }
+        }
+    }
+}
+
 const BASH: &str = include_str!("../../../resources/agent-integrations/codex/shell/bash");
 const ZSH: &str = include_str!("../../../resources/agent-integrations/codex/shell/zsh");
 const FISH: &str = include_str!("../../../resources/agent-integrations/codex/shell/fish");
@@ -145,15 +497,18 @@ impl Drop for TestShell {
 }
 
 pub(crate) fn helper_path() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()?
-        .parent()
-        .map(|p| p.join("ivy-codex"))
+    std::env::current_exe().ok()?.parent().map(|p| {
+        p.join(if cfg!(windows) {
+            "ivy-codex.exe"
+        } else {
+            "ivy-codex"
+        })
+    })
 }
 
 pub(crate) struct Prepared {
-    dir: PathBuf,
-    file: PathBuf,
+    dir: Option<PathBuf>,
+    file: Option<PathBuf>,
     args: Vec<String>,
     env: Vec<(&'static str, Option<OsString>)>,
 }
@@ -168,10 +523,15 @@ impl Prepared {
         helper: Option<&Path>,
         original_zdotdir: Option<OsString>,
     ) -> io::Result<Option<Self>> {
-        let shell = Path::new(program)
-            .file_name()
-            .and_then(OsStr::to_str)
-            .unwrap_or("");
+        let stem = program
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let shell = stem.strip_suffix(".exe").unwrap_or(&stem);
+        if matches!(shell, "pwsh" | "powershell") {
+            return Ok(Some(powershell::prepare(helper)));
+        }
         let (name, script) = match shell {
             "bash" => ("bashrc", BASH),
             "zsh" => (".zshenv", ZSH),
@@ -222,8 +582,8 @@ impl Prepared {
             _ => unreachable!(),
         };
         Ok(Some(Self {
-            dir,
-            file,
+            dir: Some(dir),
+            file: Some(file),
             args,
             env,
         }))
@@ -240,8 +600,12 @@ impl Prepared {
 }
 impl Drop for Prepared {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.file);
-        let _ = std::fs::remove_dir(&self.dir);
+        if let Some(file) = &self.file {
+            let _ = std::fs::remove_file(file);
+        }
+        if let Some(dir) = &self.dir {
+            let _ = std::fs::remove_dir(dir);
+        }
     }
 }
 
@@ -376,6 +740,56 @@ mod tests {
     }
 
     #[test]
+    fn git_bash_routes_the_native_launcher_instead_of_the_extensionless_npm_shim() {
+        let mut random = [0; 8];
+        getrandom::fill(&mut random).unwrap();
+        let home = std::env::temp_dir().join(format!("ivy-msys-{:x}", u64::from_ne_bytes(random)));
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(
+            home.join(".bashrc"),
+            "export PATH=\"$PREPEND_BIN:$PATH\"\nOSTYPE=msys\n",
+        )
+        .unwrap();
+        let helper = home.join("helper");
+        executable(&helper, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
+        executable(&bin.join("codex"), "#!/bin/sh\necho WRONG_SHIM\n");
+        for extension in ["cmd", "exe"] {
+            executable(
+                &bin.join(format!("codex.{extension}")),
+                "#!/bin/sh\nexit 0\n",
+            );
+            let prepared = Prepared::prepare("bash.exe", Some(&helper))
+                .unwrap()
+                .unwrap();
+            let mut command = Command::new("/bin/bash");
+            command
+                .args(prepared.args())
+                .args(["-i", "-c", "codex resume 'session one'"])
+                .env("HOME", &home)
+                .env("PREPEND_BIN", &bin)
+                .env("TERM", "dumb");
+            for (key, value) in prepared.env() {
+                command.env(key, value.unwrap());
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                format!(
+                    "{}\nresume\nsession one\n",
+                    bin.join(format!("codex.{extension}")).display()
+                )
+            );
+        }
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn relative_tmpdir_uses_absolute_shared_base_and_warns_once() {
         const CHILD: &str = "IVY_TEST_RELATIVE_TMPDIR_CHILD";
         if std::env::var_os(CHILD).is_some() {
@@ -386,9 +800,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert!(
-                prepared.dir.starts_with("/tmp"),
+                prepared.dir.as_ref().unwrap().starts_with("/tmp"),
                 "{}",
-                prepared.dir.display()
+                prepared.dir.as_ref().unwrap().display()
             );
             return;
         }
@@ -504,7 +918,7 @@ mod tests {
                 "{shell}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let dir = prepared.dir.clone();
+            let dir = prepared.dir.clone().unwrap();
             drop(prepared);
             assert!(!dir.exists());
             std::fs::remove_dir_all(home).unwrap();
@@ -600,7 +1014,7 @@ mod tests {
         let prepared = Prepared::prepare_with_zdotdir("bash", Some(Path::new("/bin/sh")), None)
             .unwrap()
             .unwrap();
-        let dir = prepared.dir.clone();
+        let dir = prepared.dir.clone().unwrap();
         std::fs::write(dir.join("foreign"), "kept").unwrap();
         drop(prepared);
         assert_eq!(
@@ -946,6 +1360,10 @@ mod tests {
 
 #[cfg(all(test, windows))]
 mod tests {
+    crate::windows_unix_omission!(
+        git_bash_routes_the_native_launcher_instead_of_the_extensionless_npm_shim,
+        "unix-only: exercises the MSYS lookup branch using executable POSIX shell fixtures"
+    );
     crate::windows_unix_omission!(
         relative_tmpdir_uses_absolute_shared_base_and_warns_once,
         "unix-only: requires executable POSIX shell integration with bash and /bin/sh"
