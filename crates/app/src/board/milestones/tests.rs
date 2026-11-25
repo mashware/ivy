@@ -1199,3 +1199,125 @@ fn changed_or_vanished_separator_cancels_drag_before_it_can_resize_another_group
     reader.resize(egui::pos2(104.0, 20.0));
     assert_eq!(reader.project("p").sections.widths, [None; 4]);
 }
+
+#[test]
+fn divider_raw_input_never_pans_overflowing_scroll_areas_after_touch_detection() {
+    use super::sections::Group;
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let plan = panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"Active","items":[{"text":"a","mark":"current"}]},{"id":"B","title":"Ready","items":[{"text":"b"}]}],"outside":["outside"]}"#).unwrap().0;
+    let section = section(Vec::new(), plan.clone());
+    let project = project_key(&section);
+    let roles = Roles::of(&crate::theme::Theme::default());
+    let mut reader = Reader::default();
+    reader.project(&project).sections.widths = [Some(400.0), Some(300.0), Some(400.0), None];
+    let frame = |reader: &mut Reader, events: Vec<egui::Event>| {
+        for event in &events {
+            match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                } => {
+                    reader.begin_resize(*pos);
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => {
+                    reader.resize(*pos);
+                    reader.cancel_resize();
+                }
+                egui::Event::PointerMoved(pos) if reader.resizing() => reader.resize(*pos),
+                _ => {}
+            }
+        }
+        reader.hits.clear();
+        reader.targets.clear();
+        let mut offsets = egui::Vec2::ZERO;
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 400.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let outer = egui::ScrollArea::vertical()
+                    .id_salt("outer")
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        paint_plan_with(
+                            ui,
+                            &section,
+                            &plan,
+                            &roles,
+                            reader,
+                            &Default::default(),
+                            &column,
+                            &mut |_, _, _, _, _| {},
+                        );
+                        offsets.x = reader
+                            .targets
+                            .iter()
+                            .find_map(|(target, rect)| {
+                                matches!(target, Target::Header(_)).then_some(rect.left())
+                            })
+                            .unwrap();
+                        ui.add_space(700.0);
+                    });
+                offsets.y = outer.state.offset.y;
+            },
+        );
+        out.drop_without_applying_deltas();
+        offsets
+    };
+    frame(&mut reader, vec![]);
+    let baseline = frame(&mut reader, vec![]);
+    let at = reader.dividers[0].rect.center();
+    for phase in [egui::TouchPhase::Start, egui::TouchPhase::End] {
+        frame(
+            &mut reader,
+            vec![egui::Event::Touch {
+                device_id: egui::TouchDeviceId(1),
+                id: egui::TouchId(1),
+                phase,
+                pos: at,
+                force: None,
+            }],
+        );
+    }
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    assert_eq!(
+        frame(
+            &mut reader,
+            vec![egui::Event::PointerMoved(at), button(at, true)]
+        ),
+        baseline
+    );
+    for delta in [vec2(50.0, 20.0), vec2(100.0, 40.0)] {
+        assert_eq!(
+            frame(&mut reader, vec![egui::Event::PointerMoved(at - delta)]),
+            baseline
+        );
+    }
+    assert_eq!(
+        frame(&mut reader, vec![button(at - vec2(100.0, 40.0), false)]),
+        baseline
+    );
+    assert_eq!(
+        frame(&mut reader, vec![]),
+        baseline,
+        "release inertia panned the Board"
+    );
+    let widths = reader.project(&project).sections.widths;
+    assert_eq!(widths[Group::Active as usize], Some(300.0));
+    assert_eq!(widths[Group::Ready as usize], Some(400.0));
+}

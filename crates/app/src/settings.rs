@@ -2482,7 +2482,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 65] = [
+        const SOURCES: [(&str, &str); 66] = [
             (
                 "diagnostics_log/graphics.rs",
                 include_str!("diagnostics_log/graphics.rs"),
@@ -2506,6 +2506,10 @@ mod tests {
             (
                 "board/milestones/projection.rs",
                 include_str!("board/milestones/projection.rs"),
+            ),
+            (
+                "board/milestones/sections.rs",
+                include_str!("board/milestones/sections.rs"),
             ),
             (
                 "board/milestones/state.rs",

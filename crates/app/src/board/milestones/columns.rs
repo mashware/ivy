@@ -323,6 +323,12 @@ pub(in crate::board) fn paint(
                     ),
                 );
                 if !maximized && !show_all {
+                    // ScrollArea must see the same drag owner as Board, including on touch devices.
+                    ui.interact(
+                        line,
+                        ui.id().with(("section-divider", &project, left, right)),
+                        egui::Sense::drag(),
+                    );
                     if hovered || reader.resizing() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     }
