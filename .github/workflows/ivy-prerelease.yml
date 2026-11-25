@@ -300,8 +300,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($name in 'windows_powershell_preparation_recognises_executables_and_keeps_profiles_enabled',
                             'windows_powershell_reports_encoded_directories_without_a_helper_and_clears_other_providers',
-                            'windows_powershell_preserves_prompt_error_status_and_user_codex_commands',
-                            'windows_powershell_codex_chooses_application_over_ps1_and_passes_arguments') {
+                            'windows_powershell_preserves_prompt_error_status_and_user_codex_commands') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
+          cargo test --locked -p panel-control --test ivy_codex_launch -- native_shell_entry 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'native_shell_entry_preserves_native_powershell_status_and_arguments',
+                            'native_shell_entry_resolves_current_path_and_keeps_explicit_mode') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
           $built = cargo test --locked -p app --lib --no-run --message-format=json |
