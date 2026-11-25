@@ -10323,6 +10323,31 @@ process scans or per-frame inspection (unbounded or frame-blocking work without 
 
 ## D92 — Codex mobile and panel tools share one conversation owner
 
+**Amended 25 November 2026 — #173.** Private Codex route storage is supported on Windows
+independently of the shared-conversation relay. Route directories and each opened/created file
+use a current-user-owned protected user/SYSTEM DACL, checked through the handle used for data;
+capability files and the directory reject reparse points. Persistent lock files are separate
+from synced, atomically replaced records and thread mappings. Existing storage with an unsafe
+ACL is refused rather than silently repaired. Runtime capability files deliberately do not
+support cloud/filter-backed reparse storage; this does not change the document viewer's policy.
+The pathname namespace and other processes of this user retain the existing per-user trust boundary.
+
+Windows shared-panel routing remains unsupported, with that reason printed at ordinary interactive
+launch. Official Codex documents a Windows AF_UNIX daemon endpoint and a proxy that accepts it;
+upstream transport support alone does not identify the intended Ivy pane. A route does not carry
+the expected app PID required by Windows producer authentication, and the shared daemon cannot
+supply it from its inherited environment. Native relay console lifetime and daemon/proxy attachment
+also remain unverified. The launcher preserves the original command and status, never adding
+`--no-daemon`. This delivery keeps route v1 unchanged and does not port session recovery.
+
+**Discarded:** enabling the relay after storage alone (omits per-route authenticated app identity
+and native lifetime proof); declaring the upstream Windows transport unsupported (the official
+client documents AF_UNIX); inheritance-only file privacy (does not validate an existing file);
+truncating snapshots in place or deleting before replacement (exposes incomplete state to readers);
+copying a second ACL implementation (would diverge from private pane-directory policy);
+automatically fixing existing ACLs (changes ownership/access without the caller choosing it).
+
+
 **Amended 25 November 2026 — #251.** The official-server connection accepts an
 individual WebSocket frame up to the existing 64 MiB message ceiling. The official
 Codex 0.172.0 proxy emitted the plugin catalog as one 48,300,053-byte frame; the
@@ -10381,7 +10406,7 @@ The unchanged relay reproduced the cutoff at 10.045 seconds with 100-byte writes
 
 **Amended 19 November 2026 — #140.** Ordinary supported Codex starts on macOS now select the same authenticated shared relay as Linux. A fresh-window report showed the second console reading the first console's panel even with shell integration present: excluding macOS from the relay while executing Codex unchanged allowed the shared daemon's inherited identity to select the panel. Missing capabilities, failed shared setup and unverified route proofs retain the existing refusal path; Ivy never automatically adds `--no-daemon`. Explicit bypass invocations and ordinary direct panel producers retain their meaning. Shared-launch and refusal fixtures now run on macOS as well as Linux, with native arm64 and Intel panel-control tests required by the PR workflow. Native two-console and phone history/input interoperability remain separate acceptance checks; Linux fixtures and a native package build do not establish them.
 
-**Discarded for the macOS amendment:** retaining unverified ordinary-launch passthrough (reproduces cross-console publication); automatically selecting independent mode (loses live mobile input); treating all detached producers as unauthorized (changes D91's deliberate diagnostic-only boundary). Windows remains outside this relay's supported platforms because atomic route replacement is not implemented there.
+**Discarded for the macOS amendment:** retaining unverified ordinary-launch passthrough (reproduces cross-console publication); automatically selecting independent mode (loses live mobile input); treating all detached producers as unauthorized (changes D91's deliberate diagnostic-only boundary). Windows remains outside this relay's supported platforms; the #173 amendment separates private storage from the unverified relay identity and lifecycle.
 
 **Amended 18 November 2026 — #130.** Updating the official CLI to 0.170.0 exposed the exact-version guard as a product regression: the installed launcher silently selected independent mode and mobile could only read saved messages. Shared eligibility now uses bounded CLI capability checks and the actual daemon/proxy protocol, retaining the immutable MCP proof before route binding. Neither CLI nor managed-server version numbers control eligibility. Ivy never adds `--no-daemon` automatically; an explicit user argument retains its meaning. Missing capabilities or failed shared setup stop the launch with a diagnostic. Other platforms and unsupported invocation shapes preserve the original command and diagnose unverified local panel routing. This removes version-based rejection, not the possibility that a future incompatible protocol fails. Native and phone interoperability observations remain version-specific evidence below.
 
@@ -10397,7 +10422,7 @@ The unchanged relay reproduced the cutoff at 10.045 seconds with 100-byte writes
 
 The relay discovers MCP configuration for each requested project, using the explicit launch directory or the saved thread's directory. It merges only its environment leaf; normalized config readback is never reinserted as input. Before binding, a normal read-only MCP call returns an immutable public proof nonce from the actual running bridge. The relay compares it with the pending capability's proof, so a loaded-thread race cannot turn an ignored config override into a false successful binding. The nonce is independent of the bearer path and grants no panel authority. Missing or mismatched proof refuses the attachment without choosing another pane.
 
-Route data is atomically replaced while a separate persistent lock inode serializes complete calls and cutover. Each attachment scans validated atomic route snapshots under the registry lock and releases every prior active route for that exact pane, including an orphan left before its thread mapping committed. Only matching routes are locked; unreadable unrelated records cannot poison another pane. This costs one scan per attachment, outside frame and MCP-call work. The MCP process also releases an obsolete Producer while otherwise idle. Missing or corrupt unrelated records cannot prevent another pane from binding. The original delivery retained an independent safeguard on macOS and Windows pending native verification; the amendments above supersede that launcher policy. Windows atomic route replacement is not claimed.
+Route data is atomically replaced while a separate persistent lock inode serializes complete calls and cutover. Each attachment scans validated atomic route snapshots under the registry lock and releases every prior active route for that exact pane, including an orphan left before its thread mapping committed. Only matching routes are locked; unreadable unrelated records cannot poison another pane. This costs one scan per attachment, outside frame and MCP-call work. The MCP process also releases an obsolete Producer while otherwise idle. Missing or corrupt unrelated records cannot prevent another pane from binding. The original delivery retained an independent safeguard on macOS and Windows pending native verification; the amendments above supersede that launcher policy. Windows private atomic route storage is covered by the #173 amendment; Windows relay support is not claimed.
 
 On launcher exit, an immutable private cancellation marker closes its exact attachment epoch before any route lock or relay join is attempted. A tool operation already in flight can finish, but subsequent operations see that epoch as inactive even if a slow operation delayed ordinary record cleanup. Cancellation takes no route or registry lock, so it remains effective under contention and cannot revoke a newer epoch. The stable public proof remains readable while inactive, permitting a later verified resume. Process reapers are detached and explicitly declared; relay and reader joins have a grace deadline. Cleanup failure is diagnosed rather than presented as successful revocation.
 

@@ -12,8 +12,13 @@ mod native_shell_entry {
                 .join(format!("ivy-native-entry-{:x}", u64::from_ne_bytes(random)));
             std::fs::create_dir(&root).unwrap();
             let code = r#"fn main() {
+                use std::io::Write;
                 let args: Vec<_> = std::env::args().skip(1).collect();
                 std::fs::write(std::env::var_os("IVY_NATIVE_RECORD").unwrap(), format!("{args:?}")).unwrap();
+                if let Some(path) = std::env::var_os("IVY_NATIVE_CALLS") {
+                    let mut calls = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+                    writeln!(calls, "{args:?}").unwrap();
+                }
                 if let Some(path) = std::env::var_os("IVY_NATIVE_IDENTITY") {
                     std::fs::write(path, std::env::current_exe().unwrap().to_str().unwrap()).unwrap();
                 }
@@ -42,6 +47,7 @@ mod native_shell_entry {
             let mut command = Command::new(program);
             command
                 .env("IVY_NATIVE_RECORD", self.0.join("record"))
+                .env("IVY_NATIVE_CALLS", self.0.join("calls"))
                 .env("IVY_NATIVE_STATUS", "37")
                 .env("PATH", &self.0)
                 .env("IVY_CODEX_HELPER", self.0.join("ivy-codex.exe"))
@@ -300,6 +306,63 @@ exit 0
                     format!("{:?}", ["-V", &format!("image {name}")])
                 );
             }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unsupported_windows_relay_explains_why_and_preserves_the_client_invocation() {
+        let fixture = Fixture::new();
+        let args = ["prompt with \"quotes\"", "--", "", "trailing\\", "a&b"];
+        let result = fixture
+            .command(fixture.0.join("ivy-codex.exe"))
+            .arg(fixture.0.join("codex.exe"))
+            .args(args)
+            .env("CODEX_HOME", &fixture.0)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(37));
+        assert_eq!(
+            std::fs::read_to_string(fixture.0.join("record")).unwrap(),
+            format!("{args:?}")
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.0.join("calls")).unwrap(),
+            format!("{args:?}\n"),
+            "the unsupported path must invoke only the original client, without capability or daemon probes"
+        );
+        assert_eq!(
+            String::from_utf8(result.stderr)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "ivy-codex: shared panel routing is not supported on Windows: Ivy cannot yet verify the owning console for a shared conversation; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
+            ]
+        );
+        assert!(!fixture.0.join("ivy-panel-routes").exists());
+
+        for args in [
+            vec!["--no-daemon", "hello"],
+            vec!["--help"],
+            vec!["app-server", "daemon", "status"],
+        ] {
+            std::fs::remove_file(fixture.0.join("calls")).unwrap();
+            let result = fixture
+                .command(fixture.0.join("ivy-codex.exe"))
+                .arg(fixture.0.join("codex.exe"))
+                .args(&args)
+                .output()
+                .unwrap();
+            assert_eq!(result.status.code(), Some(37));
+            assert!(
+                result.stderr.is_empty(),
+                "bypass invocation gained a routing warning"
+            );
+            assert_eq!(
+                std::fs::read_to_string(fixture.0.join("calls")).unwrap(),
+                format!("{args:?}\n")
+            );
         }
     }
 
