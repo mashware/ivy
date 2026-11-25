@@ -666,6 +666,17 @@ mod tests {
             assert!(Instant::now() < deadline, "native directory unavailable");
             thread::sleep(Duration::from_millis(10));
         }
+        // The Windows directory is pre-seeded; wait for the child's post-Prepare file before
+        // starting the blocked-reader scenario, without spending its input-delivery budget.
+        let ready = Instant::now() + Duration::from_secs(10);
+        while !matches!(fs::read(&marker).as_deref(), Ok(b"")) {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+            assert!(
+                Instant::now() < ready,
+                "input fixture did not open its witness"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         let (started_tx, started_rx) = mpsc::sync_channel(1);
         let (release_tx, release_rx) = mpsc::sync_channel(1);
         let gate = Mutex::new(Some(release_rx));
