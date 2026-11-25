@@ -39,6 +39,10 @@ mod patch;
 pub mod plan;
 #[cfg(windows)]
 pub mod windows_directory;
+#[cfg(windows)]
+pub mod windows_private_file;
+#[cfg(windows)]
+mod windows_security;
 
 pub use dropped::Dropped;
 pub use panel::{

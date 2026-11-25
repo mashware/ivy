@@ -261,7 +261,10 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
 fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     let mut nonce = [0; 8];
     getrandom::fill(&mut nonce).unwrap();
-    let path = std::env::temp_dir().join(format!("viewer-path-{:x}", u64::from_ne_bytes(nonce)));
+    let path = std::env::temp_dir().join(format!(
+        "viewer-path-{:x}-long-enough-to-wrap-across-terminal-columns",
+        u64::from_ne_bytes(nonce)
+    ));
     fs::create_dir(&path).unwrap();
     let _directory = Directory(path.clone());
     fs::write(
@@ -286,6 +289,10 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
         pane.pty = pty.into();
         pane.pty_output = crate::pty_output::PtyOutput::new(output, || {});
     }
+    // The path below is synthetic: keep native startup and resize redraws out of its fixture.
+    let (_output_guard, output) = std::sync::mpsc::channel();
+    window.active_mut().panes_mut()[0].pty_output =
+        crate::pty_output::PtyOutput::new(output, || {});
     let ctx = egui::Context::default();
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, vec![]);
@@ -308,9 +315,17 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
     let painted = window.active().panes()[0].painted_console.as_ref().unwrap();
-    let pos = painted.area.min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
     assert!(
-        painted.local_at(pos, &metrics, painted.frame).is_some(),
+        path.join("viewer-click.md").to_string_lossy().len()
+            > usize::from(painted.view.size().cols),
+        "the path fixture must exercise wrapped text"
+    );
+    let pos = painted.area.min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
+    assert_eq!(
+        painted
+            .local_at(pos, &metrics, painted.frame)
+            .map(|target| target.path),
+        Some(path.join("viewer-click.md")),
         "painted target missing: {:?} row: {:?} size: {:?}",
         painted.view.local_path_at(0, 5),
         painted

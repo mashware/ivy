@@ -205,6 +205,11 @@ fn main() {
     }
     match classify(&original) {
         Kind::Interactive { already: false } => {
+            #[cfg(windows)]
+            eprintln!(
+                "ivy-codex: shared panel routing is not supported on Windows: Ivy cannot yet verify the owning console for a shared conversation; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
+            );
+            #[cfg(not(windows))]
             eprintln!(
                 "ivy-codex: this platform or invocation cannot use Ivy's shared-panel bridge; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
             );

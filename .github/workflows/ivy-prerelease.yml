@@ -142,6 +142,11 @@ jobs:
         run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove Windows Codex route owner refusal before the workspace
+        shell: pwsh
+        run: |
+          python scripts/windows-codex-route-mutations.py --owner-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the Windows workspace against its known failures
         shell: pwsh
         run: |
@@ -168,6 +173,18 @@ jobs:
         run: |
           python scripts/windows-test-report.py --platform windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove Windows Codex route privacy and launcher regressions
+        shell: pwsh
+        run: |
+          python scripts/windows-codex-route-mutations.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Keep Windows Codex route mutation evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-codex-route-evidence
+          path: target/windows-codex-route-mutations/*.log
+          if-no-files-found: warn
       - name: Check native console and diagnostic regressions
         shell: pwsh
         run: |

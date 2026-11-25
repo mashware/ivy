@@ -260,6 +260,40 @@ fn wait_for_text(
     }
 }
 
+fn files_text_visible(
+    window: &crate::Window,
+    painted: &[(String, egui::Pos2)],
+    name: &str,
+) -> bool {
+    painted.iter().any(|(text, pos)| {
+        text == name
+            && window
+                .sidebar
+                .last_files
+                .is_some_and(|body| body.contains(*pos))
+    })
+}
+
+fn wait_for_file_text(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    name: &str,
+) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let painted = frame(window, ctx, area, vec![]);
+        if files_text_visible(window, &painted, name) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing Files row {name:?}: {painted:?}"
+        );
+        std::thread::yield_now();
+    }
+}
+
 /// Waits until the search's own matches hold `name`. Seeing the name on screen is not enough: the
 /// tree can show it while the search worker has not answered, and a key pressed then picks nothing.
 fn wait_for_match(
@@ -561,7 +595,31 @@ fn markdown_single_click_opens_the_file_from_the_active_console() {
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
         frame(&mut window, &ctx, area, vec![]);
         click_refresh(&mut window, &ctx, area);
-        wait_for_text(&mut window, &ctx, area, "handoff.md");
+        if tab == 1 {
+            // The old viewer's filename is not evidence that the new Files listing arrived.
+            window.explorer.loader = Loader::default();
+            let request = window.explorer.request(ids[2], second.0.clone());
+            window.explorer.cache.remove(&request);
+            window.explorer.loading = Some(request);
+            let painted = frame(&mut window, &ctx, area, vec![]);
+            assert!(painted.iter().any(|(text, pos)| {
+                text == "handoff.md"
+                    && window
+                        .sidebar
+                        .last_dock
+                        .is_some_and(|body| body.contains(*pos))
+            }));
+            assert!(painted.iter().any(|(text, pos)| {
+                text == "Loading…"
+                    && window
+                        .sidebar
+                        .last_files
+                        .is_some_and(|body| body.contains(*pos))
+            }));
+            assert!(!files_text_visible(&window, &painted, "handoff.md"));
+            window.explorer.loading = None;
+        }
+        wait_for_file_text(&mut window, &ctx, area, "handoff.md");
         click_text(&mut window, &ctx, area, "handoff.md");
         assert!(
             crate::viewer::is_open(&window),
@@ -575,6 +633,8 @@ fn markdown_single_click_opens_the_file_from_the_active_console() {
         wait_for_text(&mut window, &ctx, area, expected);
     }
     // Keyboard activation remains available without first clicking the file.
+    crate::viewer::apply_strip_action(&mut window, crate::viewer::StripAction::CloseDocument, &ctx);
+    assert!(!crate::viewer::is_open(&window));
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     let pane = ids[2];
