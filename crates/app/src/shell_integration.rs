@@ -345,6 +345,7 @@ mod powershell {
                 let root = Temp::new();
                 let directory = root.0.join("changed folder");
                 std::fs::create_dir(&directory).unwrap();
+                let expected_directory = std::fs::canonicalize(&directory).unwrap();
                 let prepared = Prepared::prepare(program.to_str().unwrap(), None)
                     .unwrap()
                     .unwrap();
@@ -368,7 +369,12 @@ mod powershell {
                 let deadline = Instant::now() + Duration::from_secs(30);
                 let mut seen = String::new();
                 let mut answered = 0;
-                while screen.working_directory() != Some(directory.as_path()) {
+                while screen
+                    .working_directory()
+                    .map(|path| std::fs::canonicalize(path).unwrap())
+                    .as_deref()
+                    != Some(expected_directory.as_path())
+                {
                     let left = deadline.saturating_duration_since(Instant::now());
                     assert!(
                         !left.is_zero(),
@@ -469,7 +475,8 @@ mod powershell {
         ) -> (String, String) {
             use std::process::{Command, Stdio};
             use std::time::{Duration, Instant};
-            let script = format!("{prelude}\n{SCRIPT}\n{body}");
+            let script =
+                format!("$ProgressPreference = 'SilentlyContinue'\n{prelude}\n{SCRIPT}\n{body}");
             let encoded = STANDARD.encode(
                 script
                     .encode_utf16()
@@ -540,7 +547,13 @@ prompt
                 let mut screen = term_core::Screen::new(term_core::Size::default());
                 let first_end = out.find("CUSTOM_PROMPT").unwrap();
                 screen.advance(&out.as_bytes()[..first_end]);
-                assert_eq!(screen.working_directory(), Some(dir.as_path()), "{out}");
+                assert_eq!(
+                    screen
+                        .working_directory()
+                        .map(|path| std::fs::canonicalize(path).unwrap()),
+                    Some(std::fs::canonicalize(&dir).unwrap()),
+                    "{out}"
+                );
                 screen.advance(&out.as_bytes()[first_end..]);
                 assert_eq!(screen.working_directory(), None, "{out}");
                 assert!(out.contains("WRAPPED:False"), "{out}");
