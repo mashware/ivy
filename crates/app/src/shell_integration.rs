@@ -3,6 +3,260 @@ use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 
+const BASH: &str = include_str!("../../../resources/agent-integrations/codex/shell/bash");
+const ZSH: &str = include_str!("../../../resources/agent-integrations/codex/shell/zsh");
+const FISH: &str = include_str!("../../../resources/agent-integrations/codex/shell/fish");
+
+/// The program that opens a console: the shell of whoever launched the application.
+///
+/// **It is what a terminal does**: without this a shell opens with no prompt and no history, and
+/// this project exists to look at what comes out on screen. It is still not outside input —it is
+/// the user's own session—, but the day the program comes from **configuration** or from a file
+/// from outside, this line becomes sensitive surface and has to be reviewed as such. That is why
+/// saved labels and directories **never supply a program**: there is nothing
+/// to connect here.
+///
+/// **It has been in a function of its own since restoring exists**, and not for pleasure: restoring
+/// opens N consoles at once, and reading the environment inside each one would read it a hundred
+/// and twenty-eight times in the worst case.
+pub(crate) fn the_users_shell() -> String {
+    #[cfg(test)]
+    if let Some(shell) = TEST_SHELL.with(|shell| shell.borrow().clone()) {
+        return shell;
+    }
+    // Resolved once per process: on Windows it searches the disk, and a console opens on the
+    // interface thread.
+    static SHELL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SHELL
+        .get_or_init(|| {
+            #[cfg(windows)]
+            return windows_shell(&WindowsSession::read(), Path::is_file);
+            #[cfg(not(windows))]
+            std::env::var("SHELL").unwrap_or_else(|_| fallback_shell().to_owned())
+        })
+        .clone()
+}
+
+/// The program that is launched when the first one cannot start: one every machine of the platform
+/// has. Where it is also what was tried first, the launch does not retry it.
+pub(crate) fn fallback_shell() -> &'static str {
+    #[cfg(windows)]
+    {
+        static CMD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        CMD.get_or_init(|| windows_cmd(&WindowsSession::read()))
+    }
+    #[cfg(not(windows))]
+    "/bin/sh"
+}
+
+/// What a Windows session says about its shells, read from its environment.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Default)]
+struct WindowsSession {
+    shell: Option<OsString>,
+    path: Option<OsString>,
+    comspec: Option<OsString>,
+    system_root: Option<OsString>,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl WindowsSession {
+    fn read() -> Self {
+        Self {
+            shell: std::env::var_os("SHELL"),
+            path: std::env::var_os("PATH"),
+            comspec: std::env::var_os("ComSpec"),
+            system_root: std::env::var_os("SystemRoot"),
+        }
+    }
+}
+
+/// Windows has no `/bin/sh`, and the shell variable a Git Bash or MSYS session exports is a path in
+/// that environment's own namespace (`/usr/bin/bash`) that Windows cannot launch, so it counts only
+/// as an absolute Windows path to a file. Otherwise the newer PowerShell when it is installed, else
+/// the one every Windows ships, else `cmd.exe`, as Windows Terminal picks. Looked up on the
+/// session's own search path, never in configuration, and only in absolute directories so the
+/// folder a console starts in cannot plant one.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_shell(session: &WindowsSession, is_file: impl Fn(&Path) -> bool) -> String {
+    let chosen = session
+        .shell
+        .as_deref()
+        .map(Path::new)
+        .filter(|shell| shell.is_absolute() && is_file(shell))
+        .map(Path::to_path_buf);
+    chosen
+        .or_else(|| {
+            ["pwsh.exe", "powershell.exe"].into_iter().find_map(|name| {
+                session
+                    .path
+                    .iter()
+                    .flat_map(std::env::split_paths)
+                    .filter(|directory| directory.is_absolute())
+                    .map(|directory| directory.join(name))
+                    .find(|candidate| is_file(candidate))
+            })
+        })
+        .map_or_else(
+            || windows_cmd(session),
+            |found| found.to_string_lossy().into_owned(),
+        )
+}
+
+/// `cmd.exe` by an absolute path: a bare name would be searched for again by the launcher, current
+/// directory and relative entries included.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_cmd(session: &WindowsSession) -> String {
+    let absolute = |value: &Option<OsString>| {
+        value
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    absolute(&session.comspec)
+        .or_else(|| {
+            absolute(&session.system_root).map(|root| root.join("System32").join("cmd.exe"))
+        })
+        .map_or_else(
+            || r"C:\Windows\System32\cmd.exe".to_owned(),
+            |path| path.to_string_lossy().into_owned(),
+        )
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_SHELL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps input-routing fixtures independent of user startup files without changing process env.
+#[cfg(test)]
+pub(crate) struct TestShell(Option<String>);
+#[cfg(test)]
+impl TestShell {
+    pub(crate) fn use_program(program: &str) -> Self {
+        Self(TEST_SHELL.with(|shell| shell.replace(Some(program.to_owned()))))
+    }
+}
+#[cfg(test)]
+impl Drop for TestShell {
+    fn drop(&mut self) {
+        TEST_SHELL.with(|shell| *shell.borrow_mut() = self.0.take());
+    }
+}
+
+pub(crate) fn helper_path() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(|p| {
+        p.join(if cfg!(windows) {
+            "ivy-codex.exe"
+        } else {
+            "ivy-codex"
+        })
+    })
+}
+
+pub(crate) struct Prepared {
+    dir: Option<PathBuf>,
+    file: Option<PathBuf>,
+    args: Vec<String>,
+    env: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl Prepared {
+    pub(crate) fn prepare(program: &str, helper: Option<&Path>) -> io::Result<Option<Self>> {
+        Self::prepare_with_zdotdir(program, helper, std::env::var_os("ZDOTDIR"))
+    }
+
+    fn prepare_with_zdotdir(
+        program: &str,
+        helper: Option<&Path>,
+        original_zdotdir: Option<OsString>,
+    ) -> io::Result<Option<Self>> {
+        let stem = program
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let shell = stem.strip_suffix(".exe").unwrap_or(&stem);
+        if matches!(shell, "pwsh" | "powershell") {
+            return Ok(Some(powershell::prepare(helper)));
+        }
+        let (name, script) = match shell {
+            "bash" => ("bashrc", BASH),
+            "zsh" => (".zshenv", ZSH),
+            "fish" => ("fish-init", FISH),
+            _ => {
+                eprintln!("Ivy: unsupported shell; automatic Codex panel routing is inactive.");
+                return Ok(None);
+            }
+        };
+        let Some(helper) = helper.filter(|p| p.is_absolute() && p.is_file()) else {
+            eprintln!("Ivy: codex helper unavailable; automatic panel routing is inactive.");
+            return Ok(None);
+        };
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
+        let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let dir = panel_contract::base_dir().join(format!("ivy-shell-{suffix}"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        }
+        #[cfg(not(unix))]
+        std::fs::create_dir(&dir)?;
+        let file = dir.join(name);
+        if let Err(error) = std::fs::write(&file, script) {
+            let _ = std::fs::remove_file(&file);
+            let _ = std::fs::remove_dir(&dir);
+            return Err(error);
+        }
+        let mut env = vec![("IVY_CODEX_HELPER", Some(helper.as_os_str().to_owned()))];
+        let args = match shell {
+            "bash" => vec!["--rcfile".into(), file.to_string_lossy().into_owned()],
+            "zsh" => {
+                let original = original_zdotdir;
+                env.push((
+                    "IVY_ZDOTDIR_WAS_SET",
+                    Some(if original.is_some() { "1" } else { "0" }.into()),
+                ));
+                env.push(("IVY_ORIGINAL_ZDOTDIR", original));
+                env.push(("ZDOTDIR", Some(dir.as_os_str().to_owned())));
+                vec![]
+            }
+            "fish" => {
+                env.push(("IVY_FISH_INIT", Some(file.as_os_str().to_owned())));
+                vec!["--init-command".into(), "source \"$IVY_FISH_INIT\"".into()]
+            }
+            _ => unreachable!(),
+        };
+        Ok(Some(Self {
+            dir: Some(dir),
+            file: Some(file),
+            args,
+            env,
+        }))
+    }
+    pub(crate) fn args(&self) -> &[String] {
+        &self.args
+    }
+    pub(crate) fn env(&self) -> Vec<(&str, Option<&OsStr>)> {
+        self.env
+            .iter()
+            .map(|(name, value)| (*name, value.as_deref()))
+            .collect()
+    }
+}
+impl Drop for Prepared {
+    fn drop(&mut self) {
+        if let Some(file) = &self.file {
+            let _ = std::fs::remove_file(file);
+        }
+        if let Some(dir) = &self.dir {
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+}
+
 mod powershell {
     use super::Prepared;
     use base64::{Engine, engine::general_purpose::STANDARD};
@@ -396,260 +650,6 @@ prompt
                 assert_eq!(screen.working_directory(), None);
                 assert!(err.is_empty(), "{err}");
             }
-        }
-    }
-}
-
-const BASH: &str = include_str!("../../../resources/agent-integrations/codex/shell/bash");
-const ZSH: &str = include_str!("../../../resources/agent-integrations/codex/shell/zsh");
-const FISH: &str = include_str!("../../../resources/agent-integrations/codex/shell/fish");
-
-/// The program that opens a console: the shell of whoever launched the application.
-///
-/// **It is what a terminal does**: without this a shell opens with no prompt and no history, and
-/// this project exists to look at what comes out on screen. It is still not outside input —it is
-/// the user's own session—, but the day the program comes from **configuration** or from a file
-/// from outside, this line becomes sensitive surface and has to be reviewed as such. That is why
-/// saved labels and directories **never supply a program**: there is nothing
-/// to connect here.
-///
-/// **It has been in a function of its own since restoring exists**, and not for pleasure: restoring
-/// opens N consoles at once, and reading the environment inside each one would read it a hundred
-/// and twenty-eight times in the worst case.
-pub(crate) fn the_users_shell() -> String {
-    #[cfg(test)]
-    if let Some(shell) = TEST_SHELL.with(|shell| shell.borrow().clone()) {
-        return shell;
-    }
-    // Resolved once per process: on Windows it searches the disk, and a console opens on the
-    // interface thread.
-    static SHELL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    SHELL
-        .get_or_init(|| {
-            #[cfg(windows)]
-            return windows_shell(&WindowsSession::read(), Path::is_file);
-            #[cfg(not(windows))]
-            std::env::var("SHELL").unwrap_or_else(|_| fallback_shell().to_owned())
-        })
-        .clone()
-}
-
-/// The program that is launched when the first one cannot start: one every machine of the platform
-/// has. Where it is also what was tried first, the launch does not retry it.
-pub(crate) fn fallback_shell() -> &'static str {
-    #[cfg(windows)]
-    {
-        static CMD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-        CMD.get_or_init(|| windows_cmd(&WindowsSession::read()))
-    }
-    #[cfg(not(windows))]
-    "/bin/sh"
-}
-
-/// What a Windows session says about its shells, read from its environment.
-#[cfg_attr(not(windows), allow(dead_code))]
-#[derive(Default)]
-struct WindowsSession {
-    shell: Option<OsString>,
-    path: Option<OsString>,
-    comspec: Option<OsString>,
-    system_root: Option<OsString>,
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
-impl WindowsSession {
-    fn read() -> Self {
-        Self {
-            shell: std::env::var_os("SHELL"),
-            path: std::env::var_os("PATH"),
-            comspec: std::env::var_os("ComSpec"),
-            system_root: std::env::var_os("SystemRoot"),
-        }
-    }
-}
-
-/// Windows has no `/bin/sh`, and the shell variable a Git Bash or MSYS session exports is a path in
-/// that environment's own namespace (`/usr/bin/bash`) that Windows cannot launch, so it counts only
-/// as an absolute Windows path to a file. Otherwise the newer PowerShell when it is installed, else
-/// the one every Windows ships, else `cmd.exe`, as Windows Terminal picks. Looked up on the
-/// session's own search path, never in configuration, and only in absolute directories so the
-/// folder a console starts in cannot plant one.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn windows_shell(session: &WindowsSession, is_file: impl Fn(&Path) -> bool) -> String {
-    let chosen = session
-        .shell
-        .as_deref()
-        .map(Path::new)
-        .filter(|shell| shell.is_absolute() && is_file(shell))
-        .map(Path::to_path_buf);
-    chosen
-        .or_else(|| {
-            ["pwsh.exe", "powershell.exe"].into_iter().find_map(|name| {
-                session
-                    .path
-                    .iter()
-                    .flat_map(std::env::split_paths)
-                    .filter(|directory| directory.is_absolute())
-                    .map(|directory| directory.join(name))
-                    .find(|candidate| is_file(candidate))
-            })
-        })
-        .map_or_else(
-            || windows_cmd(session),
-            |found| found.to_string_lossy().into_owned(),
-        )
-}
-
-/// `cmd.exe` by an absolute path: a bare name would be searched for again by the launcher, current
-/// directory and relative entries included.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn windows_cmd(session: &WindowsSession) -> String {
-    let absolute = |value: &Option<OsString>| {
-        value
-            .as_deref()
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    absolute(&session.comspec)
-        .or_else(|| {
-            absolute(&session.system_root).map(|root| root.join("System32").join("cmd.exe"))
-        })
-        .map_or_else(
-            || r"C:\Windows\System32\cmd.exe".to_owned(),
-            |path| path.to_string_lossy().into_owned(),
-        )
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_SHELL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Keeps input-routing fixtures independent of user startup files without changing process env.
-#[cfg(test)]
-pub(crate) struct TestShell(Option<String>);
-#[cfg(test)]
-impl TestShell {
-    pub(crate) fn use_program(program: &str) -> Self {
-        Self(TEST_SHELL.with(|shell| shell.replace(Some(program.to_owned()))))
-    }
-}
-#[cfg(test)]
-impl Drop for TestShell {
-    fn drop(&mut self) {
-        TEST_SHELL.with(|shell| *shell.borrow_mut() = self.0.take());
-    }
-}
-
-pub(crate) fn helper_path() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.parent().map(|p| {
-        p.join(if cfg!(windows) {
-            "ivy-codex.exe"
-        } else {
-            "ivy-codex"
-        })
-    })
-}
-
-pub(crate) struct Prepared {
-    dir: Option<PathBuf>,
-    file: Option<PathBuf>,
-    args: Vec<String>,
-    env: Vec<(&'static str, Option<OsString>)>,
-}
-
-impl Prepared {
-    pub(crate) fn prepare(program: &str, helper: Option<&Path>) -> io::Result<Option<Self>> {
-        Self::prepare_with_zdotdir(program, helper, std::env::var_os("ZDOTDIR"))
-    }
-
-    fn prepare_with_zdotdir(
-        program: &str,
-        helper: Option<&Path>,
-        original_zdotdir: Option<OsString>,
-    ) -> io::Result<Option<Self>> {
-        let stem = program
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let shell = stem.strip_suffix(".exe").unwrap_or(&stem);
-        if matches!(shell, "pwsh" | "powershell") {
-            return Ok(Some(powershell::prepare(helper)));
-        }
-        let (name, script) = match shell {
-            "bash" => ("bashrc", BASH),
-            "zsh" => (".zshenv", ZSH),
-            "fish" => ("fish-init", FISH),
-            _ => {
-                eprintln!("Ivy: unsupported shell; automatic Codex panel routing is inactive.");
-                return Ok(None);
-            }
-        };
-        let Some(helper) = helper.filter(|p| p.is_absolute() && p.is_file()) else {
-            eprintln!("Ivy: codex helper unavailable; automatic panel routing is inactive.");
-            return Ok(None);
-        };
-        let mut random = [0u8; 16];
-        getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
-        let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let dir = panel_contract::base_dir().join(format!("ivy-shell-{suffix}"));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
-        }
-        #[cfg(not(unix))]
-        std::fs::create_dir(&dir)?;
-        let file = dir.join(name);
-        if let Err(error) = std::fs::write(&file, script) {
-            let _ = std::fs::remove_file(&file);
-            let _ = std::fs::remove_dir(&dir);
-            return Err(error);
-        }
-        let mut env = vec![("IVY_CODEX_HELPER", Some(helper.as_os_str().to_owned()))];
-        let args = match shell {
-            "bash" => vec!["--rcfile".into(), file.to_string_lossy().into_owned()],
-            "zsh" => {
-                let original = original_zdotdir;
-                env.push((
-                    "IVY_ZDOTDIR_WAS_SET",
-                    Some(if original.is_some() { "1" } else { "0" }.into()),
-                ));
-                env.push(("IVY_ORIGINAL_ZDOTDIR", original));
-                env.push(("ZDOTDIR", Some(dir.as_os_str().to_owned())));
-                vec![]
-            }
-            "fish" => {
-                env.push(("IVY_FISH_INIT", Some(file.as_os_str().to_owned())));
-                vec!["--init-command".into(), "source \"$IVY_FISH_INIT\"".into()]
-            }
-            _ => unreachable!(),
-        };
-        Ok(Some(Self {
-            dir: Some(dir),
-            file: Some(file),
-            args,
-            env,
-        }))
-    }
-    pub(crate) fn args(&self) -> &[String] {
-        &self.args
-    }
-    pub(crate) fn env(&self) -> Vec<(&str, Option<&OsStr>)> {
-        self.env
-            .iter()
-            .map(|(name, value)| (*name, value.as_deref()))
-            .collect()
-    }
-}
-impl Drop for Prepared {
-    fn drop(&mut self) {
-        if let Some(file) = &self.file {
-            let _ = std::fs::remove_file(file);
-        }
-        if let Some(dir) = &self.dir {
-            let _ = std::fs::remove_dir(dir);
         }
     }
 }
