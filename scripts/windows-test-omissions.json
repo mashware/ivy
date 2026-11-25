@@ -1,6 +1,11 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "shell_integration::tests::git_bash_routes_the_native_launcher_instead_of_the_extensionless_npm_shim",
+    "reason": "unix-only: exercises the MSYS lookup branch using executable POSIX shell fixtures"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "viewer::load::tests::off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened",
     "reason": "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
   },

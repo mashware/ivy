@@ -293,6 +293,30 @@ jobs:
                             'windows_exit_an_exit_code_of_259_is_an_ended_program') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass on the bundled host" }
           }
+      - name: Test PowerShell startup, prompts and Codex routing
+        shell: pwsh
+        run: |
+          cargo test --locked -p app --lib -- windows_powershell 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_powershell_preparation_recognises_executables_and_keeps_profiles_enabled',
+                            'windows_powershell_reports_encoded_directories_without_a_helper_and_clears_other_providers',
+                            'windows_powershell_preserves_prompt_error_status_and_user_codex_commands',
+                            'windows_powershell_codex_chooses_application_over_ps1_and_passes_arguments') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
+          $built = cargo test --locked -p app --lib --no-run --message-format=json |
+            ForEach-Object { try { $_ | ConvertFrom-Json } catch { } } |
+            Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'app' -and $_.executable }
+          if ($LASTEXITCODE -ne 0 -or -not $built) { throw 'the app test binary was not built' }
+          $dir = New-Item -ItemType Directory -Force -Path target/powershell-test
+          python scripts/conpty.py --to $dir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item $built.executable $dir
+          $test = Join-Path $dir (Split-Path $built.executable -Leaf)
+          $name = 'windows_powershell_prepared_startup_reports_cwd_through_bundled_conpty'
+          & $test --ignored --exact "shell_integration::powershell::tests::$name" 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
       - name: Test that a reported Windows directory is stored as a Windows path
         shell: pwsh
         run: |
