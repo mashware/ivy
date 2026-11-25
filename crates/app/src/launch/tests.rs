@@ -23,6 +23,7 @@ fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
             refused: false,
             refusals: 0,
             failure: None,
+            startup_failure: None,
             delivery_failed: false,
             dismissed: false,
         },

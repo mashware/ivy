@@ -66,6 +66,7 @@ mod tests {
     fn real_double_click_on_label_opens_rename_on_second_release() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
+        let _output = isolate_output(&mut window);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         let pane_name = window.active().focus;

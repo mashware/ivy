@@ -83,6 +83,26 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/tests/codex_route_windows_sharing.rs"),
     ),
     (
+        "panel-control/src/bin/ivy-session/signals.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/signals.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/signals_tests.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/signals_tests.rs"),
+    ),
+    (
+        "panel-control/src/client/agent_signal.rs",
+        include_str!("../../panel-control/src/client/agent_signal.rs"),
+    ),
+    (
+        "panel-control/src/client/agent_signal/tests.rs",
+        include_str!("../../panel-control/src/client/agent_signal/tests.rs"),
+    ),
+    (
+        "panel-control/tests/signals_helper.rs",
+        include_str!("../../panel-control/tests/signals_helper.rs"),
+    ),
+    (
         "panel-control/src/codex_relay/transport_tests.rs",
         include_str!("../../panel-control/src/codex_relay/transport_tests.rs"),
     ),
@@ -1107,6 +1127,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
+    (
+        "app/src/opening/pane.rs",
+        include_str!("../src/opening/pane.rs"),
+    ),
     (
         "app/src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),

@@ -2482,7 +2482,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 66] = [
+        const SOURCES: [(&str, &str); 67] = [
             (
                 "diagnostics_log/graphics.rs",
                 include_str!("diagnostics_log/graphics.rs"),
@@ -2590,6 +2590,7 @@ mod tests {
             ("session.rs", include_str!("session.rs")),
             ("session/ownership.rs", include_str!("session/ownership.rs")),
             ("startup.rs", include_str!("startup.rs")),
+            ("opening/pane.rs", include_str!("opening/pane.rs")),
             ("shell_integration.rs", include_str!("shell_integration.rs")),
             ("restoration.rs", include_str!("restoration.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
@@ -2691,7 +2692,10 @@ mod tests {
         // One and not more: `tab_bar.rs` carries a single sentence, so any higher number would be a
         // table rather than a floor — the same reason its sibling gives.
         for (name, _) in SOURCES {
-            if matches!(name, "session/ownership.rs" | "board/milestones/state.rs") {
+            if matches!(
+                name,
+                "session/ownership.rs" | "board/milestones/state.rs" | "opening/pane.rs"
+            ) {
                 // These ownership/disclosure modules have no user-facing sentences. If that
                 // changes, require them to join the per-file census.
                 assert!(

@@ -12433,3 +12433,77 @@ When available, install a global PowerShell alias to the absolute sibling `ivy-c
 **Discarded.** An advanced function consumes native options such as `-V` as common parameters. Throwing on a nonzero exit changes script control flow. A per-console executable copy adds synchronous I/O and deletion while Windows may still hold the file. A PATH shim changes every child and still loses to aliases. A `.ps1` startup file is blocked by Windows PowerShell Restricted policy; ExecutionPolicy Bypass would change the profile policy too. A native PEB directory reader belongs to native process discovery. cmd integration and shared-conversation relay remain separate work.
 
 **Limits.** Only a returned prompt reports a changed location; a framework redefining prompt afterward can replace the wrapper. Native arguments follow the PowerShell version itself (5.1 may drop empty native arguments); batch targets retain Rust command-line escaping restrictions and fail visibly where an argument is unsafe. Relative-only PATH installations are not resolved. A missing native entry leaves Codex unwrapped with a warning; removing an aliased executable later fails natively. Windows desktop badge, split, Review and link behavior requires native verification. No frame-performance claim is made.
+
+## D125 — A shell that cannot start leaves a visible failed console
+
+**Decided for #202.** After the existing startup and restoration attempts have failed to open a
+shell, Ivy keeps its window open with one failed console. The application explains which program
+was attempted and why it could not start. The notice belongs to the application, above the console,
+and is never written as terminal output or producer-owned panel content. D40's retained failure and
+D41's click dismissal apply: dismissing the explanation neither recovers the program nor makes the
+window close automatically. Existing application close controls remain the way to close it.
+
+The fixed failure headline must not disappear because a path or operating-system error is long.
+Program and reason previews fit within the notice's upper-half allowance, with explicit Unicode-safe
+elision retaining identifying context and the native error's cause. Complete diagnostics stay in
+D114's existing log, accessible from Settings. The notice points there for full details.
+
+**Why.** A person starting Ivy from the Windows Start menu cannot see standard error. Closing the
+window over a failed first shell gives them no actionable explanation. Keeping a failed console
+also lets the existing controls remain available without pretending that a program is running.
+
+**Boundary.** Recovery belongs after the existing startup attempts. Strict launch errors still
+belong to callers that retry a saved directory, fall back from a saved client, or retain the current
+console when a replacement cannot start. This decision changes neither shell selection nor those
+retry policies, and unrelated initialization errors are not reported as failed shell launches.
+
+| Discarded | Why |
+|---|---|
+| Show a native message and exit | The owner chose to keep Ivy open with the explanation on its console. |
+| Record only the log | A log preserves evidence but does not explain the disappearing window to the person opening it. |
+| Wrap the full diagnostic in the existing all-or-nothing notice | Long executable paths can make the whole notice exceed its ceiling and hide even the failure headline. |
+| Convert every launch error into a successful failed pane | Existing callers need the error to choose their directory and client fallbacks. |
+| Start a helper program to print the error | No working shell is available, and the application already has a failed-console lifecycle. |
+
+## D126 — Windows OpenCode metadata uses the bundled authenticated helper
+
+**Decided for the activity/attention slice of #174.** The explicitly installed OpenCode TUI plugin
+uses a persistent `ivy-session signals` child on Windows. It starts only Ivy's inherited absolute
+local `.exe` helper path, with fixed arguments, no shell and no PATH fallback. The helper reuses
+the existing private-directory and expected-server-PID checks on the connection that carries the
+signals. The optional Windows peer upgrade retains its existing unverified fallback and numeric
+server-PID limitation; activity metadata does not gain foreground, hook or recovery authority.
+Linux and macOS keep their direct Unix socket transport.
+
+**Why.** Node's supported named-pipe connection API alone does not supply the native directory
+owner/DACL and server-PID checks required by D115. An independent native probe followed by a
+different JavaScript connection would reopen the replacement race. The bundled helper already
+owns the required transport boundary and its absolute location is supplied at console launch.
+
+The child accepts only bounded OpenCode signal envelopes or explicit null, reconstructing a typed
+signal request instead of proxying arbitrary channel tools. An authenticated-ready frame precedes
+the first snapshot. Signal-specific reply decoding preserves `retryable`; the legacy producer
+result deliberately ignores that extension and keeps its established behavior. A transient refusal
+retries on the same connection with fresh state; a permanent refusal stops. Explicit withdrawal
+pending during a refusal is retained during disposal instead of asking a stopped producer to refresh.
+Disconnect still leaves a pending wait stale rather than declaring it answered (D80).
+
+One absolute six-second deadline covers writing and reading a whole native exchange. Applying a
+duration separately to every byte would let a trickled reply keep it alive indefinitely. Normal
+plugin disposal shares one 4.75-second deadline across its existing drain, graceful exit and forced
+child cleanup, inside OpenCode's five-second cleanup grace. The plugin never replaces a still-live
+helper. The additional process belongs to this plugin's connection, not to a background service.
+
+| Discarded | Why |
+|---|---|
+| Connect directly from Node by the Windows pipe name | Omits the established native owner, ACL and server-PID checks. |
+| Authenticate on a separate native probe, then reconnect from Node | Authenticates a different connection from the one carrying metadata. |
+| Add a new terminal escape protocol or modify OpenCode | No equivalent verified OpenCode native declaration contract exists in this integration. |
+| Move Unix clients to the child too | Adds a process where the direct transport already has the required checks and live-client evidence. |
+| Offer an arbitrary stdio channel proxy | Exposes unrelated commands when this producer needs only activity metadata. |
+| Treat Windows process ancestry as agent authority | D119 explicitly reserves that boundary for separate work; the owner deferred recovery. |
+
+**Evidence boundary.** Actual-asset fixtures and the native helper/channel witness are separate from
+installed OpenCode desktop interoperability. Neither source review nor cross-compilation proves
+Windows runtime behavior. Native CI, mutations and installed-client checks must report their own
+results. This delivery leaves #174's conversation-recovery reporters deferred.
