@@ -17,6 +17,12 @@ impl Drop for ChildGuard {
 }
 
 fn child_connection() -> (Stream, ChildGuard, StopSignal) {
+    child_connection_after_preparation(Duration::ZERO)
+}
+
+fn child_connection_after_preparation(
+    preparation_delay: Duration,
+) -> (Stream, ChildGuard, StopSignal) {
     let dir = PanelDir::create().unwrap();
     let listener = bind(dir.path(), dir.id()).unwrap();
     let (stop, acceptor) = acceptor(listener).unwrap();
@@ -44,6 +50,17 @@ function Read-Line([System.IO.Stream]$stream) {{
     $r = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $false, 256, $true)
     return $r.ReadLine()
 }}
+# MUTATION: move the preparation invocation immediately after reading $redirect.
+$prepareProtocol = {{
+    # Keep PowerShell's first JSON module load and stream-reader JIT outside the peer deadline.
+    $preparationBytes = [System.Text.Encoding]::UTF8.GetBytes('{{"peer":{{"mode":"verified","name":"prepared"}}}}' + [char]10)
+    $preparation = [System.IO.MemoryStream]::new($preparationBytes, $false)
+    $prepared = (Read-Line $preparation) | ConvertFrom-Json
+    if ($prepared.peer.mode -ne 'verified') {{ throw 'peer protocol preparation failed' }}
+    $preparation.Dispose()
+    [System.Threading.Thread]::Sleep({})
+}}
+& $prepareProtocol
 $bootstrap = Connect-Pipe 'ivy-{}'
 $hello = [System.Text.Encoding]::UTF8.GetBytes('{{"tool":"peer_hello","v":1}}' + [char]10)
 $bootstrap.Write($hello, 0, $hello.Length)
@@ -55,6 +72,7 @@ if ($ready.peer.mode -ne 'verified') {{ throw 'peer was not verified' }}
 $fresh.Dispose()
 $bootstrap.Dispose()
 "#,
+        preparation_delay.as_millis(),
         dir.id()
     );
     let child = Command::new("powershell.exe")
@@ -83,6 +101,15 @@ $bootstrap.Dispose()
     let stream = received.unwrap().unwrap();
     server.join().unwrap();
     (stream, child, stop)
+}
+
+#[test]
+fn slow_child_preparation_does_not_consume_the_peer_upgrade_deadline() {
+    let preparation_delay = negotiation::DEADLINE + Duration::from_secs(1);
+    let (stream, child, _stop) = child_connection_after_preparation(preparation_delay);
+    let peer = Peer::capture(&stream).unwrap();
+    assert_eq!(peer.pid(), child.0.id());
+    assert!(peer.is_alive());
 }
 
 #[test]
