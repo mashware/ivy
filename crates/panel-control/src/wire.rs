@@ -96,7 +96,7 @@ impl Side {
 }
 
 /// Activity declared by the OpenCode TUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Activity {
     Busy,
@@ -105,7 +105,7 @@ pub enum Activity {
 }
 
 /// Complete, pane-local OpenCode metadata. Session is inert, bounded metadata.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentSnapshot {
     pub session: String,
