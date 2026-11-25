@@ -1141,6 +1141,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/mouse.rs", include_str!("../src/mouse.rs"), 201),
     ("src/opening.rs", include_str!("../src/opening.rs"), 148),
     (
+        "src/opening/pane.rs",
+        include_str!("../src/opening/pane.rs"),
+        3,
+    ),
+    (
         "src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
         0,

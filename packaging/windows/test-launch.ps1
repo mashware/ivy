@@ -2,8 +2,10 @@ param([Parameter(Mandatory=$true)][string]$Executable,
       [Parameter(Mandatory=$true)][string]$EvidenceDir,
       [ValidateSet('none', 'crash', 'shell', 'layout', 'deadline')][string]$Control = 'none',
       [ValidateRange(1, 120)][int]$TimeoutSeconds = 30,
-      [string]$ProvenancePublisher = '')
+      [string]$ProvenancePublisher = '',
+      [switch]$ExpectShellFailure)
 $ErrorActionPreference = 'Stop'
+if ($ExpectShellFailure -and $Control -ne 'shell') { throw 'Failed-shell evidence requires the shell control.' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:IVY_DISPOSABLE_RUNNER -ne 'yes') {
     throw 'Launch checks require a disposable GitHub Windows runner.'
 }
@@ -176,6 +178,25 @@ function Check-Alive {
         throw "deadline: $Stage exceeded ${TimeoutSeconds}s"
     }
 }
+function Capture-Witness([string]$Name) {
+    Add-Type -AssemblyName System.Drawing
+    # Responsiveness is not proof of a fresh Ivy frame. Collect evidence samples; acceptance
+    # still requires reviewing the expected caption/notice in the panel, not console echo.
+    for ($Sample = 0; $Sample -lt 3; $Sample++) {
+        Check-Alive
+        if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Publication capture lost the controlled window focus' }
+        $Rect = [IvyLaunchNative]::CaptureBounds($Window.Handle)
+        if ($Rect[2] -lt 100 -or $Rect[3] -lt 100) { throw 'Publication window is too small' }
+        $Bitmap = [Drawing.Bitmap]::new($Rect[2], $Rect[3])
+        $Graphics = [Drawing.Graphics]::FromImage($Bitmap)
+        try {
+            $Graphics.CopyFromScreen($Rect[0], $Rect[1], 0, 0, $Bitmap.Size)
+            $Bitmap.Save((Join-Path $EvidenceDir "$Name-$Sample.png"), [Drawing.Imaging.ImageFormat]::Png)
+        } finally { $Graphics.Dispose(); $Bitmap.Dispose() }
+        if ($Sample -lt 2) { Start-Sleep -Milliseconds 100 }
+    }
+}
+
 try {
     if ($Control -eq 'layout') { New-Item -ItemType Directory $Layout -Force | Out-Null }
     $Process = [Diagnostics.Process]::Start($Start)
@@ -192,6 +213,23 @@ try {
         if ($Windows | Where-Object { $_.Class -eq '#32770' }) { throw "${Stage}: unexpected modal dialog" }
         $Window = $Windows | Where-Object { $_.Title -match 'Ivy' -and $_.Class -ne '#32770' } | Select-Object -First 1
         if ($null -eq $Window) { Start-Sleep -Milliseconds 50 }
+    }
+    if ($ExpectShellFailure) {
+        $Stage = 'failed shell'
+        if (-not [IvyLaunchNative]::SetForegroundWindow($Window.Handle) -and [IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'failed shell: could not focus the application window' }
+        Capture-Witness 'failed-shell'
+        if (-not [IvyLaunchNative]::PostMessage($Window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'failed shell: WM_CLOSE failed' }
+        while (-not $Process.HasExited) {
+            if ($Clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'failed shell: normal close did not finish' }
+            Start-Sleep -Milliseconds 50
+        }
+        if ($Process.ExitCode -ne 0) { throw "failed shell: close exited $($Process.ExitCode)" }
+        if (-not $Stderr.Wait(5000)) { throw 'failed shell: diagnostic stream did not close' }
+        $Cause = $Stderr.GetAwaiter().GetResult()
+        if ($Cause -notmatch 'missing-cmd\.exe') { throw 'failed shell: the attempted interpreter was not diagnosed' }
+        [IO.File]::WriteAllText((Join-Path $EvidenceDir 'failed-shell.json'), (@{ responsive=$true; normal_close=$true; visual_review_required=$true; expected_headline="This console's program could not be started."; expected_program='missing-cmd.exe' } | ConvertTo-Json))
+        Write-Output 'Installed failed-shell window stayed responsive and closed normally; screenshots require visual review.'
+        return
     }
     $Stage = 'shell'
     $Shell = $null
@@ -236,24 +274,6 @@ try {
                 if ($Value -eq $Expected) { return }
             }
             Start-Sleep -Milliseconds 50
-        }
-    }
-    function Capture-Witness([string]$Name) {
-        Add-Type -AssemblyName System.Drawing
-        # Responsiveness is not proof of a fresh Ivy frame. Collect evidence samples; acceptance
-        # still requires reviewing the expected caption/notice in the panel, not console echo.
-        for ($Sample = 0; $Sample -lt 3; $Sample++) {
-            Check-Alive
-            if ([IvyLaunchNative]::GetForegroundWindow() -ne $Window.Handle) { throw 'Publication capture lost the controlled window focus' }
-            $Rect = [IvyLaunchNative]::CaptureBounds($Window.Handle)
-            if ($Rect[2] -lt 100 -or $Rect[3] -lt 100) { throw 'Publication window is too small' }
-            $Bitmap = [Drawing.Bitmap]::new($Rect[2], $Rect[3])
-            $Graphics = [Drawing.Graphics]::FromImage($Bitmap)
-            try {
-                $Graphics.CopyFromScreen($Rect[0], $Rect[1], 0, 0, $Bitmap.Size)
-                $Bitmap.Save((Join-Path $EvidenceDir "$Name-$Sample.png"), [Drawing.Imaging.ImageFormat]::Png)
-            } finally { $Graphics.Dispose(); $Bitmap.Dispose() }
-            if ($Sample -lt 2) { Start-Sleep -Milliseconds 100 }
         }
     }
     function Type-Publication([string]$Body, [string]$AckName) {
