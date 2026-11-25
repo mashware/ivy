@@ -90,6 +90,7 @@ pub(super) fn paint(
         .show(parent.ctx(), |registered| {
             registered.allocate_rect(area, egui::Sense::hover());
             paint_contents(window, registered, area, sections, signals, now, totals);
+            window.board.surface.milestones.finish_resize_frame();
         });
 }
 
@@ -118,8 +119,7 @@ fn paint_contents(
     super::style::apply(&mut ui, &theme);
     ui.painter().rect_filled(area, 0.0, roles.base);
     window.board.surface.child_hits.clear();
-    window.board.surface.milestones.hits.clear();
-    window.board.surface.milestones.targets.clear();
+    window.board.surface.milestones.begin_frame();
     super::bar::paint(
         &mut ui,
         area.width(),

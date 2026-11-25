@@ -1132,6 +1132,17 @@ fn interruption_reason(failure: &io::Error) -> &'static str {
         .unwrap_or("panel routing or I/O operation failed")
 }
 
+// Official responses can use one frame for the whole message (for example,
+// plugin/list). Keep both upstream limits inside the existing 64 MiB envelope.
+fn connect_upstream<S: Read + Write>(stream: S) -> io::Result<WebSocket<S>> {
+    let mut config = WebSocketConfig::default();
+    config.max_message_size = Some(MAX_FRAME);
+    config.max_frame_size = Some(MAX_FRAME);
+    tungstenite::client::client_with_config("ws://localhost/", stream, Some(config))
+        .map(|(ws, _)| ws)
+        .map_err(|_| error("official proxy handshake failed"))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn serve(
     listener: TcpListener,
@@ -1177,7 +1188,7 @@ fn serve(
                 continue;
             }
         };
-        let (mut upstream, _) = match tungstenite::client("ws://localhost/", stream) {
+        let mut upstream = match connect_upstream(stream) {
             Ok(value) => value,
             Err(_) => {
                 let _ = ws.close(None);
@@ -1270,6 +1281,10 @@ fn serve(
     }
     Ok(routing.last_thread.clone())
 }
+
+#[cfg(test)]
+#[path = "codex_relay/transport_tests.rs"]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {

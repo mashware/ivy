@@ -19,13 +19,14 @@ pub(super) fn header(
     missing: &[String],
     key: &Key,
     full: bool,
-    collapsed: bool,
+    _collapsed: bool,
     closable: bool,
     reader: &mut Reader,
     roles: &Roles,
 ) {
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 36.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 44.0), egui::Sense::hover());
+    let inner = rect.shrink2(vec2(8.0, 6.0));
     let title = match &m.id {
         Some(id) if id != &m.title => format!("{id} · {}", m.title),
         _ => m.title.clone(),
@@ -38,19 +39,19 @@ pub(super) fn header(
     }
     crate::ui::icons::paint(
         ui.painter(),
-        rect.min + vec2(6.0, 9.0),
-        crate::ui::icons::Icon::Caret { open: !collapsed },
+        inner.min + vec2(6.0, 9.0),
+        crate::ui::icons::Icon::Caret { open: full },
         12.0,
         roles.tx3,
     );
-    let right = rect.right() - if closable { 20.0 } else { 0.0 };
+    let right = inner.right() - if closable { 20.0 } else { 0.0 };
     strip::text(
         ui,
         Rect::from_min_max(
-            rect.min + vec2(18.0, 0.0),
+            inner.min + vec2(18.0, 0.0),
             pos2(
                 right - count_width - if class == Class::Ready { 40.0 } else { 0.0 },
-                rect.top() + 20.0,
+                inner.top() + 20.0,
             ),
         ),
         &title,
@@ -61,7 +62,7 @@ pub(super) fn header(
     strip::text(
         ui,
         Rect::from_min_size(
-            pos2(right - count_width, rect.top()),
+            pos2(right - count_width, inner.top()),
             vec2(count_width, 18.0),
         ),
         &count,
@@ -71,7 +72,7 @@ pub(super) fn header(
     );
     if class == Class::Ready {
         let badge = Rect::from_min_size(
-            pos2(right - count_width - 38.0, rect.top()),
+            pos2(right - count_width - 38.0, inner.top()),
             vec2(34.0, 17.0),
         );
         ui.painter().rect_filled(badge, 4, roles.accent_soft);
@@ -85,18 +86,18 @@ pub(super) fn header(
         );
     }
     if closable {
-        let close = Rect::from_min_size(pos2(rect.right() - 18.0, rect.top()), vec2(18.0, 20.0));
+        let close = Rect::from_min_size(pos2(inner.right() - 18.0, inner.top()), vec2(18.0, 20.0));
         strip::text(ui, close, "×", FontId::proportional(13.0), roles.tx2, 1);
         reader.hits.push((
             close.intersect(ui.clip_rect()),
             Action::CloseColumn(key.clone()),
         ));
     }
-    let track = Rect::from_min_size(rect.min + vec2(0.0, 27.0), vec2(width, 3.0));
+    let track = Rect::from_min_size(inner.min + vec2(0.0, 26.0), vec2(inner.width(), 3.0));
     ui.painter().rect_filled(track, 1.5, roles.line);
     if b > 0 {
         ui.painter().rect_filled(
-            Rect::from_min_size(track.min, vec2(width * a as f32 / b as f32, 3.0)),
+            Rect::from_min_size(track.min, vec2(inner.width() * a as f32 / b as f32, 3.0)),
             1.5,
             if class == Class::Ready {
                 roles.tx3
@@ -153,39 +154,6 @@ pub(super) fn header(
     }
     ui.separator();
     ui.add_space(8.0);
-}
-pub(super) fn button(
-    ui: &mut egui::Ui,
-    label: &str,
-    action: Action,
-    reader: &mut Reader,
-    roles: &Roles,
-) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), egui::Sense::hover());
-    let text = label.trim_end_matches(['▾', '▴', '▸', ' ']);
-    strip::text(ui, rect, text, FontId::proportional(12.0), roles.tx2, 1);
-    let width = ui
-        .fonts_mut(|f| f.layout_no_wrap(text.into(), FontId::proportional(12.0), roles.tx2))
-        .size()
-        .x;
-    let icon = if label.ends_with('▴') {
-        crate::ui::icons::Icon::CaretUp
-    } else {
-        crate::ui::icons::Icon::Caret {
-            open: !label.ends_with('▸'),
-        }
-    };
-    crate::ui::icons::paint(
-        ui.painter(),
-        pos2(
-            (rect.left() + width + 10.0).min(rect.right() - 6.0),
-            rect.top() + 8.0,
-        ),
-        icon,
-        12.0,
-        roles.tx3,
-    );
-    reader.hits.push((rect.intersect(ui.clip_rect()), action));
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn item_row(

@@ -1,5 +1,8 @@
 //! Disclosure belongs to the reader and survives hiding Board, not application restarts.
-use super::projection::Class;
+use super::{
+    projection::Class,
+    sections::{self, Group},
+};
 use eframe::egui::{self, Rect};
 use std::collections::{HashMap, HashSet};
 
@@ -46,12 +49,17 @@ pub(in crate::board) enum Action {
     ToggleItems(Key),
     CloseColumn(Key),
     ShowAll(bool),
+    HideGroup(String, Group),
+    ShowGroup(String, Group),
+    MaximizeGroup(String, Group),
+    RestoreLayout(String),
 }
 #[derive(Default)]
 pub(super) struct Project {
     pub(super) opened: HashSet<Identity>,
     pub(super) full: HashSet<Identity>,
     pub(super) show_all: bool,
+    pub(super) sections: sections::Layout,
     classes: HashMap<Identity, Class>,
     diagnostic_plan: Option<panel_contract::plan::Plan>,
     diagnostics: HashSet<String>,
@@ -72,6 +80,8 @@ pub(in crate::board) struct Reader {
     pub(in crate::board) reveal: Option<Key>,
     pub(in crate::board) reveal_pane: Option<usize>,
     pub(in crate::board) zone: FocusZone,
+    pub(in crate::board) dividers: Vec<sections::Divider>,
+    drag: Option<sections::Drag>,
     all: bool,
 }
 impl Reader {
@@ -119,7 +129,24 @@ impl Reader {
     }
     pub(in crate::board) fn apply(&mut self, action: &Action) {
         match action {
+            Action::HideGroup(project, group) => {
+                self.project(project).sections.hide(*group);
+                self.cancel_resize();
+            }
+            Action::ShowGroup(project, group) => {
+                self.project(project).sections.show(*group);
+                self.cancel_resize();
+            }
+            Action::MaximizeGroup(project, group) => {
+                self.project(project).sections.toggle_maximized(*group);
+                self.cancel_resize();
+            }
+            Action::RestoreLayout(project) => {
+                self.project(project).sections.maximized = None;
+                self.cancel_resize();
+            }
             Action::ShowAll(value) => {
+                self.cancel_resize();
                 self.all = *value;
                 for p in self.projects.values_mut() {
                     p.show_all = *value;
@@ -157,6 +184,43 @@ impl Reader {
                 p.opened.remove(&key.milestone);
                 p.full.remove(&key.milestone);
             }
+        }
+    }
+    pub(in crate::board) fn begin_frame(&mut self) {
+        self.dividers.clear();
+        self.hits.clear();
+        self.targets.clear();
+    }
+    pub(in crate::board) fn begin_resize(&mut self, pos: egui::Pos2) -> bool {
+        let Some(divider) = self.dividers.iter().find(|d| d.rect.contains(pos)).cloned() else {
+            return false;
+        };
+        self.drag = Some(sections::Drag { divider, x: pos.x });
+        true
+    }
+    pub(in crate::board) fn resizing(&self) -> bool {
+        self.drag.is_some()
+    }
+    pub(in crate::board) fn resize(&mut self, pos: egui::Pos2) {
+        let Some(drag) = self.drag.clone() else {
+            return;
+        };
+        self.project(&drag.divider.project)
+            .sections
+            .resize(&drag, pos.x);
+    }
+    pub(in crate::board) fn cancel_resize(&mut self) {
+        self.drag = None;
+    }
+    pub(in crate::board) fn finish_resize_frame(&mut self) {
+        if let Some(drag) = &self.drag
+            && !self.dividers.iter().any(|d| {
+                d.project == drag.divider.project
+                    && d.groups == drag.divider.groups
+                    && d.minima == drag.divider.minima
+            })
+        {
+            self.cancel_resize();
         }
     }
     pub(in crate::board) fn keyboard(
@@ -235,6 +299,8 @@ impl Default for Reader {
             reveal: None,
             reveal_pane: None,
             zone: FocusZone::Cards,
+            dividers: Vec::new(),
+            drag: None,
             all: false,
         }
     }

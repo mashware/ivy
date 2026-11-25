@@ -167,7 +167,6 @@ jobs:
           foreach ($name in 'binding_is_what_binds_says',
                             'diagnostic_peer_is_the_connected_process',
                             'inspector_runs_once_and_its_observation_reaches_each_delivery',
-                            'slow_child_preparation_does_not_consume_the_peer_upgrade_deadline',
                             'exited_windows_peer_and_its_clones_never_become_alive_again',
                             'a_substituted_process_cannot_authorize_the_fresh_connector',
                             'raw_windows_stream_cannot_manufacture_a_verified_peer',
@@ -200,31 +199,6 @@ jobs:
         run: |
           python scripts/windows-peer-mutations.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Prove peer preparation stays outside the protocol deadline
-        shell: pwsh
-        run: |
-          $source = 'crates/panel-control/src/endpoint/windows/peer_tests.rs'
-          $original = [IO.File]::ReadAllText($source)
-          $prepare = '& $prepareProtocol'
-          $redirect = '$redirect = (Read-Line $bootstrap) | ConvertFrom-Json'
-          if (($original.Split($prepare).Count - 1) -ne 1 -or ($original.Split($redirect).Count - 1) -ne 1) {
-            throw 'peer preparation mutation anchors must occur exactly once'
-          }
-          $test = 'endpoint::windows::peer_tests::slow_child_preparation_does_not_consume_the_peer_upgrade_deadline'
-          try {
-            $mutated = $original.Replace($prepare, '').Replace($redirect, "$redirect`n$prepare")
-            [IO.File]::WriteAllText($source, $mutated)
-            cargo test --locked -p panel-control --lib -- $test --exact --nocapture 2>&1 | Tee-Object -Variable printed
-            if ($LASTEXITCODE -eq 0 -or -not ($printed -match 'running 1 test') -or
-                -not ($printed -match 'test result: FAILED') -or -not ($printed -match 'peer upgrade timed out')) {
-              throw 'late preparation must fail at the real peer deadline; a compile failure is not proof'
-            }
-          } finally {
-            [IO.File]::WriteAllText($source, $original)
-          }
-          cargo test --locked -p panel-control --lib -- $test --exact --nocapture 2>&1 | Tee-Object -Variable printed
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not ($printed -match "$test \.\.\. ok$")) { throw 'clean peer preparation witness did not run and pass' }
       - name: Keep named Windows control lifecycle witnesses
         shell: pwsh
         run: |

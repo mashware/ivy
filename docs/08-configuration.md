@@ -933,9 +933,9 @@ options and the floating box's position are unchanged.
 ## Board milestone reading
 
 **By milestone** shows every milestone in one compact strip and the relevant work in columns below.
-Active work starts expanded with its current/attached items and up to two following pending items;
-ready work starts collapsed. Click a header or its remaining count for all items and the closing
-criterion. Click a completed or later milestone in the strip to open it; click again or its close
+Milestone bodies initially show their console cards without roadmap task previews;
+click the milestone header to reveal all task items and the closing criterion. Click it again to
+collapse the task details. Click a completed or later milestone in the strip to open it; click again or its close
 control to remove it. **Show all** exposes the full roadmap in order. Only the columns scroll
 horizontally when their minimum widths do not fit. Fourteen milestones fit the strip at 1440 points;
 labels truncate on smaller windows or larger plans, with full details on hover.
@@ -953,4 +953,9 @@ the plan. Titles in different languages never establish identity. Compact milest
 producer title and up to three literal body lines, prioritizing explicit wait/block marks, plus
 attention, freshness, branch and phase. The full panel remains in the console. A resolvable local
 roadmap source opens in the read-only document viewer; unavailable sources explain why on hover.
-No new configuration keys are introduced.
+Drag a vertical separator to adjust the two neighboring caption groups. Groups retain their
+readable column minima; overflow scrolls horizontally. Each caption has Hide and Maximize/Restore
+controls. Named Show controls above the columns recover hidden groups even when all are hidden.
+Maximize temporarily shows one group; Restore layout returns the previous widths and visibility.
+These choices are per project for the current app session. Show all temporarily bypasses them and
+keeps its flat roadmap order. No new configuration keys are introduced.

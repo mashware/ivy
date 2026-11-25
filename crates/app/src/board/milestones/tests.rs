@@ -95,21 +95,18 @@ fn claim_priority_done_attachment_empty_milestone_and_cycles_are_explicit() {
     );
 }
 #[test]
-fn selective_items_include_all_attachments_and_only_two_pending_after_last_relevant() {
+fn default_items_keep_only_attachments_and_header_expansion_reveals_every_item() {
     let mut plan = fixture();
     let m = &mut plan.milestones[4];
     m.items[6].mark = Some(Mark::Current);
     let mut attached = vec![false; m.items.len()];
     attached[5] = true;
-    assert_eq!(
-        projection::visible(m, &attached, false, false),
-        [5, 6, 7, 8]
-    );
+    assert_eq!(projection::visible(m, &attached, false, false), [5]);
     assert_eq!(projection::visible(m, &attached, false, true), [5]);
     assert_eq!(projection::visible(m, &attached, true, false).len(), 10);
     assert_eq!(
         projection::visible(&plan.milestones[6], &[], false, false),
-        [0, 1]
+        Vec::<usize>::new()
     );
 }
 #[test]
@@ -492,7 +489,7 @@ fn show_all_paints_the_entire_roadmap_then_restores_the_compact_groups() {
 }
 
 #[test]
-fn outside_expansion_survives_projection_and_current_outside_items_are_visible() {
+fn outside_items_wait_for_expansion_and_expansion_survives_projection() {
     let mut plan = fixture();
     plan.outside = (0..6)
         .map(|i| panel_contract::plan::Item {
@@ -515,7 +512,7 @@ fn outside_expansion_survives_projection_and_current_outside_items_are_visible()
             })
             .collect::<Vec<_>>()
     };
-    assert_eq!(outside(&reader), [4, 5]);
+    assert!(outside(&reader).is_empty());
     let key = Key {
         project: project_key(&section),
         milestone: Identity::Outside,
@@ -568,7 +565,7 @@ fn producer_ids_cannot_alias_anonymous_or_outside_reader_columns() {
             .filter(|(t, _)| matches!(t,Target::Item(k,_) if k.milestone==Identity::Outside))
             .count()
     };
-    assert_eq!(outside(&reader), 2);
+    assert_eq!(outside(&reader), 0);
     reader.apply(&Action::ToggleItems(Key {
         project,
         milestone: Identity::Outside,
@@ -684,6 +681,11 @@ fn card_filters_keep_item_targets_and_claiming_columns_yield_to_show_all() {
             .filter_map(|(target, _)| matches!(target, Target::Item(..)).then_some(target.clone()))
             .collect::<Vec<_>>()
     };
+    reader.apply(&Action::ToggleItems(Key {
+        project: project_key(&section),
+        milestone: Identity::from("H3"),
+    }));
+    render(&ctx, &section, &mut reader, &Default::default());
     let before = items(&reader);
     assert!(!before.is_empty());
     render(
@@ -772,6 +774,17 @@ fn all_done_message_keeps_unmatched_consoles_before_outside_items() {
             .any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
         if text.galley.text() == "All milestones done · Show all to review"))
     );
+    assert!(
+        !reader
+            .targets
+            .iter()
+            .any(|(target, _)| matches!(target, Target::Item(..)))
+    );
+    reader.apply(&Action::ToggleItems(Key {
+        project: project_key(&section),
+        milestone: Identity::Outside,
+    }));
+    render(&ctx, &section, &mut reader, &Default::default());
     let card = reader
         .targets
         .iter()
@@ -794,27 +807,57 @@ fn all_done_message_keeps_unmatched_consoles_before_outside_items() {
 }
 
 #[test]
-fn hidden_summary_counts_only_omitted_items_and_full_expansion_has_none() {
-    let items = (0..10_000)
-        .map(|i| panel_contract::plan::Item {
-            text: format!("Task {i}"),
-            mark: Some(if i % 2 == 0 {
-                Mark::Done
-            } else {
-                Mark::Pending
-            }),
-            ..Default::default()
+fn roadmap_rows_wait_for_header_disclosure_but_attached_cards_remain() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut reader = Reader::default();
+    let section = section(
+        vec![entry(11, Some("H3"), Some("TERRITORIES"), None)],
+        fixture(),
+    );
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert!(reader.targets.iter().any(|(t, _)| *t == Target::Card(11)));
+    assert!(
+        !reader
+            .targets
+            .iter()
+            .any(|(t, _)| matches!(t, Target::Item(..)))
+    );
+    let key = reader
+        .targets
+        .iter()
+        .find_map(|(t, _)| match t {
+            Target::Header(k) if k.milestone == Identity::from("H3") => Some(k.clone()),
+            _ => None,
         })
-        .collect::<Vec<_>>();
+        .unwrap();
+    reader.apply(&Action::ToggleItems(key.clone()));
+    render(&ctx, &section, &mut reader, &Default::default());
+    let plan = section.roadmap.as_ref().unwrap().plan.as_ref().unwrap();
+    let count = plan
+        .milestones
+        .iter()
+        .find(|m| m.id.as_deref() == Some("H3"))
+        .unwrap()
+        .items
+        .len();
     assert_eq!(
-        projection::hidden_counts(&items, &[1, 5000, 9999], false),
-        (4998, 4999)
+        reader
+            .targets
+            .iter()
+            .filter(|(t, _)| matches!(t, Target::Item(k, _) if k == &key))
+            .count(),
+        count
     );
-    assert_eq!(projection::hidden_counts(&items, &[], false), (5000, 5000));
-    assert_eq!(
-        projection::hidden_counts(&items, &(0..items.len()).collect::<Vec<_>>(), true),
-        (0, 0)
+    reader.apply(&Action::ToggleItems(key));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert!(
+        !reader
+            .targets
+            .iter()
+            .any(|(t, _)| matches!(t, Target::Item(..)))
     );
+    assert!(reader.targets.iter().any(|(t, _)| *t == Target::Card(11)));
 }
 
 #[test]
@@ -924,4 +967,357 @@ fn column_groups_use_one_gap_and_published_values_keep_their_own_column() {
         "a wrapped value must not run below its key"
     );
     assert!(now.pos.y >= decision_value.pos.y + decision_value.galley.size().y + 6.0);
+}
+
+#[test]
+fn section_controls_restore_hidden_cards_and_preserve_maximized_layout() {
+    use super::sections::Group;
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let section = section(
+        vec![
+            entry(1, Some("H3"), Some("TERRITORIES"), None),
+            entry(2, None, None, None),
+        ],
+        fixture(),
+    );
+    let project = project_key(&section);
+    let mut reader = Reader::default();
+    render(&ctx, &section, &mut reader, &Default::default());
+    let cards = |r: &Reader| {
+        r.targets
+            .iter()
+            .filter_map(|(t, _)| match t {
+                Target::Card(p) => Some(*p),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(cards(&reader), [1, 2]);
+    let before: Vec<_> = reader
+        .targets
+        .iter()
+        .filter_map(|(t, rect)| match t {
+            Target::Header(k) => Some((k.clone(), rect.width())),
+            _ => None,
+        })
+        .collect();
+    reader.apply(&Action::HideGroup(project.clone(), Group::Outside));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(cards(&reader), [1]);
+    assert!(
+        reader.hits.iter().any(|(rect, a)| rect.is_positive()
+            && *a == Action::ShowGroup(project.clone(), Group::Outside))
+    );
+    reader.apply(&Action::MaximizeGroup(project.clone(), Group::Active));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(cards(&reader), [1]);
+    assert!(reader.dividers.is_empty());
+    let plan = section.roadmap.as_ref().unwrap().plan.as_ref().unwrap();
+    let placed = place(&section.entries, plan);
+    let projection = Projection::new(plan, &placed, &column);
+    let expected: Vec<_> = projection
+        .classes
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.active())
+        .map(|(i, _)| strip::key(&project, plan, i).milestone)
+        .collect();
+    let shown: Vec<_> = reader
+        .targets
+        .iter()
+        .filter_map(|(t, _)| match t {
+            Target::Header(k) => Some(k.milestone.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shown, expected);
+    reader.apply(&Action::RestoreLayout(project.clone()));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(
+        cards(&reader),
+        [1],
+        "restore must retain the previously hidden section"
+    );
+    reader.apply(&Action::ShowGroup(project.clone(), Group::Outside));
+    render(&ctx, &section, &mut reader, &Default::default());
+    let after: Vec<_> = reader
+        .targets
+        .iter()
+        .filter_map(|(t, rect)| match t {
+            Target::Header(k) => Some((k.clone(), rect.width())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(after, before);
+    for group in Group::ALL {
+        reader.apply(&Action::HideGroup(project.clone(), group));
+    }
+    let shapes = render(&ctx, &section, &mut reader, &Default::default());
+    assert!(cards(&reader).is_empty());
+    for group in Group::ALL {
+        assert!(reader.hits.iter().any(|(rect, action)| rect.is_positive()
+            && *action == Action::ShowGroup(project.clone(), group)));
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == format!("Show {}", group.label()))));
+    }
+    assert!(
+        !reader
+            .project("another project")
+            .sections
+            .hidden
+            .iter()
+            .any(|h| *h)
+    );
+    reader.apply(&Action::ShowAll(true));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert_eq!(cards(&reader), [1, 2]);
+    reader.apply(&Action::ShowAll(false));
+    render(&ctx, &section, &mut reader, &Default::default());
+    assert!(cards(&reader).is_empty());
+}
+
+#[test]
+fn section_resize_moves_only_neighbors_and_minimum_clamps_do_not_erase_preferences() {
+    use super::sections::{self, Group};
+    let columns = [(0, false, true), (1, true, false), (2, false, true)];
+    let mut reader = Reader::default();
+    let original = sections::widths(1500.0, &columns, &reader.project("p").sections);
+    reader.dividers.push(sections::Divider {
+        rect: Rect::from_min_size(egui::Pos2::ZERO, vec2(8.0, 100.0)),
+        project: "p".into(),
+        groups: [Group::Active, Group::Ready],
+        widths: [original[0], original[1]],
+        minima: [240.0, 190.0],
+    });
+    assert!(reader.begin_resize(egui::pos2(4.0, 20.0)));
+    reader.resize(egui::pos2(-96.0, 20.0));
+    let resized = sections::widths(1500.0, &columns, &reader.project("p").sections);
+    assert_eq!(
+        resized,
+        [original[0] - 100.0, original[1] + 100.0, original[2]]
+    );
+    reader.cancel_resize();
+    let changed_minimum = [
+        (0, false, true),
+        (0, false, false),
+        (1, true, false),
+        (2, false, true),
+    ];
+    let expanded = sections::widths(600.0, &changed_minimum, &reader.project("p").sections);
+    assert!(expanded[0] >= 240.0 && expanded[1] >= 240.0);
+    assert_eq!(
+        sections::widths(1500.0, &columns, &reader.project("p").sections),
+        resized
+    );
+    reader.apply(&Action::MaximizeGroup("p".into(), Group::Ready));
+    assert_eq!(
+        sections::widths(1500.0, &[(1, true, false)], &reader.project("p").sections),
+        [1500.0]
+    );
+    reader.apply(&Action::RestoreLayout("p".into()));
+    assert_eq!(
+        sections::widths(1500.0, &columns, &reader.project("p").sections),
+        resized
+    );
+}
+
+#[test]
+fn highlighted_header_text_and_progress_have_inner_margins() {
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let plan = fixture();
+    let roles = Roles::of(&crate::theme::Theme::default());
+    let key = Key {
+        project: "p".into(),
+        milestone: Identity::from("H3"),
+    };
+    let mut reader = Reader::default();
+    let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.set_width(400.0);
+        details::header(
+            ui,
+            &plan.milestones[4],
+            &plan,
+            Class::Ready,
+            &[],
+            &key,
+            true,
+            false,
+            false,
+            &mut reader,
+            &roles,
+        );
+    });
+    let rect = reader
+        .targets
+        .iter()
+        .find(|(t, _)| *t == Target::Header(key.clone()))
+        .unwrap()
+        .1;
+    let mut track = false;
+    let mut title = false;
+    for shape in &out.shapes {
+        match &shape.shape {
+            egui::Shape::Text(t) if t.pos.y < rect.bottom() => {
+                assert!(t.pos.x >= rect.left() + 8.0 && t.pos.y >= rect.top() + 6.0);
+                assert!(t.pos.x + t.galley.size().x <= rect.right() - 8.0 + 0.1);
+                title = true;
+            }
+            egui::Shape::Rect(r) if r.rect.height() == 3.0 => {
+                assert!(r.rect.left() >= rect.left() + 8.0 && r.rect.right() <= rect.right() - 8.0);
+                assert!(r.rect.bottom() <= rect.bottom() - 6.0);
+                track = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(title && track);
+    out.drop_without_applying_deltas();
+}
+
+#[test]
+fn changed_or_vanished_separator_cancels_drag_before_it_can_resize_another_group() {
+    use super::sections::{Divider, Group};
+    let mut reader = Reader::default();
+    let divider = Divider {
+        rect: Rect::from_min_size(egui::Pos2::ZERO, vec2(8.0, 100.0)),
+        project: "p".into(),
+        groups: [Group::Active, Group::Ready],
+        widths: [600.0, 300.0],
+        minima: [240.0, 190.0],
+    };
+    reader.dividers.push(divider.clone());
+    assert!(reader.begin_resize(egui::pos2(4.0, 20.0)));
+    reader.dividers[0].minima[0] = 500.0;
+    reader.finish_resize_frame();
+    assert!(!reader.resizing());
+    reader.dividers[0] = divider;
+    assert!(reader.begin_resize(egui::pos2(4.0, 20.0)));
+    reader.dividers.clear();
+    reader.finish_resize_frame();
+    assert!(!reader.resizing());
+    reader.resize(egui::pos2(104.0, 20.0));
+    assert_eq!(reader.project("p").sections.widths, [None; 4]);
+}
+
+#[test]
+fn divider_raw_input_never_pans_overflowing_scroll_areas_after_touch_detection() {
+    use super::sections::Group;
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let plan = panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"Active","items":[{"text":"a","mark":"current"}]},{"id":"B","title":"Ready","items":[{"text":"b"}]}],"outside":["outside"]}"#).unwrap().0;
+    let section = section(Vec::new(), plan.clone());
+    let project = project_key(&section);
+    let roles = Roles::of(&crate::theme::Theme::default());
+    let mut reader = Reader::default();
+    reader.project(&project).sections.widths = [Some(400.0), Some(300.0), Some(400.0), None];
+    let frame = |reader: &mut Reader, events: Vec<egui::Event>| {
+        for event in &events {
+            match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                } => {
+                    reader.begin_resize(*pos);
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => {
+                    reader.resize(*pos);
+                    reader.cancel_resize();
+                }
+                egui::Event::PointerMoved(pos) if reader.resizing() => reader.resize(*pos),
+                _ => {}
+            }
+        }
+        reader.hits.clear();
+        reader.targets.clear();
+        let mut offsets = egui::Vec2::ZERO;
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 400.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let outer = egui::ScrollArea::vertical()
+                    .id_salt("outer")
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        paint_plan_with(
+                            ui,
+                            &section,
+                            &plan,
+                            &roles,
+                            reader,
+                            &Default::default(),
+                            &column,
+                            &mut |_, _, _, _, _| {},
+                        );
+                        offsets.x = reader
+                            .targets
+                            .iter()
+                            .find_map(|(target, rect)| {
+                                matches!(target, Target::Header(_)).then_some(rect.left())
+                            })
+                            .unwrap();
+                        ui.add_space(700.0);
+                    });
+                offsets.y = outer.state.offset.y;
+            },
+        );
+        out.drop_without_applying_deltas();
+        offsets
+    };
+    frame(&mut reader, vec![]);
+    let baseline = frame(&mut reader, vec![]);
+    let at = reader.dividers[0].rect.center();
+    for phase in [egui::TouchPhase::Start, egui::TouchPhase::End] {
+        frame(
+            &mut reader,
+            vec![egui::Event::Touch {
+                device_id: egui::TouchDeviceId(1),
+                id: egui::TouchId(1),
+                phase,
+                pos: at,
+                force: None,
+            }],
+        );
+    }
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    assert_eq!(
+        frame(
+            &mut reader,
+            vec![egui::Event::PointerMoved(at), button(at, true)]
+        ),
+        baseline
+    );
+    for delta in [vec2(50.0, 20.0), vec2(100.0, 40.0)] {
+        assert_eq!(
+            frame(&mut reader, vec![egui::Event::PointerMoved(at - delta)]),
+            baseline
+        );
+    }
+    assert_eq!(
+        frame(&mut reader, vec![button(at - vec2(100.0, 40.0), false)]),
+        baseline
+    );
+    assert_eq!(
+        frame(&mut reader, vec![]),
+        baseline,
+        "release inertia panned the Board"
+    );
+    let widths = reader.project(&project).sections.widths;
+    assert_eq!(widths[Group::Active as usize], Some(300.0));
+    assert_eq!(widths[Group::Ready as usize], Some(400.0));
 }

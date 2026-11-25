@@ -363,6 +363,17 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
     let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
     wait_for_source(&mut window, &ctx, area, ids[0], first);
     wait_for_source(&mut window, &ctx, area, ids[2], second);
+    // Windows publishes the fixture directory before PowerShell has prepared console input.
+    // Only the child's empty file proves the reader is ready to receive the tested LF.
+    let ready = Instant::now() + std::time::Duration::from_secs(10);
+    while !matches!(fs::read(&marker).as_deref(), Ok(b"")) {
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(
+            Instant::now() < ready,
+            "input fixture did not open its witness"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let before: Vec<_> = window
         .all_panes()
         .map(|pane| (pane.name, pane.measured))
@@ -1185,8 +1196,14 @@ fn scrolling_files_keeps_console_paint_and_geometry_stable() {
     for index in 0..100 {
         fs::write(directory.0.join(format!("entry-{index:03}.txt")), "entry").unwrap();
     }
+    // The producer signals after console preparation, then waits while Files settles its layout.
+    // The Windows fixture already emits this readiness signal before its input gate.
+    #[cfg(unix)]
+    let announce = "printf ivy-fixture-reading; ";
+    #[cfg(windows)]
+    let announce = "";
     let command = format!(
-        "cd '{}' && printf '\x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS'; sleep 30",
+        "cd '{}' && {announce}read -r line; printf \x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS; sleep 30",
         directory.0.display()
     );
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
@@ -1196,6 +1213,41 @@ fn scrolling_files_keeps_console_paint_and_geometry_stable() {
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     wait_for_text(&mut window, &ctx, area, "entry-000.txt");
+    let ready = Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        frame(&mut window, &ctx, area, vec![]);
+        let text = window.pane_called(pane).unwrap().screen.to_text();
+        assert!(
+            !text.contains("CONSOLE_OPACITY_WITNESS"),
+            "producer bypassed its input gate"
+        );
+        if text.contains("ivy-fixture-reading") {
+            break;
+        }
+        assert!(
+            Instant::now() < ready,
+            "paint producer did not reach its read gate: {text}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Keep pumping while the real producer is held: directory/layout readiness cannot forge it.
+    for _ in 0..10 {
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(
+            !window
+                .pane_called(pane)
+                .unwrap()
+                .screen
+                .to_text()
+                .contains("CONSOLE_OPACITY_WITNESS")
+        );
+    }
+    window
+        .pane_called(pane)
+        .unwrap()
+        .pty
+        .write(b"go\n")
+        .unwrap();
     wait_for_console_text(
         &mut window,
         &ctx,

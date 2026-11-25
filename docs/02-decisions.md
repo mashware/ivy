@@ -10323,6 +10323,25 @@ process scans or per-frame inspection (unbounded or frame-blocking work without 
 
 ## D92 — Codex mobile and panel tools share one conversation owner
 
+**Amended 25 November 2026 — #251.** The official-server connection accepts an
+individual WebSocket frame up to the existing 64 MiB message ceiling. The official
+Codex 0.172.0 proxy emitted the plugin catalog as one 48,300,053-byte frame; the
+relay's default 16 MiB frame limit rejected its header even though the complete
+message was within the supported envelope. Frame and aggregate-message limits are
+independent, so setting only a message ceiling does not make that response usable.
+
+The upstream limit remains finite and independent of Codex version numbers. The
+local client's incoming-request limit, authentication, routing proof, shared owner
+and byte-progress health checks keep their existing boundaries. A large response
+must still pass through normal routing to the official client; accepting its header
+alone does not establish that it was delivered.
+
+**Discarded for the catalog amendment:** disabling remote plugins or editing user
+settings to shrink the catalog (removes available functionality); an unbounded
+frame/message size (removes the transport's memory envelope); extending health
+timeouts (does not affect header-length rejection); a version allowlist (catalog
+size can change without a CLI update).
+
 **Amended 23 November 2026 — #224.** On macOS, the bounded official
 `app-server daemon start` launch disclaims Ivy's native process responsibility at exec.
 The reporter closed Ivy and confirmed that its main process had exited, while two
@@ -10554,6 +10573,24 @@ or wrapped strip (loses the overview); drawing the whole producer body in each m
 (reintroduces the supplied crowding); a preliminary layout PR followed by a replacement (an extra
 serial delivery with no durable independent part). No native desktop or performance claim follows
 from synthetic geometry tests; existing Board spans account for the new work once.
+
+**Reader controls correction, 25 November 2026 — #250.** The owner's annotated screenshot asks
+for consistent header padding, removes roadmap preview rows because the header already exposes
+them, and makes caption groups adjustable. Milestone headers inset title, badge, count and progress
+by eight points. Default bodies retain every attached console card and its literal producer excerpt;
+only explicitly expanded headers (or Show all) expose roadmap item rows and closing criteria.
+The preview counts below cards are removed. Discarded: retaining two pending previews (the reported
+duplication) or removing access to roadmap details (the header is the requested access).
+
+In progress, Ready to start, Off the plan and Opened by you are reader-owned groups. Adjacent
+separators transfer width between their two neighbors, bounded by existing column minima. Hidden
+groups have named restore controls outside the horizontal scroller. Maximization is an override
+that leaves normal widths and visibility untouched; restoring recovers that state. These choices
+have Reader's session lifetime, independently per project. Show all retains its flat roadmap order
+and temporarily bypasses these group preferences. Discarded: per-milestone controls (the screenshot
+marks group boundaries), a second saved layout snapshot (duplicates normal state), and a new disk
+format (not requested). New input/layout/paint stays inside the existing Board timing spans;
+no performance or native validation claim follows from this decision.
 
 ## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
 
