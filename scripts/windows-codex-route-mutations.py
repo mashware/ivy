@@ -1,5 +1,6 @@
 """Run native route witnesses, then prove their individual guards can turn them red."""
 
+import argparse
 from pathlib import Path
 import os
 import subprocess
@@ -131,10 +132,17 @@ def mutate_owner(directory: Path) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--owner-only", action="store_true", help="Check the native owner fixture before the full workspace.")
+    arguments = parser.parse_args()
     if sys.platform != "win32":
         raise SystemExit("These witnesses require native Windows; cross-compilation is not execution.")
     directory = ROOT / "target/windows-codex-route-mutations"
     directory.mkdir(parents=True, exist_ok=True)
+    if arguments.owner_only:
+        mutate_owner(directory)
+        print("Windows Codex route owner mutation was detected.")
+        return
     for number, (filename, package, target, case, needle, replacement) in enumerate(CASES, 1):
         path = ROOT / filename
         original = path.read_bytes()

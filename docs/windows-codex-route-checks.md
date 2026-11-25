@@ -33,9 +33,11 @@ Run it in an elevated native PowerShell session, supplying the absolute checkout
 
 The script builds a disposable harness with the repository's pinned Rust toolchain and cached
 dependencies (`cargo build --offline`). It creates a file through the public private-file API,
-independently checks its owner and exact protected user/SYSTEM DACL, changes only its owner to
-Administrators, and verifies that the public opener rejects it with `PermissionDenied` while the
-sentinel remains readable. It also checks that the opener changed neither owner nor DACL.
+independently checks its owner and exact protected user/SYSTEM DACL, changes its owner to
+Administrators with [SetNamedSecurityInfoW](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setnamedsecurityinfow)
+using only `OWNER_SECURITY_INFORMATION` and null DACL arguments. It verifies that the public opener
+rejects it with `PermissionDenied` while the sentinel remains readable. It also checks that the
+opener changed neither owner nor DACL.
 The temporary harness is cleaned in `finally`, including after a failed fixture or assertion.
 
 Success prints exactly `PASS foreign-owner route file rejected`. If the owner guard accepts the

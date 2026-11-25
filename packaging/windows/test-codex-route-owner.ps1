@@ -28,9 +28,17 @@ version = "0.0.0"
 edition = "2024"
 [dependencies]
 panel-contract = { path = $DependencyLiteral }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
 "@, $Utf8)
     [IO.File]::WriteAllText((Join-Path $Harness 'src/main.rs'), @'
 use std::{io, path::PathBuf};
+use std::os::windows::ffi::OsStrExt;
+use std::ptr::null_mut;
+use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
+use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
+use windows_sys::Win32::Security::Authorization::{
+    ConvertStringSidToSidW, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+};
 fn main() {
     let mut args = std::env::args_os().skip(1);
     let mode = args.next().unwrap();
@@ -40,6 +48,18 @@ fn main() {
         let mut file = panel_contract::windows_private_file::create_new(&path).unwrap();
         file.write_all(b"owner-negative-sentinel").unwrap();
         file.sync_all().unwrap();
+    } else if mode == "owner" {
+        let sid_text: Vec<u16> = "S-1-5-32-544".encode_utf16().chain(Some(0)).collect();
+        let mut sid = null_mut();
+        assert_ne!(unsafe { ConvertStringSidToSidW(sid_text.as_ptr(), &mut sid) }, 0,
+            "{}", io::Error::last_os_error());
+        let mut name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let status = unsafe {
+            SetNamedSecurityInfoW(name.as_mut_ptr(), SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION, sid, null_mut(), null_mut(), null_mut())
+        };
+        unsafe { LocalFree(sid); }
+        assert_eq!(status, ERROR_SUCCESS, "{}", io::Error::from_raw_os_error(status as i32));
     } else {
         let error = panel_contract::windows_private_file::open(&path).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
@@ -81,15 +101,23 @@ fn main() {
     $Dacl = $Before.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
     $Foreign = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
     if ($Foreign.Value -eq $User.Value) { throw 'Foreign SID equals caller' }
-    $Before.SetOwner($Foreign)
-    Set-Acl -LiteralPath $File -AclObject $Before
+    $SavedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $OwnerOutput = & $Exe owner $File 2>&1
+        $OwnerStatus = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $SavedErrorAction
+    }
+    $OwnerOutput | ForEach-Object { Write-Host $_ }
+    if ($OwnerStatus -ne 0) { throw 'Owner assignment failed' }
     $Changed = Get-Acl -LiteralPath $File
     if ($Changed.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $Foreign.Value) {
         throw 'Owner change not established'
     }
-    if (-not $Changed.AreAccessRulesProtected -or
-        $Changed.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -ne $Dacl) {
-        throw 'DACL changed with owner'
+    $ChangedDacl = $Changed.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    if (-not $Changed.AreAccessRulesProtected -or $ChangedDacl -ne $Dacl) {
+        throw "DACL changed with owner: expected=$Dacl actual=$ChangedDacl protected=$($Changed.AreAccessRulesProtected)"
     }
     $SavedErrorAction = $ErrorActionPreference
     try {
@@ -106,9 +134,9 @@ fn main() {
     if ($After.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $Foreign.Value) {
         throw 'Opener repaired owner'
     }
-    if (-not $After.AreAccessRulesProtected -or
-        $After.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -ne $Dacl) {
-        throw 'Opener changed DACL'
+    $AfterDacl = $After.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    if (-not $After.AreAccessRulesProtected -or $AfterDacl -ne $Dacl) {
+        throw "Opener changed DACL: expected=$Dacl actual=$AfterDacl protected=$($After.AreAccessRulesProtected)"
     }
 } finally {
     if (Test-Path -LiteralPath $Harness) {
