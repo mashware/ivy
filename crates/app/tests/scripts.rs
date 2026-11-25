@@ -75,6 +75,26 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "panel-control/src/bin/ivy-session/signals.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/signals.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/signals_tests.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/signals_tests.rs"),
+    ),
+    (
+        "panel-control/src/client/agent_signal.rs",
+        include_str!("../../panel-control/src/client/agent_signal.rs"),
+    ),
+    (
+        "panel-control/src/client/agent_signal/tests.rs",
+        include_str!("../../panel-control/src/client/agent_signal/tests.rs"),
+    ),
+    (
+        "panel-control/tests/signals_helper.rs",
+        include_str!("../../panel-control/tests/signals_helper.rs"),
+    ),
+    (
         "panel-control/src/codex_relay/transport_tests.rs",
         include_str!("../../panel-control/src/codex_relay/transport_tests.rs"),
     ),

@@ -94,7 +94,7 @@ jobs:
         run: |
           python scripts/windows-opencode-mutations.py 2>&1 | Tee-Object windows-opencode-mutations.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Select-String -Path windows-opencode-mutations.log -SimpleMatch 'PASS all 5 OpenCode boundary mutations')) {
+          if (-not (Select-String -Path windows-opencode-mutations.log -SimpleMatch 'PASS all 6 OpenCode boundary mutations')) {
             throw 'The native OpenCode mutation matrix did not complete.'
           }
       - name: Keep native OpenCode transport evidence

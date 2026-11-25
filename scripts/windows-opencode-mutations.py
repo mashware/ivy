@@ -62,18 +62,27 @@ def main():
             cargo + ["--test", "signals_helper", "native_helper_wrong_pid_sends_zero_bytes_before_failed_readiness"],
             "native_helper_wrong_pid_sends_zero_bytes_before_failed_readiness",
         ))
+        cases.append((
+            "native-private-directory",
+            root / "crates/panel-control/src/client.rs",
+            "endpoint::private_to_this_user(dir)?;",
+            "let _ = dir;",
+            cargo + ["--test", "signals_helper", "native_helper_unsafe_directory_sends_zero_bytes_before_failed_readiness"],
+            "native_helper_unsafe_directory_sends_zero_bytes_before_failed_readiness",
+        ))
     for name, path, before, after, command, test_name in cases:
         original = path.read_bytes()
         needle = before.encode()
-        if original.count(needle) != 1:
-            raise SystemExit(f"{name}: expected one production mutation anchor")
+        count = 2 if name == "native-private-directory" else 1
+        if original.count(needle) != count:
+            raise SystemExit(f"{name}: expected {count} production mutation anchors")
         baseline = subprocess.run(command, cwd=root, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, timeout=180, check=False)
         if baseline.returncode != 0:
             sys.stdout.buffer.write(baseline.stdout)
             raise SystemExit(f"{name}: baseline must pass")
         try:
-            path.write_bytes(original.replace(needle, after.encode(), 1))
+            path.write_bytes(original.replace(needle, after.encode(), count))
             result = subprocess.run(command, cwd=root, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, timeout=180, check=False)
             output = result.stdout.decode("utf-8", errors="replace")

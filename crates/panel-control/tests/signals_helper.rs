@@ -14,6 +14,119 @@ use std::time::{Duration, Instant};
 const NULL: &[u8] =
     b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":null}\n";
 
+#[cfg(windows)]
+#[test]
+fn native_helper_unsafe_directory_sends_zero_bytes_before_failed_readiness() {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        GetNamedSecurityInfoW, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    };
+    use windows_sys::Win32::Security::{
+        ACL, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    };
+
+    struct RestoreAcl {
+        path: Vec<u16>,
+        dacl: *mut ACL,
+        descriptor: PSECURITY_DESCRIPTOR,
+    }
+    impl Drop for RestoreAcl {
+        fn drop(&mut self) {
+            // SAFETY: the saved ACL lives in descriptor until LocalFree below.
+            let result = unsafe {
+                SetNamedSecurityInfoW(
+                    self.path.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    self.dacl,
+                    null_mut(),
+                )
+            };
+            unsafe {
+                LocalFree(self.descriptor);
+            }
+            assert_eq!(result, ERROR_SUCCESS, "restore the fixture's private DACL");
+        }
+    }
+
+    let panel = PanelDir::create().unwrap();
+    let bound = endpoint::bind(panel.path(), panel.id()).unwrap();
+    let mut acl = RestoreAcl {
+        path: panel
+            .path()
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect(),
+        dacl: null_mut(),
+        descriptor: null_mut(),
+    };
+    assert_eq!(
+        unsafe {
+            GetNamedSecurityInfoW(
+                acl.path.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                &mut acl.dacl,
+                null_mut(),
+                &mut acl.descriptor,
+            )
+        },
+        ERROR_SUCCESS
+    );
+    assert_eq!(
+        unsafe {
+            SetNamedSecurityInfoW(
+                acl.path.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+            )
+        },
+        ERROR_SUCCESS
+    );
+    assert!(endpoint::private_to_this_user(panel.path()).is_err());
+    let server = std::thread::spawn(move || {
+        let mut stream = bound.accept().unwrap();
+        stream
+            .set_recv_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut byte = [0];
+        let received = stream.read(&mut byte).unwrap();
+        (received, byte)
+    });
+    let mut child = spawn(&panel);
+    let _ = child.stdin.take().unwrap().write_all(NULL);
+    wait(&mut child, Duration::from_secs(3));
+    let output = child.wait_with_output().unwrap();
+    // A distinct marker releases accept without attributing the witness connection to the helper.
+    let mut sentinel =
+        endpoint::connect_authenticated(panel.path(), panel.id(), std::process::id()).unwrap();
+    sentinel.write_all(b"!").unwrap();
+    let observed = server.join().unwrap();
+    drop(acl);
+    endpoint::private_to_this_user(panel.path()).unwrap();
+    assert_eq!(
+        observed,
+        (1, [b'!']),
+        "unsafe helper reached the native endpoint"
+    );
+    assert!(!output.status.success());
+    let ready: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(ready["ok"], false);
+    assert_eq!(ready["ready"], true);
+    assert_eq!(ready["retryable"], false);
+}
+
 fn spawn(panel: &PanelDir) -> Child {
     Command::new(env!("CARGO_BIN_EXE_ivy-session"))
         .arg("signals")
