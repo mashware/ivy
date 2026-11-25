@@ -5,7 +5,11 @@ if alias codex >/dev/null 2>&1 || declare -F codex >/dev/null; then
 else
     function codex {
         local ivy_real
-        ivy_real=$(type -P codex) || { printf '%s\n' 'Ivy: codex executable not found in PATH.' >&2; return 127; }
+        case $OSTYPE in
+            msys*|cygwin*) ivy_real=$(type -P codex.exe || type -P codex.cmd) ;;
+            *) ivy_real=$(type -P codex) ;;
+        esac
+        [[ -n $ivy_real ]] || { printf '%s\n' 'Ivy: codex executable not found in PATH.' >&2; return 127; }
         if [[ -x "$IVY_CODEX_HELPER" ]]; then
             "$IVY_CODEX_HELPER" "$ivy_real" "$@"
         else
