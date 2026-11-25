@@ -14,6 +14,9 @@ mod native_shell_entry {
             let code = r#"fn main() {
                 let args: Vec<_> = std::env::args().skip(1).collect();
                 std::fs::write(std::env::var_os("IVY_NATIVE_RECORD").unwrap(), format!("{args:?}")).unwrap();
+                if let Some(path) = std::env::var_os("IVY_NATIVE_IDENTITY") {
+                    std::fs::write(path, std::env::current_exe().unwrap().to_str().unwrap()).unwrap();
+                }
                 std::process::exit(std::env::var("IVY_NATIVE_STATUS").unwrap().parse().unwrap());
             }"#;
             std::fs::write(root.join("client.rs"), code).unwrap();
@@ -53,6 +56,30 @@ mod native_shell_entry {
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn powershell_programs() -> Vec<(PathBuf, u32)> {
+        #[cfg(windows)]
+        {
+            let legacy = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+            assert!(
+                legacy.is_file(),
+                "Windows PowerShell is required: {legacy:?}"
+            );
+            let pwsh = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|dir| dir.join("pwsh.exe"))
+                .find(|path| path.is_file())
+                .expect("PowerShell 7 is required on Windows; install pwsh and add it to PATH");
+            vec![(legacy, 5), (pwsh, 7)]
+        }
+        #[cfg(not(windows))]
+        {
+            std::env::var_os("IVY_TEST_PWSH")
+                .map(|path| (PathBuf::from(path), 7))
+                .into_iter()
+                .collect()
         }
     }
 
@@ -130,26 +157,7 @@ mod native_shell_entry {
 
     #[test]
     fn native_shell_entry_preserves_native_powershell_status_and_arguments() {
-        #[cfg(windows)]
-        let programs = {
-            let mut programs = vec![
-                PathBuf::from(std::env::var_os("SystemRoot").unwrap())
-                    .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
-            ];
-            if let Some(path) = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-                .map(|dir| dir.join("pwsh.exe"))
-                .find(|path| path.is_file())
-            {
-                programs.push(path);
-            }
-            programs
-        };
-        #[cfg(not(windows))]
-        let programs: Vec<_> = std::env::var_os("IVY_TEST_PWSH")
-            .map(PathBuf::from)
-            .into_iter()
-            .collect();
-        for program in programs {
+        for (program, major) in powershell_programs() {
             for batch in if cfg!(windows) {
                 vec![false, true]
             } else {
@@ -164,17 +172,24 @@ mod native_shell_entry {
                         "@echo off\r\n\"%~dp0client.exe\" %*\r\nexit /b %errorlevel%\r\n",
                     )
                     .unwrap();
-                    std::fs::write(fixture.0.join("codex.ps1"), "throw \"wrong launcher\"")
-                        .unwrap();
-                    "codex.cmd"
+                    "client.exe"
                 } else {
                     "codex.exe"
                 };
+                std::fs::write(fixture.0.join("codex.ps1"), "throw \"wrong launcher\"").unwrap();
                 let script = include_str!(
                     "../../../resources/agent-integrations/codex/shell/powershell.ps1"
                 );
                 let body = r#"
-$nativeArgs = @('-V', '-i', 'image one', '', '--long', 'quote"here')
+$alias = Get-Command codex
+if ($alias.CommandType -ne 'Alias' -or $alias.Definition -ne (Join-Path $env:IVY_TEST_ROOT 'ivy-codex-shell.exe')) {
+    throw 'native alias target missing'
+}
+'VERSION:' + $PSVersionTable.PSVersion.Major
+$nativeArgs = @('-V', '-i', 'image one', '', '--long', 'trailing\')
+if ($env:IVY_NATIVE_TARGET -eq 'codex.exe') {
+    $nativeArgs += 'amp&pipe|caret^percent%dollar$paren()semi;angle<>'
+}
 & (Join-Path $env:IVY_TEST_ROOT $env:IVY_NATIVE_TARGET) @nativeArgs
 'DIRECT:' + $? + ':' + $LASTEXITCODE
 $direct = [IO.File]::ReadAllText($env:IVY_NATIVE_RECORD)
@@ -203,6 +218,7 @@ exit 0
                     &format!("{script}\n{body}"),
                 ]);
                 let out = output(command, &fixture.0);
+                assert!(out.contains(&format!("VERSION:{major}")), "{out}");
                 assert!(out.contains("DIRECT:False:37"), "{out}");
                 assert!(out.contains("WRAPPED:False:37"), "{out}");
                 assert!(
@@ -210,10 +226,102 @@ exit 0
                     "{out}"
                 );
                 assert!(!out.contains("WRONG_FAILURE_CHAIN"), "{out}");
-                if out.contains("CHAINS_CHECKED") {
+                if major >= 7 {
+                    assert!(out.contains("CHAINS_CHECKED"), "{out}");
                     assert!(out.contains("SUCCESS_CHAIN"), "{out}");
                 }
+                let mut expected = vec!["-V", "-i", "image one", "", "--long", "trailing\\"];
+                if major == 5 {
+                    expected.retain(|arg| !arg.is_empty());
+                }
+                if !batch {
+                    expected.push("amp&pipe|caret^percent%dollar$paren()semi;angle<>");
+                }
+                assert_eq!(
+                    std::fs::read_to_string(fixture.0.join("record")).unwrap(),
+                    format!("{expected:?}"),
+                    "{program:?}, batch={batch}"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn native_shell_entry_resolves_path_changes_after_powershell_installs_the_alias() {
+        for (program, _) in powershell_programs() {
+            let fixture = Fixture::new();
+            for name in ["first", "second"] {
+                std::fs::create_dir(fixture.0.join(name)).unwrap();
+            }
+            std::fs::rename(
+                fixture.0.join("codex.exe"),
+                fixture.0.join("first/codex.exe"),
+            )
+            .unwrap();
+            std::fs::copy(
+                fixture.0.join("first/codex.exe"),
+                fixture.0.join("second/codex.exe"),
+            )
+            .unwrap();
+            let script =
+                include_str!("../../../resources/agent-integrations/codex/shell/powershell.ps1");
+            let body = r#"
+$alias = Get-Command codex
+if ($alias.CommandType -ne 'Alias' -or $alias.Definition -ne (Join-Path $env:IVY_TEST_ROOT 'ivy-codex-shell.exe')) {
+    throw 'native alias target missing'
+}
+foreach ($name in @('first', 'second')) {
+    $env:PATH = Join-Path $env:IVY_TEST_ROOT $name
+    $env:IVY_NATIVE_RECORD = Join-Path $env:IVY_TEST_ROOT "$name-args"
+    $env:IVY_NATIVE_IDENTITY = Join-Path $env:IVY_TEST_ROOT "$name-identity"
+    codex -V "image $name"
+    if (-not $? -or $LASTEXITCODE -ne 0) { throw "client $name failed" }
+}
+'PATH_CHANGES_CHECKED'
+exit 0
+"#;
+            let mut command = fixture.command(&program);
+            command.env("IVY_NATIVE_STATUS", "0").args([
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                &format!("{script}\n{body}"),
+            ]);
+            assert!(output(command, &fixture.0).contains("PATH_CHANGES_CHECKED"));
+            for name in ["first", "second"] {
+                let identity =
+                    std::fs::read_to_string(fixture.0.join(format!("{name}-identity"))).unwrap();
+                assert_eq!(
+                    std::fs::canonicalize(identity).unwrap(),
+                    std::fs::canonicalize(fixture.0.join(name).join("codex.exe")).unwrap()
+                );
+                assert_eq!(
+                    std::fs::read_to_string(fixture.0.join(format!("{name}-args"))).unwrap(),
+                    format!("{:?}", ["-V", &format!("image {name}")])
+                );
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_shell_entry_refuses_unsafe_batch_arguments_visibly() {
+        let fixture = Fixture::new();
+        std::fs::rename(fixture.0.join("codex.exe"), fixture.0.join("client.exe")).unwrap();
+        std::fs::write(
+            fixture.0.join("codex.cmd"),
+            "@echo off\r\n\"%~dp0client.exe\" %*\r\nexit /b %errorlevel%\r\n",
+        )
+        .unwrap();
+        for argument in ["line\nbreak", "line\rbreak"] {
+            let result = fixture
+                .command(fixture.0.join("ivy-codex-shell.exe"))
+                .args(["-V", argument])
+                .output()
+                .unwrap();
+            assert!(!result.status.success(), "unsafe batch argument accepted");
+            assert!(!result.stderr.is_empty(), "batch failure was silent");
+            assert!(!fixture.0.join("record").exists(), "client was started");
         }
     }
 }

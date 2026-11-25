@@ -144,15 +144,11 @@ mod powershell {
                     .unwrap()
                     .join("WindowsPowerShell/v1.0/powershell.exe"),
                 ];
-                for directory in
-                    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-                {
-                    let pwsh = directory.join("pwsh.exe");
-                    if pwsh.is_file() {
-                        paths.push(pwsh);
-                        break;
-                    }
-                }
+                let pwsh = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                    .map(|directory| directory.join("pwsh.exe"))
+                    .find(|path| path.is_file())
+                    .expect("PowerShell 7 is required on Windows; install pwsh and add it to PATH");
+                paths.push(pwsh);
                 assert!(
                     paths.iter().all(|path| path.is_file()),
                     "Windows PowerShell is required: {paths:?}"
@@ -183,6 +179,31 @@ mod powershell {
             fn drop(&mut self) {
                 let _ = std::fs::remove_dir_all(&self.0);
             }
+        }
+
+        fn native_client(root: &Path, name: &str) -> PathBuf {
+            let source = root.join("client.rs");
+            std::fs::write(
+                &source,
+                r#"fn main() {
+                    let args: Vec<_> = std::env::args().skip(1).collect();
+                    println!("NATIVE_CLIENT:{args:?}");
+                    std::fs::write(std::path::PathBuf::from(std::env::var_os("IVY_TEST_ROOT").unwrap()).join("native-called"), "called").unwrap();
+                }"#,
+            )
+            .unwrap();
+            let target = root.join(name);
+            assert!(
+                std::process::Command::new("rustc")
+                    .arg("--crate-name=ivy_powershell_fixture")
+                    .arg(&source)
+                    .arg("-o")
+                    .arg(&target)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            target
         }
 
         fn run(
@@ -277,11 +298,13 @@ prompt
         fn windows_powershell_preserves_prompt_error_status_and_user_codex_commands() {
             for program in programs() {
                 for definition in [
-                    "function codex { 'USER_CODEX' }",
-                    "function user_codex { 'USER_CODEX' }; Set-Alias codex user_codex",
+                    "function codex { 'USER_CODEX:' + ($args -join ':') }",
+                    "function user_codex { 'USER_CODEX:' + ($args -join ':') }; Set-Alias codex user_codex",
                 ] {
                     let root = Temp::new();
-                    let helper = std::env::current_exe().unwrap();
+                    native_client(&root.0, "ivy-codex-shell.exe");
+                    let helper = root.0.join("ivy-codex.exe");
+                    std::fs::write(&helper, "unused helper").unwrap();
                     let prelude =
                         format!("function prompt {{ \"STATUS:$?:$LASTEXITCODE\" }}; {definition}");
                     let (out, err) = run(
@@ -291,18 +314,87 @@ prompt
 $global:LASTEXITCODE = 37
 Write-Error 'expected failure' -ErrorAction SilentlyContinue
 prompt
-codex
+codex -V 'image one'
 "#,
                         Some(&helper),
                         &root.0,
                     );
                     assert!(out.contains("STATUS:False:37"), "{out}");
-                    assert!(out.contains("USER_CODEX"), "{out}");
+                    assert!(out.contains("USER_CODEX:-V:image one"), "{out}");
+                    assert!(!root.0.join("native-called").exists(), "{out}");
                     assert!(
                         err.contains("existing codex alias or function preserved"),
                         "{err}"
                     );
                 }
+            }
+        }
+
+        #[test]
+        fn windows_powershell_missing_native_sibling_leaves_the_path_client_callable() {
+            for program in programs() {
+                let root = Temp::new();
+                native_client(&root.0, if cfg!(windows) { "codex.exe" } else { "codex" });
+                let helper = root.0.join("ivy-codex.exe");
+                std::fs::write(&helper, "unused helper").unwrap();
+                let (out, err) = run(
+                    &program,
+                    r#"
+function prompt { 'CUSTOM_PROMPT' }
+$env:PATH = $env:IVY_TEST_ROOT
+"#,
+                    r#"
+'WRAPPED:' + [bool](Get-Command codex -CommandType Alias,Function -ErrorAction Ignore)
+codex -V 'image one'
+prompt
+"#,
+                    Some(&helper),
+                    &root.0,
+                );
+                assert!(out.contains("WRAPPED:False"), "{out}");
+                assert!(
+                    out.contains(r#"NATIVE_CLIENT:["-V", "image one"]"#),
+                    "{out}"
+                );
+                assert!(root.0.join("native-called").is_file(), "{out}");
+                assert!(
+                    out.contains("\x1b]7;file://") && out.contains("CUSTOM_PROMPT"),
+                    "{out}"
+                );
+                assert!(err.contains("native Codex launcher unavailable"), "{err}");
+            }
+        }
+
+        #[test]
+        fn windows_powershell_formats_unc_provider_paths_without_network_access() {
+            for program in programs() {
+                let root = Temp::new();
+                let (out, err) = run(
+                    &program,
+                    "function prompt { 'CUSTOM_PROMPT' }",
+                    r#"
+function global:Get-Location {
+    [pscustomobject]@{
+        Provider = [pscustomobject]@{ Name = 'FileSystem' }
+        ProviderPath = '\\ivy-remote\share %\café#'
+    }
+}
+prompt
+"#,
+                    None,
+                    &root.0,
+                );
+                assert_eq!(
+                    out,
+                    "\x1b]7;file://ivy-remote/share%20%25/caf%C3%A9%23\x1b\\CUSTOM_PROMPT\n"
+                        .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
+                );
+                let mut screen = term_core::Screen::new(term_core::Size::default());
+                screen.advance(b"\x1b]7;file:///before\x1b\\");
+                assert!(screen.working_directory().is_some());
+                screen.advance(out.as_bytes());
+                assert_eq!(screen.working_directory(), None);
+                assert!(err.is_empty(), "{err}");
             }
         }
     }
