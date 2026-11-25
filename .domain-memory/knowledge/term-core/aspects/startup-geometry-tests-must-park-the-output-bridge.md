@@ -9,19 +9,24 @@ status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-11-19T00:15:58.058Z'
-updated_at: '2026-11-19T00:15:58.058Z'
-last_verified: '2026-11-19T00:15:58.058Z'
+updated_at: '2026-11-25T22:33:13.022Z'
+last_verified: '2026-11-25T22:33:13.022Z'
 file_paths:
   - crates/app/src/launch.rs
   - crates/app/src/pty_output.rs
   - crates/app/src/launch/tests.rs
+  - crates/app/src/viewer/interaction_tests.rs
 symbols:
   - prepare
   - 'Process::startup_pending'
   - 'Process::interpreted'
   - 'PtyOutput::seeded'
+  - control_click_reveals_markdown_in_files_before_opening_its_viewer
 content_hashes:
-  crates/app/src/pty_output.rs: 'sha256:a4d23c4dc759b0fffd4494985ed440832c81a0fe1d3f8018767c00bf4037c7fa'
+  crates/app/src/launch.rs: 'sha256:d82ad7a71414f09c368326a30e166db031d7b756f86579d8e752f4eca057f79e'
+  crates/app/src/pty_output.rs: 'sha256:aea4d95e850ac3dc311a759d6c1d56deef352d1c235790231f0e2c5a67ab12db'
+  crates/app/src/launch/tests.rs: 'sha256:e8b8d3606f2711f39136b58bafc1e360d9bcb9da8024e6ff69eb660555e4942d'
+  crates/app/src/viewer/interaction_tests.rs: 'sha256:f5dde8a4d6258434946fda94d75ceaaf7026d6a992edb2728eece069e7db5847'
 tags:
   - startup
   - terminal-geometry
@@ -41,6 +46,16 @@ The regression must park the bridge before its first enqueue rather than wait fo
 
 Evidence: #124 startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked and startup_snapshot_has_a_finite_chunk_bound_and_preserves_the_remaining_stream. Deliberately removing capture, resize gating, either input gate or the finite snapshot bound failed the corresponding assertions; source restored afterward. Verified 2026-11-19, candidate6cb89bb.
 
+### Synthetic renderer fixtures need a single output producer
+
+A test that writes OSC7 and an absolute path directly through Screen::advance must not leave native startup or resize output attached to that same synthetic screen. The Markdown Ctrl-click fixture in #173 did: native CI painted only a filename suffix. Its is_some local-target assertion could also accept a different relative filename instead of the intended file.
+
+Use the idle-channel boundary already used by the neighboring image fixture, retain the sender for its lifetime, assert the exact full target and deliberately cover a wrapped path. Keep the actual Ctrl-click, Files reveal, file activation and rendered Markdown checks. In a paired deterministic reproduction, the same original-channel queued clear/home/suffix bytes and wake handshake failed without isolation and passed with it; removing Ctrl separately failed the actual Files effect. The crafted replay proves the fixture boundary, not the exact native byte sequence that caused the original CI failure. Both repaired Markdown witnesses passed natively in run45696334411.
+
+This does not replace the parked real bridge in the startup-geometry witness above: that test studies arrival ordering; the synthetic interaction fixture supplies its own screen content and must exclude a second writer.
+
 ## Where it lives
 
 crates/app/src/launch.rs — prepare, Process::interpreted/startup_pending, complete and finish_input; crates/app/src/pty_output.rs — seeded output bridge and normal pump; crates/app/src/launch/tests.rs — parked-bridge and finite-prefix regressions.
+
+crates/app/src/viewer/interaction_tests.rs::control_click_reveals_markdown_in_files_before_opening_its_viewer owns synthetic screen content and the idle output channel; The neighboring image interaction fixture is in the same module.
