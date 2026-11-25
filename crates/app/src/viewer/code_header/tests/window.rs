@@ -51,12 +51,13 @@ fn window_pass(
             _ => None,
         })
         .collect();
-    let shapes = output.shapes.clone();
+    let shapes = painted_shapes(&output.shapes);
     output.drop_without_applying_deltas();
     Painted {
         texts,
         copied,
         shapes,
+        widgets: Vec::new(),
     }
 }
 
