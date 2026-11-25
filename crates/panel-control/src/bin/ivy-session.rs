@@ -3,7 +3,18 @@
 use panel_control::session::{self, Client, Request};
 use std::io::{Read, Write};
 
+#[path = "ivy-session/signals.rs"]
+mod signals;
+
 fn main() {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args.as_slice() == [std::ffi::OsString::from("signals")] {
+        if let Err(failure) = signals::run(std::io::stdin().lock(), std::io::stdout().lock()) {
+            eprintln!("ivy-session signals: {failure}");
+            std::process::exit(1);
+        }
+        return;
+    }
     use panel_control::client::whole_identity;
 
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
@@ -11,7 +22,6 @@ fn main() {
         println!("{{\"ok\":false,\"error\":\"outside_ivy\"}}");
         std::process::exit(1);
     }
-    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if args.as_slice() == [std::ffi::OsString::from("publish")] {
         publish(std::io::stdin().lock());
         return;

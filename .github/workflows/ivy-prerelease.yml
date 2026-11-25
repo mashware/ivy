@@ -69,6 +69,43 @@ jobs:
       - name: Check Windows launch helper contracts
         shell: pwsh
         run: ./packaging/windows/test-launch-contract.ps1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.14.1'
+      - name: Test the actual OpenCode adapter and helper lifecycle
+        shell: pwsh
+        run: |
+          node --test resources/agent-integrations/opencode/plugin.test.mjs resources/agent-integrations/opencode/windows-helper.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove OpenCode signals through the native Windows helper and channel
+        shell: pwsh
+        run: |
+          cargo build --locked -p panel-control --bin ivy-session
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $fixture = (Resolve-Path resources/agent-integrations/opencode/native-helper.test.mjs).Path
+          $helper = (Resolve-Path target/debug/ivy-session.exe).Path
+          cargo run --locked -p panel-control --example opencode-signals -- $fixture $helper 2>&1 | Tee-Object windows-opencode-signals.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path windows-opencode-signals.log -SimpleMatch 'two-pane isolation; transport=Windows')) {
+            throw 'The native OpenCode plugin/helper witness did not complete.'
+          }
+      - name: Prove native OpenCode boundary regressions with mutations
+        shell: pwsh
+        run: |
+          python scripts/windows-opencode-mutations.py 2>&1 | Tee-Object windows-opencode-mutations.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path windows-opencode-mutations.log -SimpleMatch 'PASS all 5 OpenCode boundary mutations')) {
+            throw 'The native OpenCode mutation matrix did not complete.'
+          }
+      - name: Keep native OpenCode transport evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-opencode-signals-evidence
+          path: |
+            windows-opencode*.log
+            target/opencode-evidence/*.log
+          if-no-files-found: warn
       - name: Prove Ctrl+Alt text with native Spanish and US keyboards
         shell: pwsh
         env:

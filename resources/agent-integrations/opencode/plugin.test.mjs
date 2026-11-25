@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { createServer } from 'node:net'
 
 const pause = ms => new Promise(r => setTimeout(r, ms))
-test('route bootstrap, displayed request, cancellation, navigation and disposal', async () => {
+test('route bootstrap, displayed request, cancellation, navigation and disposal', {skip: process.platform === 'win32' ? 'Unix socket controller; Windows helper is covered by windows-helper and native-helper fixtures' : false}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ivy-opencode-'))
   await mkdir(join(dir, 'node_modules/solid-js'), {recursive:true})
   await writeFile(join(dir, 'node_modules/solid-js/package.json'), '{"type":"module","exports":"./index.js"}')
@@ -139,7 +139,7 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
   } finally { if (dispose) await dispose(); if (server) await new Promise(resolve => server.close(resolve)); delete process.env.PANEL_DIR; delete process.env.PANEL_ID; await rm(dir,{recursive:true,force:true}) }
 })
 
-test('private directory check precedes every connection and disposal cancels retries', async () => {
+test('private directory check precedes every connection and disposal cancels retries', {skip: process.platform === 'win32' ? 'Unix uid/mode/symlink authentication; Windows uses authenticated native helper coverage' : false}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ivy-private-'))
   const originalDir = process.env.PANEL_DIR, originalId = process.env.PANEL_ID
   try {

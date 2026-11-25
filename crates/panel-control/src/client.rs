@@ -9,6 +9,9 @@ use std::path::Path;
 
 use crate::endpoint::Stream;
 
+mod agent_signal;
+pub use agent_signal::SignalAnswer;
+
 use crate::endpoint;
 use crate::wire::{MAX_REQUEST, Side};
 

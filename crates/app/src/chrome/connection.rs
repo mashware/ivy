@@ -520,7 +520,7 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     ui.label("To avoid a duplicate Codex title spinner, merge this key into your existing [tui] table in ~/.codex/config.toml. Preserve other settings, then restart Codex and resume your conversation:");
     copyable(ui, "terminal_title = [\"thread-name\", \"project-name\"]", "Copy Codex title setting", &mut guide.copied);
     ui.label("Claude removes its duplicate title indicator after native negotiation. Live client verification is still required.");
-    if cfg!(windows) { ui.label("The OpenCode TUI plugin transport is not supported on Windows in this delivery."); }
+    if cfg!(windows) { ui.label("After updating Ivy, use Install / repair OpenCode plugin and restart OpenCode in this console. Installed-client verification on Windows remains separate from adapter tests."); }
     if let Some(dir) =
         crate::settings::path().and_then(|p| p.parent().map(std::path::Path::to_path_buf))
     {
