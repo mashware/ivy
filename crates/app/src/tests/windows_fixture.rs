@@ -301,7 +301,10 @@ fn diagnostics_keep_each_childs_stages_and_exception_outside_its_output() {
             }
             if Instant::now() >= deadline {
                 let _ = child.kill();
-                let _ = child.wait();
+                let cleanup_deadline = Instant::now() + Duration::from_millis(100);
+                while child.try_wait().unwrap().is_none() && Instant::now() < cleanup_deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
                 panic!("PowerShell diagnostic fixture timed out");
             }
             std::thread::sleep(Duration::from_millis(10));
