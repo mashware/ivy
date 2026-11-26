@@ -114,10 +114,10 @@ fn fresh_rejects_recognized_nested_process_and_helper_exit_keeps_witness() {
     let mut screen = Screen::new(Size::default());
     let pid = loop {
         answer_output(&mut pty, &output, &mut screen);
-        if let Ok(value) = std::fs::read_to_string(&marker) {
-            if let Ok(pid) = value.parse() {
-                break pid;
-            }
+        if let Ok(value) = std::fs::read_to_string(&marker)
+            && let Ok(pid) = value.parse()
+        {
+            break pid;
         }
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(10));
