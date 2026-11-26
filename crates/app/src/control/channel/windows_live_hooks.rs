@@ -165,7 +165,9 @@ fn windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane() {
         pane.pty.failure
     );
     assert!(pane.control.is_some(), "completion installs native control");
-    wait_file(&work.join("ready"), || {});
+    wait_file(&work.join("ready"), || {
+        pane.pump(Default::default());
+    });
     let _bridge_cleanup = BridgeCleanup::retain(&work);
     let witness = std::fs::read_to_string(work.join("launch-witness")).unwrap();
     let (argc, cwd) = witness.split_once('\n').unwrap();
@@ -194,7 +196,9 @@ fn windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane() {
     assert!(tab.attention(SystemTime::now()).is_some());
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "publish").unwrap();
-    let reply = wait_file(&work.join("result"), || {});
+    let reply = wait_file(&work.join("result"), || {
+        tab.panes_mut()[0].pump(Default::default());
+    });
     assert!(
         reply.contains("{\"ok\":true}"),
         "fresh worker hook authority: {reply}"
@@ -212,6 +216,7 @@ fn windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane() {
     std::fs::write(work.join("command"), "exit").unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     while tab.panes_mut()[0].pty.exit_success().is_none() && Instant::now() < deadline {
+        tab.panes_mut()[0].pump(Default::default());
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(tab.panes_mut()[0].pty.exit_success(), Some(true));
@@ -220,6 +225,7 @@ fn windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane() {
 }
 
 fn apply_pane(pane: &mut crate::Pane) {
+    pane.pump(Default::default());
     pane.control.as_mut().unwrap().apply(
         &mut pane.panel_state,
         &mut pane.signals,
