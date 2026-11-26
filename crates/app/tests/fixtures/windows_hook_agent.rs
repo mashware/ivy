@@ -19,6 +19,10 @@ fn result(text: impl AsRef<[u8]>) -> std::io::Result<()> {
 }
 
 fn main() {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--help")) {
+        println!("Usage: ivy-hook-fixture");
+        return;
+    }
     if let Err(error) = run() {
         let _ = fs::write("failure", error.to_string());
         std::process::exit(1);

@@ -17,11 +17,18 @@ EVIDENCE = ROOT / "target" / "windows-live-hook-mutations"
 TARGET = ROOT / "target" / "windows-live-hooks" / "cargo-target"
 LIVE = "control::channel::windows_live_hooks::windows_live_hook_real_bridge_and_helper_clear_wait"
 FRESH = "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane"
+CAPABILITY = "control::channel::windows_live_hooks::windows_fresh_codex_without_local_capability_is_painted_without_authority"
 IMAGE = "foreground::windows::fresh_tests::fresh_root_rejects_wrong_image_foreign_root_and_console_close"
+IDENTITY = "foreground::windows::fresh_tests::fresh_registration_rechecks_captured_root_identity_and_sequence"
+SEQUENCE = "foreground::windows::chain::tests::later_reused_parent_is_unknown_despite_earlier_wall_clock_birth"
 CWD = "tests::windows_exact_cwd_removed_after_validation_fails_instead_of_using_home"
 
 # label, source, unique before, replacement, package, exact test, assertion witness
 CASES = (
+    ("codex-local-capability", "crates/app/src/launch/fresh.rs",
+     "if selection.client == Client::Codex\n",
+     "if false && selection.client == Client::Codex\n",
+     "app", CAPABILITY, "fresh Codex capability refusal must be painted"),
     ("fresh-authority", "crates/app/src/launch.rs",
      "return crate::panel::overlay::Authority::fresh(scope, invocation);",
      "let _ = invocation; return crate::panel::overlay::Authority::new(scope);",
@@ -32,6 +39,17 @@ CASES = (
     ("nested-client-image", "crates/term-core/src/foreground/windows/fresh.rs",
      "if root.images.contains(&image) {", "if false && root.images.contains(&image) {",
      "app", LIVE, "nested client reply:"),
+    ("captured-root-identity", "crates/term-core/src/foreground/windows/fresh.rs",
+     "|| process::identity(self.root.as_handle())? != self.root_identity",
+     "|| (process::identity(self.root.as_handle())? != self.root_identity && false)",
+     "term-core", IDENTITY, "a changed captured root birth must prevent registration"),
+    ("captured-root-sequence", "crates/term-core/src/foreground/windows/fresh.rs",
+     "|| ancestry::sequence(self.root.as_handle())? != root_sequence",
+     "|| (ancestry::sequence(self.root.as_handle())? != root_sequence && false)",
+     "term-core", IDENTITY, "a changed captured root sequence must prevent registration"),
+    ("ancestry-sequence-order", "crates/term-core/src/foreground/windows/chain.rs",
+     "id.sequence >= child.sequence", "id.sequence >= child.sequence && false",
+     "term-core", SEQUENCE, "assertion `left == right` failed"),
     ("root-lifetime-at-apply", "crates/panel-control/src/windows_hooks.rs",
      "!self.revoked.load(Ordering::Acquire) && self.root.current()",
      "!self.revoked.load(Ordering::Acquire) && { let _ = &self.root; true }",
@@ -107,10 +125,12 @@ def main():
     env["CARGO_TARGET_DIR"] = str(TARGET)
     code, _ = invoke("baseline-suite", [sys.executable, str(ROOT / "scripts/windows-live-hooks.py")], env)
     if code != 0:
-        raise SystemExit("the six named baseline witnesses must pass first")
-    code, output = invoke("baseline-selected-root-image", test_command("term-core", IMAGE), env)
-    if not passed_once(IMAGE, code, output):
-        raise SystemExit("the named selected-root-image baseline did not pass exactly once")
+        raise SystemExit("the named native baseline witnesses must pass first")
+    for label, name in [("selected-root-image", IMAGE), ("captured-root-identity", IDENTITY),
+                        ("ancestry-sequence-order", SEQUENCE)]:
+        code, output = invoke(f"baseline-{label}", test_command("term-core", name), env)
+        if not passed_once(name, code, output):
+            raise SystemExit(f"the named {label} baseline did not pass exactly once")
 
     for item, (label, relative, before, after, package, name, marker) in zip(inventory, CASES):
         path = ROOT / relative

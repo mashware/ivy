@@ -38,6 +38,33 @@ fn fresh_root_rejects_wrong_image_foreign_root_and_console_close() {
 }
 
 #[test]
+fn fresh_registration_rechecks_captured_root_identity_and_sequence() {
+    let _inspection_guard = super::inspection::TEST_LOCK.lock().unwrap();
+    let system = std::env::var_os("SystemRoot").unwrap();
+    let shell = Path::new(&system).join(r"System32\cmd.exe");
+    let (pty, _) = Pty::spawn(shell.to_str().unwrap(), &["/K"], Size::default()).unwrap();
+    let mut captured = scope(&pty).unwrap();
+    assert!(captured.fresh_invocation(&shell, &[]).is_ok());
+
+    let identity = captured.root_identity;
+    captured.root_identity.birth = identity.birth.wrapping_add(1);
+    assert!(
+        captured.fresh_invocation(&shell, &[]).is_err(),
+        "a changed captured root birth must prevent registration"
+    );
+    captured.root_identity = identity;
+
+    let sequence = captured.root_sequence.unwrap();
+    captured.root_sequence = Some(sequence.wrapping_add(1));
+    assert!(
+        captured.fresh_invocation(&shell, &[]).is_err(),
+        "a changed captured root sequence must prevent registration"
+    );
+    captured.root_sequence = Some(sequence);
+    assert!(captured.fresh_invocation(&shell, &[]).is_ok());
+}
+
+#[test]
 fn fresh_witness_expires_when_root_exits() {
     let _inspection_guard = super::inspection::TEST_LOCK.lock().unwrap();
     let root = std::env::var("SystemRoot").unwrap();

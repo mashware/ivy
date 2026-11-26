@@ -50,6 +50,133 @@ struct NativeWindow {
     class: Vec<u16>,
     instance: isize,
 }
+
+fn assert_fresh_failure_is_painted(
+    selection: crate::launch::fresh::Selection,
+    expected_reason: Option<&str>,
+    marker: &str,
+) {
+    let ctx = egui::Context::default();
+    let mut pane = crate::Pane::with_panel(
+        &ctx,
+        "cmd.exe",
+        &["/d".into(), "/c".into(), "exit".into()],
+        None,
+        0,
+    )
+    .unwrap();
+    pane.control.take();
+    let (process, output) = crate::launch::fresh::start(
+        Arc::new(|| {}),
+        Default::default(),
+        selection,
+        Size::default(),
+        Vec::new(),
+    )
+    .unwrap();
+    pane.pty = process;
+    pane.pty.context = Some(ctx.clone());
+    pane.pty_output = crate::pty_output::PtyOutput::new(output, || {});
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while pane.pty.pending() {
+        crate::launch::complete(&mut pane);
+        assert!(Instant::now() < deadline, "fresh failure worker timed out");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1000.0));
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(area),
+            ..Default::default()
+        },
+        |ui| {
+            crate::painter::notices::paint_them_over_it(
+                &ui.painter_at(area),
+                &pane,
+                &crate::theme::Theme::default(),
+                &crate::painter::CellMetrics::of(8.0, 16.0),
+                area,
+                crate::painter::Keys::Here,
+            );
+        },
+    );
+    let text = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    output.drop_without_applying_deltas();
+    assert!(
+        text.contains("This console's program could not be started.")
+            && text.contains("Program:")
+            && text.contains("Reason:")
+            && expected_reason.is_none_or(|reason| text.contains(reason)),
+        "{marker}: {text}"
+    );
+    assert!(
+        pane.control.is_none(),
+        "failed launch installed control authority"
+    );
+    assert!(
+        pane.pty.foreground_scope().is_err(),
+        "failed launch substituted a live fallback program"
+    );
+    assert!(pane.pty.write(b"must not run\r").is_err());
+    assert!(
+        !pane.is_finished(false),
+        "failure explanation was auto-closed"
+    );
+}
+
+#[test]
+fn windows_fresh_native_loader_failure_is_painted_without_fallback() {
+    let work = std::env::temp_dir().join(format!("ivy-loader-failure-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    let invalid = work.join("invalid-agent.exe");
+    std::fs::write(&invalid, b"This is not a native executable image.").unwrap();
+    assert_fresh_failure_is_painted(
+        crate::launch::fresh::Selection {
+            client: crate::launch::fresh::Client::Claude,
+            images: [
+                invalid.to_str().unwrap().into(),
+                String::new(),
+                String::new(),
+            ],
+            directory: work.to_str().unwrap().into(),
+        },
+        None,
+        "fresh native loader failure must be painted",
+    );
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn windows_fresh_codex_without_local_capability_is_painted_without_authority() {
+    let work = std::env::temp_dir().join(format!("ivy-capability-failure-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    assert_fresh_failure_is_painted(
+        crate::launch::fresh::Selection {
+            client: crate::launch::fresh::Client::Codex,
+            images: [
+                String::new(),
+                fixture_exe().to_str().unwrap().into(),
+                String::new(),
+            ],
+            directory: work.to_str().unwrap().into(),
+        },
+        Some("This Codex executable does not advertise --no-daemon."),
+        "fresh Codex capability refusal must be painted",
+    );
+    assert!(
+        !work.join("launch-witness").exists(),
+        "unsupported Codex was launched as an interactive session"
+    );
+    std::fs::remove_dir_all(work).unwrap();
+}
 impl NativeWindow {
     fn new() -> Self {
         let class: Vec<u16> = format!(

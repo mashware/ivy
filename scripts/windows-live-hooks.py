@@ -14,6 +14,8 @@ TARGET = EVIDENCE / "cargo-target"
 APP_TESTS = (
     "control::channel::windows_live_hooks::windows_live_hook_real_bridge_and_helper_clear_wait",
     "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane",
+    "control::channel::windows_live_hooks::windows_fresh_native_loader_failure_is_painted_without_fallback",
+    "control::channel::windows_live_hooks::windows_fresh_codex_without_local_capability_is_painted_without_authority",
 )
 TERM_TESTS = (
     "tests::windows_exact_cwd_reaches_the_child",
@@ -76,7 +78,8 @@ def main():
                        "--features", "serde_support", "--lib", "--", name, "--exact",
                        "--nocapture", "--test-threads=1"]
             require_pass(name, *execute(f"vendor-{index}", command, env=vendor_env))
-    print("PASS all 6 named native live hook and cwd witnesses", flush=True)
+    count = len(APP_TESTS) + len(TERM_TESTS) + len(VENDOR_TESTS)
+    print(f"PASS all {count} named native live hook and cwd witnesses", flush=True)
 
 
 if __name__ == "__main__":
