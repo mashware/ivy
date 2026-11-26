@@ -10261,6 +10261,39 @@ peer and bounded process ancestry evidence identify the same live native client 
 the holder. Source names and PANEL_ID/PANEL_DIR select or label; they never authenticate.
 A script can still hold the panel with ordinary tools, but its hold cannot receive hook updates.
 
+**Windows fresh-launch amendment (26 November 2026, #185).** A person may explicitly open
+a fresh native agent from Connect agents, after seeing its selected executable, fixed arguments and
+working directory. Only that direct PTY child, retained through its actual process handle and checked
+against the selected image path, is a Windows hook root. The holder and publisher must have verified
+native ancestry to that same live root. Ordinary shell-launched agents keep MCP without this new
+hook authority; Windows diagnostic ancestry is not relabelled as Unix foreground evidence.
+
+The native recognition catalogue is the finite set of explicitly selected client images, frozen
+for each invocation. A second recognized client below the root, including the same executable again,
+is a nested invocation and refuses. Generic hook/shell descendants may remain in the chain.
+Unsupported or unselected installations and interpreter-hosted agents are outside that recognition
+guarantee; this does not isolate malicious descendants or authenticate vendor code under D84.
+
+Windows workers retain concrete bounded holder snapshots and use the existing native wake rather
+than application callbacks. A hook reserves the holder connection's existing one-outstanding delivery
+slot through apply/discard. Contention refuses promptly; it neither waits for the window nor widens
+that ceiling. Apply rechecks holder incarnation, root lifetime and pane revocation; helper exit
+after admission alone does not invalidate the hook.
+
+**Why.** Windows already has private MCP, verified peers and native diagnostic ancestry, but none
+of those proves Unix foreground client ownership. The user chose only live hooks for explicitly
+opened fresh agents, leaving recorded-conversation recovery on macOS/Windows and Windows shared
+Codex relay deferred. The explicit root supplies the needed invocation boundary without importing
+installation discovery or saved-session machinery. Codex's distinct local-hook launch previews
+`--no-daemon` and requires that capability; ordinary commands are never rewritten.
+
+**Discarded:** inferring a client from source/environment/title; adopting all diagnostic descendants
+as authority; another peer handshake or secret; generic npm/Volta/script discovery; a direct-child or
+single-shell restriction without provider evidence; a comprehensive PE parser or vendor certification
+for a person-selected executable. The OS's explicit native loader and the actual retained child image
+supply different evidence from a file claiming an executable format. Native installed-client and
+mutation proof remain required; compile checks are not runtime verification.
+
 **Native Claude discovery amendment (19 November 2026, #142).** A desktop launch may lack
 `~/.local/bin` even though its console shell adds it. Discovery and fixed launches therefore
 search the absolute PATH entries first, then `$HOME/.local/bin/claude` for Claude only when HOME

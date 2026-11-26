@@ -10,7 +10,9 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{ProcessIdentity, ProcessObservation};
+pub use windows::{
+    ProcessIdentity, ProcessObservation, WindowsInvocation, WindowsInvocationWitness,
+};
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 #[cfg(all(test, not(windows)))]
@@ -267,6 +269,16 @@ pub(crate) fn scope(pty: &crate::Pty) -> io::Result<ForegroundScope> {
 }
 
 impl ForegroundScope {
+    /// Register the retained root of an explicitly launched native program.
+    #[cfg(windows)]
+    pub fn fresh_invocation(
+        &self,
+        selected_image: &std::path::Path,
+        recognized_images: &[PathBuf],
+    ) -> io::Result<WindowsInvocation> {
+        self.native
+            .fresh_invocation(selected_image, recognized_images)
+    }
     /// Classifies process ancestry without foreground-group or executable restrictions.
     /// Callers should supply a PID obtained from native socket credentials.
     pub fn classify_ancestry(&self, pid: u32) -> Ancestry {

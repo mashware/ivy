@@ -9,6 +9,10 @@ use std::sync::{
 mod ancestry;
 mod arguments;
 mod chain;
+mod fresh;
+pub use fresh::{WindowsInvocation, WindowsInvocationWitness};
+#[cfg(test)]
+mod fresh_tests;
 mod memory;
 mod parameters;
 mod process;
