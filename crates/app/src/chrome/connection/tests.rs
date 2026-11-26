@@ -47,6 +47,18 @@ fn click(ctx: &egui::Context, guide: &mut Guide, at: egui::Pos2) -> egui::FullOu
 }
 
 #[test]
+fn an_opening_failure_is_visible_without_expanding_activity_controls() {
+    let ctx = egui::Context::default();
+    let mut guide = Guide {
+        message: "The agent console could not be opened.".into(),
+        ..Default::default()
+    };
+    let initial = frame(&ctx, &mut guide, vec![]);
+    center(&initial, "The agent console could not be opened.");
+    assert!(!painted(&initial).iter().any(|text| text == "Codex 0.167.0"));
+}
+
+#[test]
 fn activity_controls_require_opening_and_explicit_save() {
     let ctx = egui::Context::default();
     let mut guide = Guide::default();

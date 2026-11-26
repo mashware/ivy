@@ -514,6 +514,9 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
             .is_some_and(|bridge| bridge.translocated);
         recovery::show(guide.recovery, translocated, &mut guide.copied, ui);
     }
+    if !guide.message.is_empty() {
+        ui.label(&guide.message);
+    }
     egui::CollapsingHeader::new("Agent activity and input signals")
         .default_open(false)
         .show(ui, |ui| {
@@ -551,9 +554,6 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
             "Copy OpenCode plugin entry",
             &mut guide.copied,
         );
-    }
-    if !guide.message.is_empty() {
-        ui.label(&guide.message);
     }
     ui.separator();
         });

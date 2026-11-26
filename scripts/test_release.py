@@ -55,6 +55,30 @@ class ReleaseTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing notice for dep 1.0.0", result.stderr)
 
+    def test_notices_include_path_dependencies_outside_the_workspace(self):
+        source = self.root / "external-vendor"
+        source.mkdir()
+        (source / "Cargo.toml").touch()
+        original = b"external MIT copyright and license\r\n"
+        (source / "LICENSE.md").write_bytes(original)
+        metadata = {
+            "packages": [
+                {"id": name, "name": name, "source": None}
+                for name in ("app", "panel-control")
+            ] + [{"id": "vendor", "name": "portable-pty", "version": "0.9.0",
+                  "source": None, "manifest_path": str(source / "Cargo.toml"),
+                  "license": "MIT"}],
+            "workspace_members": ["app", "panel-control"],
+            "resolve": {"nodes": [
+                {"id": "app", "deps": [{"pkg": "vendor", "dep_kinds": [{"kind": None}]}]},
+                {"id": "panel-control", "deps": []}, {"id": "vendor", "deps": []}]},
+        }
+        path = self.root / "metadata.json"
+        path.write_text(json.dumps(metadata))
+        output = self.root / "path-notices"
+        run_path(str(SCRIPT))["notices"](path, output)
+        self.assertEqual((output / "portable-pty-0.9.0/LICENSE.md").read_bytes(), original)
+
     def test_notices_use_explicit_apache_fallback_and_keep_original_notice(self):
         source = self.root / "fallback-source"
         source.mkdir()

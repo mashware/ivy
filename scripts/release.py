@@ -102,6 +102,7 @@ def notices(metadata, directory):
     """Copy original notices; use the canonical Apache text for supported SPDX fallbacks."""
     data = json.loads(metadata.read_text(encoding="utf-8"))
     packages = {package["id"]: package for package in data["packages"]}
+    workspace = set(data["workspace_members"])
     nodes = {node["id"]: node for node in data["resolve"]["nodes"]}
     roots = [package["id"] for package in packages.values()
              if package["id"] in data["workspace_members"]
@@ -122,7 +123,7 @@ def notices(metadata, directory):
     directory.mkdir(parents=True, exist_ok=True)
     for ident in sorted(selected):
         package = packages[ident]
-        if package["source"] is None:
+        if ident in workspace:
             continue
         root = Path(package["manifest_path"]).parent
         files = set()

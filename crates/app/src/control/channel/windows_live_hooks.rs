@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-use term_core::{Pty, Size};
+use term_core::{Pty, Screen, Size};
 use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     System::Threading::{
@@ -263,6 +263,14 @@ fn helper(name: &str) -> PathBuf {
     );
     helper
 }
+fn answer_output(pty: &mut Pty, output: &std::sync::mpsc::Receiver<Vec<u8>>, screen: &mut Screen) {
+    for bytes in output.try_iter() {
+        screen
+            .advance_with_replies(&bytes, |reply| pty.write(reply))
+            .unwrap();
+    }
+}
+
 fn wait_file(path: &Path, mut tick: impl FnMut()) -> String {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
@@ -312,7 +320,10 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
         Some(&work),
     )
     .expect("launch fixture in native PTY");
-    wait_file(&work.join("ready"), || while output.try_recv().is_ok() {});
+    let mut screen = Screen::new(Size::default());
+    wait_file(&work.join("ready"), || {
+        answer_output(&mut pty, &output, &mut screen)
+    });
     let _bridge_cleanup = BridgeCleanup::retain(&work);
     let scope = pty.foreground_scope().unwrap();
     let invocation = scope
@@ -335,7 +346,7 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     std::fs::write(work.join("command"), "hold").unwrap();
     let reply = wait_file(&work.join("result"), || {
         control.apply(&mut state, &mut signals, SystemTime::now());
-        while output.try_recv().is_ok() {}
+        answer_output(&mut pty, &output, &mut screen)
     });
     assert!(
         reply.contains("published") && !reply.contains("isError"),
@@ -364,7 +375,9 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     assert!(tab.attention(SystemTime::now()).is_some());
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "publish").unwrap();
-    let reply = wait_file(&work.join("result"), || while output.try_recv().is_ok() {});
+    let reply = wait_file(&work.join("result"), || {
+        answer_output(&mut pty, &output, &mut screen)
+    });
     assert!(reply.contains("{\"ok\":true}"), "helper reply: {reply}");
     control.apply(
         &mut tab.panes_mut()[0].panel_state,
@@ -406,13 +419,14 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
         Some(&foreign_work),
     )
     .expect("launch foreign PTY with copied endpoint");
+    let mut foreign_screen = Screen::new(Size::default());
     wait_file(&foreign_work.join("ready"), || {
-        while foreign_output.try_recv().is_ok() {}
+        answer_output(&mut foreign, &foreign_output, &mut foreign_screen)
     });
     let _foreign_bridge_cleanup = BridgeCleanup::retain(&foreign_work);
     std::fs::write(foreign_work.join("command"), "publish").unwrap();
     let reply = wait_file(&foreign_work.join("result"), || {
-        while foreign_output.try_recv().is_ok() {}
+        answer_output(&mut foreign, &foreign_output, &mut foreign_screen)
     });
     assert!(
         reply.contains("does not descend"),
@@ -429,7 +443,9 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     drop(foreign);
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "nested").unwrap();
-    let reply = wait_file(&work.join("result"), || while output.try_recv().is_ok() {});
+    let reply = wait_file(&work.join("result"), || {
+        answer_output(&mut pty, &output, &mut screen)
+    });
     assert!(
         reply.contains("does not descend"),
         "nested client reply: {reply}"
@@ -438,14 +454,18 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     assert_eq!(state.document().unwrap(), document);
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "publish").unwrap();
-    let reply = wait_file(&work.join("result"), || while output.try_recv().is_ok() {});
+    let reply = wait_file(&work.join("result"), || {
+        answer_output(&mut pty, &output, &mut screen)
+    });
     assert!(
         reply.contains("{\"ok\":true}"),
         "second helper reply: {reply}"
     );
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "publish").unwrap();
-    let reply = wait_file(&work.join("result"), || while output.try_recv().is_ok() {});
+    let reply = wait_file(&work.join("result"), || {
+        answer_output(&mut pty, &output, &mut screen)
+    });
     assert!(
         reply.contains("holding connection cannot admit another update"),
         "pressure reply: {reply}"
@@ -479,7 +499,7 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     std::fs::write(work.join("command"), "hold").unwrap();
     let reply = wait_file(&work.join("result"), || {
         control.apply(&mut state, &mut signals, SystemTime::now());
-        while output.try_recv().is_ok() {}
+        answer_output(&mut pty, &output, &mut screen)
     });
     assert!(
         reply.contains("published") && !reply.contains("isError"),
@@ -488,7 +508,9 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     let document = state.document().unwrap();
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "publish").unwrap();
-    let reply = wait_file(&work.join("result"), || while output.try_recv().is_ok() {});
+    let reply = wait_file(&work.join("result"), || {
+        answer_output(&mut pty, &output, &mut screen)
+    });
     assert!(
         reply.contains("{\"ok\":true}"),
         "last helper reply: {reply}"

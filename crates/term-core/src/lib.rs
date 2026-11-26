@@ -4408,7 +4408,7 @@ mod tests {
         );
         let program = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
-        let (pty, output) = Pty::spawn_with_exact_cwd(
+        let (mut pty, output) = Pty::spawn_with_exact_cwd(
             program.to_str().unwrap(),
             &["-NoProfile", "-NonInteractive", "-Command", &script],
             Size::default(),
@@ -4417,6 +4417,7 @@ mod tests {
         )
         .unwrap();
         // D30: only a child-written file proves execution; ConPTY paints before the child.
+        let mut screen = Screen::new(Size::default());
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let mut diagnostic = Vec::new();
         let cwd = loop {
@@ -4424,6 +4425,9 @@ mod tests {
                 break cwd;
             }
             for chunk in output.try_iter() {
+                screen
+                    .advance_with_replies(&chunk, |reply| pty.write(reply))
+                    .unwrap();
                 diagnostic.extend(chunk);
             }
             assert!(

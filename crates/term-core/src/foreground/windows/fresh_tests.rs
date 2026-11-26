@@ -1,10 +1,19 @@
 #![cfg(test)]
 
 use super::*;
-use crate::{Pty, Size};
+use crate::{Pty, Screen, Size};
 use std::os::windows::io::AsHandle;
 use std::path::Path;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
+
+fn answer_output(pty: &mut Pty, output: &Receiver<Vec<u8>>, screen: &mut Screen) {
+    for bytes in output.try_iter() {
+        screen
+            .advance_with_replies(&bytes, |reply| pty.write(reply))
+            .unwrap();
+    }
+}
 
 #[test]
 fn fresh_root_rejects_wrong_image_foreign_root_and_console_close() {
@@ -33,7 +42,7 @@ fn fresh_witness_expires_when_root_exits() {
     let _inspection_guard = super::inspection::TEST_LOCK.lock().unwrap();
     let root = std::env::var("SystemRoot").unwrap();
     let powershell = Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
-    let (pty, _output) = Pty::spawn(
+    let (mut pty, output) = Pty::spawn(
         powershell.to_str().unwrap(),
         &["-NoProfile", "-Command", "Start-Sleep 3"],
         Size::default(),
@@ -43,7 +52,9 @@ fn fresh_witness_expires_when_root_exits() {
     let invocation = scope.fresh_invocation(&powershell, &[]).unwrap();
     let witness = invocation.attest(scope.root.as_handle()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
+    let mut screen = Screen::new(Size::default());
     while witness.current() && Instant::now() < deadline {
+        answer_output(&mut pty, &output, &mut screen);
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(!witness.current());
@@ -65,7 +76,7 @@ fn fresh_rejects_recognized_nested_process_and_helper_exit_keeps_witness() {
         shell.display(),
         marker.display()
     );
-    let (pty, _output) = Pty::spawn(
+    let (mut pty, output) = Pty::spawn(
         powershell.to_str().unwrap(),
         &["-NoProfile", "-Command", &script],
         Size::default(),
@@ -73,7 +84,9 @@ fn fresh_rejects_recognized_nested_process_and_helper_exit_keeps_witness() {
     .unwrap();
     let scope = scope(&pty).unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
+    let mut screen = Screen::new(Size::default());
     let pid = loop {
+        answer_output(&mut pty, &output, &mut screen);
         if let Ok(value) = std::fs::read_to_string(&marker) {
             if let Ok(pid) = value.parse() {
                 break pid;
@@ -88,6 +101,7 @@ fn fresh_rejects_recognized_nested_process_and_helper_exit_keeps_witness() {
     let restricted = scope.fresh_invocation(&powershell, &[shell]).unwrap();
     assert!(restricted.attest(helper.as_handle()).is_err());
     while process::is_alive(helper.as_handle()) && Instant::now() < deadline {
+        answer_output(&mut pty, &output, &mut screen);
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(!process::is_alive(helper.as_handle()));
