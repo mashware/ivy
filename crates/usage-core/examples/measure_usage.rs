@@ -1,4 +1,4 @@
-//! Synthetic Claude history witness for the public usage worker.
+//! Synthetic local history witness for the public usage worker.
 //!
 //! cargo run --release -p usage-core --example measure_usage -- many
 //! cargo run --release -p usage-core --example measure_usage -- huge
@@ -38,6 +38,7 @@ impl Fixture {
         let (mode, sources, bytes) = match mode {
             "many" => ("many", 10_000, GIB),
             "huge" => ("huge", 1, GIB),
+            "codex-prefix" => ("codex-prefix", 1, 80 * 1024 * 1024),
             "smoke" => ("smoke", 160, 160 * 16 * 1024),
             _ => return None,
         };
@@ -50,6 +51,37 @@ impl Fixture {
 
     fn generate(self, path: &Path) -> io::Result<u128> {
         fs::create_dir(path)?;
+        if self.mode == "codex-prefix" {
+            let mut file = BufWriter::new(File::create(path.join("rollout-synthetic.jsonl"))?);
+            writeln!(
+                file,
+                "{}",
+                json!({"type":"session_meta","payload":{"id":"fixture-session"}})
+            )?;
+            let write_usage = |file: &mut BufWriter<File>, multiplier: u64| {
+                writeln!(
+                    file,
+                    "{}",
+                    json!({
+                        "type":"event_msg", "timestamp":RECORD_DATE, "payload":{
+                            "type":"token_count","info":{
+                                "last_token_usage":{"input_tokens":100,"cached_input_tokens":30,"output_tokens":20,"reasoning_output_tokens":5},
+                                "total_token_usage":{"input_tokens":100*multiplier,"cached_input_tokens":30*multiplier,"output_tokens":20*multiplier,"reasoning_output_tokens":5*multiplier}
+                            }
+                        }
+                    })
+                )
+            };
+            write_usage(&mut file, 1)?;
+            let mut filler = [b' '; FILLER_BYTES];
+            filler[FILLER_BYTES - 1] = b'\n';
+            for _ in 0..self.bytes / FILLER_BYTES as u64 {
+                file.write_all(&filler)?;
+            }
+            write_usage(&mut file, 2)?;
+            file.flush()?;
+            return Ok(240);
+        }
         let filler = padding_record(FILLER_BYTES);
         let per_source_bytes = self.bytes / self.sources as u64;
         let larger_sources = self.bytes % self.sources as u64;
@@ -270,7 +302,7 @@ fn wall_ms(time: Duration) -> f64 {
     time.as_secs_f64() * 1000.0
 }
 
-fn start_worker(cache: PathBuf, source: &Path) -> io::Result<(Service, Receiver<()>)> {
+fn start_worker(cache: PathBuf, source: &Path, codex: bool) -> io::Result<(Service, Receiver<()>)> {
     let (sender, receiver) = mpsc::sync_channel(1);
     let service = Service::new(cache, move || {
         let _ = sender.try_send(());
@@ -282,7 +314,13 @@ fn start_worker(cache: PathBuf, source: &Path) -> io::Result<(Service, Receiver<
         start_ms: noon - 24 * 60 * 60 * 1000,
         end_ms: noon + 24 * 60 * 60 * 1000,
     });
-    if !service.enable(vec![source.to_owned()]) {
+    let roots = vec![source.to_owned()];
+    let enabled = if codex {
+        service.enable_codex(roots)
+    } else {
+        service.enable(roots)
+    };
+    if !enabled {
         return Err(io::Error::other("usage worker rejected the enable command"));
     }
     Ok((service, receiver))
@@ -309,11 +347,17 @@ struct Import {
     complete: bool,
 }
 
-fn import(cache: PathBuf, source: &Path, expected: u128, timeout: Duration) -> io::Result<Import> {
+fn import(
+    cache: PathBuf,
+    source: &Path,
+    expected: u128,
+    timeout: Duration,
+    codex: bool,
+) -> io::Result<Import> {
     let before = Resources::sample();
     let started = Instant::now();
     let deadline = started + timeout;
-    let (service, wake) = start_worker(cache, source)?;
+    let (service, wake) = start_worker(cache, source, codex)?;
     let mut status = None;
     let mut tokens = None;
     let mut first_importing = None;
@@ -327,7 +371,9 @@ fn import(cache: PathBuf, source: &Path, expected: u128, timeout: Duration) -> i
         if snapshot.status == Status::Importing {
             first_importing.get_or_insert_with(|| started.elapsed());
         }
-        if snapshot.enabled && snapshot.last_success_at_ms.is_some() {
+        if (snapshot.enabled && snapshot.last_success_at_ms.is_some())
+            || (snapshot.codex_enabled && snapshot.codex_last_success_at_ms.is_some())
+        {
             first_published.get_or_insert_with(|| started.elapsed());
         }
         match snapshot.status {
@@ -357,16 +403,21 @@ fn import(cache: PathBuf, source: &Path, expected: u128, timeout: Duration) -> i
     })
 }
 
-fn cancellation(cache: PathBuf, source: &Path, timeout: Duration) -> io::Result<Value> {
+fn cancellation(
+    cache: PathBuf,
+    source: &Path,
+    timeout: Duration,
+    codex: bool,
+) -> io::Result<Value> {
     let baseline = Resources::sample();
-    let (service, wake) = start_worker(cache, source)?;
+    let (service, wake) = start_worker(cache, source, codex)?;
     let deadline = Instant::now() + timeout;
     let mut active = false;
     let mut latest = None;
     while let Some(snapshot) = next_snapshot(&service, &wake, deadline) {
         latest = Some(snapshot.status);
         match snapshot.status {
-            Status::Importing if snapshot.enabled => {
+            Status::Importing if snapshot.enabled || snapshot.codex_enabled => {
                 active = true;
                 break;
             }
@@ -404,7 +455,7 @@ fn cancellation(cache: PathBuf, source: &Path, timeout: Duration) -> io::Result<
     let deadline = stop + timeout;
     let mut stopped = None;
     while let Some(snapshot) = next_snapshot(&service, &wake, deadline) {
-        if !snapshot.enabled && snapshot.status == Status::Disabled {
+        if !snapshot.enabled && !snapshot.codex_enabled && snapshot.status == Status::Disabled {
             stopped = Some(stop.elapsed());
             break;
         }
@@ -428,7 +479,7 @@ fn args() -> io::Result<(Fixture, Duration)> {
         (Some(fixture), Some(secs @ 1..=3600), None) => Ok((fixture, Duration::from_secs(secs))),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: measure_usage [smoke|many|huge] [timeout-seconds, 1–3600]",
+            "usage: measure_usage [smoke|many|huge|codex-prefix] [timeout-seconds, 1–3600]",
         )),
     }
 }
@@ -440,8 +491,19 @@ fn main() -> io::Result<()> {
     let setup = Instant::now();
     let expected = fixture.generate(&source)?;
     let fixture_ms = wall_ms(setup.elapsed());
-    let import = import(scratch.0.join("import-cache"), &source, expected, timeout)?;
-    let stop = cancellation(scratch.0.join("stop-cache"), &source, timeout)?;
+    let import = import(
+        scratch.0.join("import-cache"),
+        &source,
+        expected,
+        timeout,
+        fixture.mode == "codex-prefix",
+    )?;
+    let stop = cancellation(
+        scratch.0.join("stop-cache"),
+        &source,
+        timeout,
+        fixture.mode == "codex-prefix",
+    )?;
     let peak_target = import
         .complete
         .then(|| import.resources["incremental_process_peak_rss_bytes"].as_u64())

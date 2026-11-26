@@ -399,6 +399,53 @@ fn paint_window(ui: &mut egui::Ui, label: &str, state: WindowState) {
     ui.label(format!("{label} · {value}"));
 }
 
+#[cfg(target_os = "linux")]
+pub(super) fn launch_in_window(window: &mut crate::Window, ctx: &egui::Context, launch: Launch) {
+    let started = std::time::Instant::now();
+    let result = (|| -> term_core::Result<_> {
+        let program = launch
+            .program()
+            .to_str()
+            .ok_or("Claude Code executable path is not UTF-8")?
+            .to_owned();
+        let directory = launch.directory().to_owned();
+        let path = launch.path().to_owned();
+        let broker = std::sync::Arc::clone(launch.broker());
+        let name = window.next_pane_name;
+        window.next_pane_name += 1;
+        let tab_name = window.next_name;
+        window.next_name += 1;
+        let pane = crate::opening::launch_claude_quota(
+            ctx,
+            crate::opening::Launch {
+                program: &program,
+                args: &["--settings".into(), launch.overlay],
+                directory: Some(&directory),
+                path: Some(&path),
+            },
+            crate::panel_or_none(panel_contract::PanelDir::create()),
+            name,
+            window.control.read_activity(),
+            launch.gate,
+        )?;
+        let layout = crate::OpeningLayout {
+            columns: 1,
+            rows: 1,
+        };
+        let tab = crate::Tab::with_panes(vec![pane], &layout, tab_name);
+        window.usage.quota.install(name, broker);
+        Ok(tab)
+    })();
+    match result {
+        Ok(tab) => {
+            window.usage.close(ctx);
+            window.bring_to_front(Ok(tab), ctx);
+        }
+        Err(error) => window.usage.quota.failed(error.to_string()),
+    }
+    window.timed_separately += window.usage.timing.record(0, started.elapsed());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

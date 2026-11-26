@@ -154,6 +154,7 @@ mod tests {
             cache_write: Some(10),
             cache_write_1h: Some(0),
             output: Some(20),
+            reasoning_output: None,
             flags: 0,
         }
     }
@@ -210,6 +211,7 @@ mod tests {
             cache_write: Some(0),
             cache_write_1h: None,
             output: Some(0),
+            reasoning_output: None,
             flags: 0,
         };
         let catalog = Catalog::bundled();

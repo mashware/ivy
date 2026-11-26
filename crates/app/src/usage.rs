@@ -6,9 +6,10 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use usage_core::{DateRange, Service, Snapshot, Status};
+use usage_core::{DateRange, Granularity, Provider, Service, Snapshot, Status};
 
 mod allowances;
+mod codex_controls;
 mod paint;
 use paint::paint_summary;
 
@@ -32,6 +33,11 @@ pub(crate) struct View {
     allowances: allowances::AllowanceView,
     roots: Vec<PathBuf>,
     new_root: String,
+    codex: codex_controls::Controls,
+    provider: Option<Provider>,
+    model_filter: String,
+    applied_model: Option<String>,
+    granularity: Granularity,
     confirm_clear: bool,
     hide_result: bool,
     period: Period,
@@ -86,6 +92,22 @@ fn local_boundary(day: NaiveDate, zone: &impl TimeZone) -> Option<i64> {
     })
 }
 
+fn snapshot_has_partial_codex(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_some_and(|snapshot| snapshot.codex_enabled && snapshot.status == Status::Partial)
+}
+
+fn request_comparison(view: &mut View) {
+    if let (Some(service), Some(range)) = (&view.service, view.period.range()) {
+        view.requested_range = Some(range);
+        service.request_comparison(
+            range,
+            view.provider,
+            view.applied_model.clone(),
+            view.granularity,
+        );
+    }
+}
+
 impl View {
     #[cfg(test)]
     pub(crate) fn open_for_test(&mut self) {
@@ -111,15 +133,12 @@ impl View {
         ctx.request_repaint();
     }
 
-    fn request(&mut self) {
-        if let (Some(service), Some(range)) = (&self.service, self.period.range()) {
-            self.requested_range = Some(range);
-            service.request(range);
-        }
-    }
-
     fn snapshot_matches_range(&self, snapshot: &Snapshot) -> bool {
-        self.requested_range.is_some() && self.requested_range == snapshot.range
+        self.requested_range.is_some()
+            && self.requested_range == snapshot.range
+            && self.provider == snapshot.provider
+            && self.applied_model == snapshot.model_filter
+            && self.granularity == snapshot.granularity
     }
 
     fn install_snapshot(&mut self) {
@@ -145,9 +164,11 @@ impl View {
             .as_ref()
             .is_some_and(|s| s.status == Status::WaitingToClear);
 
+        if let Some(snapshot) = &self.snapshot {
+            ui.label(status_label(snapshot.status));
+        }
         ui.strong("Claude Code · Local, unassigned history");
         if let Some(s) = &self.snapshot {
-            ui.label(status_label(s.status));
             if let Some(success) = s
                 .last_success_at_ms
                 .and_then(chrono::DateTime::from_timestamp_millis)
@@ -239,9 +260,18 @@ impl View {
                 service.enable(std::mem::take(&mut self.roots));
             }
         }
+        let codex_enabled = self.codex.paint(
+            ui,
+            service,
+            self.snapshot.as_ref(),
+            !waiting && supported && !clearing && !incompatible,
+        );
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(enabled && !clearing, egui::Button::new("Stop collection"))
+                .add_enabled(
+                    (enabled || codex_enabled) && !clearing,
+                    egui::Button::new("Stop collection for all providers"),
+                )
                 .clicked()
             {
                 service.stop();
@@ -249,7 +279,9 @@ impl View {
             let has_history = self.snapshot.as_ref().is_some_and(|s| {
                 s.has_history
                     || s.enabled
+                    || s.codex_enabled
                     || !s.roots.is_empty()
+                    || !s.codex_roots.is_empty()
                     || matches!(s.status, Status::Error | Status::Incompatible)
             });
             if ui
@@ -275,23 +307,70 @@ impl View {
                 }
             });
         }
+        if snapshot_has_partial_codex(self.snapshot.as_ref()) {
+            ui.small("Codex coverage can be incomplete. Compressed rollouts and unverified fork history are skipped.");
+        }
         ui.separator();
         let old_period = self.period;
         ui.horizontal_wrapped(|ui| {
             for (period, label) in Period::OPTIONS {
-                ui.selectable_value(&mut self.period, period, label);
+                if self.granularity != Granularity::Hour || period == Period::Week {
+                    ui.selectable_value(&mut self.period, period, label);
+                }
             }
         });
-        if old_period != self.period {
+        let old_provider = self.provider;
+        let old_granularity = self.granularity;
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.provider, None, "All providers");
+            ui.selectable_value(&mut self.provider, Some(Provider::Claude), "Claude Code");
+            ui.selectable_value(&mut self.provider, Some(Provider::Codex), "Codex");
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.granularity, Granularity::Hour, "Hourly");
+            ui.selectable_value(&mut self.granularity, Granularity::Day, "Daily");
+            ui.selectable_value(&mut self.granularity, Granularity::Month, "Monthly");
+        });
+        let mut model_changed = false;
+        ui.horizontal(|ui| {
+            let input = ui.add(
+                egui::TextEdit::singleline(&mut self.model_filter)
+                    .hint_text("Model name")
+                    .char_limit(128),
+            );
+            if ui.button("Filter model").clicked()
+                || (input.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+            {
+                let model = self.model_filter.trim();
+                let next = (!model.is_empty()).then(|| model.to_owned());
+                model_changed = self.applied_model != next;
+                self.applied_model = next;
+            }
+            if self.applied_model.is_some() && ui.button("Clear model filter").clicked() {
+                self.model_filter.clear();
+                self.applied_model = None;
+                model_changed = true;
+            }
+        });
+        if self.granularity == Granularity::Hour {
+            self.period = Period::Week;
+        }
+        if old_period != self.period
+            || old_provider != self.provider
+            || old_granularity != self.granularity
+            || model_changed
+        {
             self.hide_result = true;
-            self.request();
+            request_comparison(self);
             return;
         }
         if !self.hide_result
             && !clearing
             && let Some(snapshot) = &self.snapshot
             && self.snapshot_matches_range(snapshot)
-            && (snapshot.has_history || snapshot.last_success_at_ms.is_some())
+            && (snapshot.has_history
+                || snapshot.last_success_at_ms.is_some()
+                || snapshot.codex_last_success_at_ms.is_some())
         {
             paint_summary(ui, snapshot);
         }
@@ -346,7 +425,7 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     if matches!(mode, Measurement::Allowances) {
         window.usage.allowances.prepare_measurement();
     }
-    window.usage.request();
+    request_comparison(&mut window.usage);
 }
 
 pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
@@ -364,7 +443,7 @@ pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
     view.quota.open(ctx);
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.pointer.any_down());
-    view.request();
+    request_comparison(view);
     window.timed_separately += view.timing.record(0, started.elapsed());
     ctx.request_repaint();
 }
@@ -426,7 +505,7 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     window.timed_separately += view.timing.record(1, started.elapsed());
     #[cfg(target_os = "linux")]
     if let Some(launch) = launch {
-        launch_quota(window, &ctx, launch);
+        quota_view::launch_in_window(window, &ctx, launch);
     }
 }
 
@@ -441,7 +520,7 @@ fn show(
         .requested_range
         .is_some_and(|range| now >= range.end_ms)
     {
-        view.request();
+        request_comparison(view);
     }
     if let Some(range) = view.requested_range
         && let Ok(remaining) = u64::try_from(range.end_ms - now)
@@ -484,53 +563,6 @@ fn show(
         }
         view.close(ctx);
     }
-}
-
-#[cfg(target_os = "linux")]
-fn launch_quota(window: &mut Window, ctx: &egui::Context, launch: quota_view::Launch) {
-    let started = Instant::now();
-    let result = (|| -> term_core::Result<_> {
-        let program = launch
-            .program()
-            .to_str()
-            .ok_or("Claude Code executable path is not UTF-8")?
-            .to_owned();
-        let directory = launch.directory().to_owned();
-        let path = launch.path().to_owned();
-        let broker = std::sync::Arc::clone(launch.broker());
-        let name = window.next_pane_name;
-        window.next_pane_name += 1;
-        let tab_name = window.next_name;
-        window.next_name += 1;
-        let pane = crate::opening::launch_claude_quota(
-            ctx,
-            crate::opening::Launch {
-                program: &program,
-                args: &["--settings".into(), launch.overlay],
-                directory: Some(&directory),
-                path: Some(&path),
-            },
-            crate::panel_or_none(panel_contract::PanelDir::create()),
-            name,
-            window.control.read_activity(),
-            launch.gate,
-        )?;
-        let layout = crate::OpeningLayout {
-            columns: 1,
-            rows: 1,
-        };
-        let tab = crate::Tab::with_panes(vec![pane], &layout, tab_name);
-        window.usage.quota.install(name, broker);
-        Ok(tab)
-    })();
-    match result {
-        Ok(tab) => {
-            window.usage.close(ctx);
-            window.bring_to_front(Ok(tab), ctx);
-        }
-        Err(error) => window.usage.quota.failed(error.to_string()),
-    }
-    window.timed_separately += window.usage.timing.record(0, started.elapsed());
 }
 
 #[derive(Default)]

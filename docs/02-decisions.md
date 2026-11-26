@@ -12617,3 +12617,20 @@ to avoid observed unrelated reads. Auth and its lifecycle belong to the official
 **Discarded.** No shared TUI connection, local history inference, account watching or credential-file
 access from Ivy. A single workspace ID cannot distinguish two users in that workspace. The pinned
 protocol semantics and native evidence initially cover Linux x86_64 and that release only.
+
+## D130 — Codex history joins local usage through separate consent
+
+**Decision.** AI usage can import explicitly selected Codex rollout folders.
+The existing private ledger is upgraded only when Codex is enabled and the
+worker owns the ledger. Existing Claude records keep their identity, totals
+and dates. The view compares providers and models over local calendar hours,
+days and months. Reasoning is displayed as a subset of output.
+
+**Why.** Copied rollout files can contain the same cumulative snapshots.
+Bounded replay reconstructs the baseline for a verified prefix, and the
+ledger keeps conflicting evidence partial. A single ledger and owner keep
+retention, clearing, resource limits and publication under one lifecycle.
+
+**Discarded.** Separate ledgers complicate clear and combined limits.
+A timestamp and token count cannot identify a Codex call by themselves.
+Direct account access is unnecessary for local history.
