@@ -705,6 +705,18 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/startup.rs", include_str!("../src/startup.rs")),
     ("src/usage.rs", include_str!("../src/usage.rs")),
+    (
+        "src/usage/allowances.rs",
+        include_str!("../src/usage/allowances.rs"),
+    ),
+    (
+        "src/usage/allowances/native.rs",
+        include_str!("../src/usage/allowances/native.rs"),
+    ),
+    (
+        "src/usage/allowances/wire.rs",
+        include_str!("../src/usage/allowances/wire.rs"),
+    ),
     ("src/usage/paint.rs", include_str!("../src/usage/paint.rs")),
     (
         "src/usage/quota_broker.rs",

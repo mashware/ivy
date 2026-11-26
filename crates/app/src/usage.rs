@@ -8,6 +8,7 @@ use std::{
 };
 use usage_core::{DateRange, Service, Snapshot, Status};
 
+mod allowances;
 mod paint;
 use paint::paint_summary;
 
@@ -28,6 +29,7 @@ pub(crate) struct View {
     focus: Option<egui::Id>,
     service: Option<Service>,
     snapshot: Option<Snapshot>,
+    allowances: allowances::AllowanceView,
     roots: Vec<PathBuf>,
     new_root: String,
     confirm_clear: bool,
@@ -96,6 +98,7 @@ impl View {
 
     fn close(&mut self, ctx: &egui::Context) {
         self.open = false;
+        self.allowances.close();
         self.confirm_clear = false;
         #[cfg(target_os = "linux")]
         self.quota.close();
@@ -315,6 +318,7 @@ fn status_label(status: Status) -> &'static str {
 enum Measurement {
     Open,
     Closed,
+    Allowances,
 }
 
 pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, measuring: bool) {
@@ -324,6 +328,7 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     let mode = match std::env::var("MEASURE_USAGE").ok().as_deref() {
         Some("open") => Measurement::Open,
         Some("closed") => Measurement::Closed,
+        Some("allowances") => Measurement::Allowances,
         _ => return,
     };
     let Some(root) = std::env::var_os("MEASURE_USAGE_ROOT").map(PathBuf::from) else {
@@ -337,7 +342,10 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     service.enable(vec![root]);
     window.usage.service = Some(service);
     window.usage.measured = Some(mode);
-    window.usage.open = matches!(mode, Measurement::Open);
+    window.usage.open = matches!(mode, Measurement::Open | Measurement::Allowances);
+    if matches!(mode, Measurement::Allowances) {
+        window.usage.allowances.prepare_measurement();
+    }
     window.usage.request();
 }
 
@@ -377,9 +385,10 @@ fn cache_directory() -> Option<PathBuf> {
 
 pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     let view = &mut window.usage;
-    if view.service.is_some() {
+    if view.service.is_some() || view.allowances.polling() {
         let started = Instant::now();
         view.install_snapshot();
+        view.allowances.poll();
         window.timed_separately += view.timing.record(0, started.elapsed());
     }
     let ctx = ui.ctx().clone();
@@ -462,6 +471,8 @@ fn show(
                     }
                     #[cfg(not(target_os = "linux"))]
                     ui.small("Claude allowance unavailable · This platform has not been verified.");
+                    ui.separator();
+                    view.allowances.show(ui);
                     ui.separator();
                     view.body(ui);
                 });
@@ -553,10 +564,16 @@ impl View {
         let mode = match self.measured {
             Some(Measurement::Open) => "open",
             Some(Measurement::Closed) => "closed",
+            Some(Measurement::Allowances) => "allowances",
             None => "none",
         };
         let tokens = self.snapshot.as_ref().map_or(0, |s| s.totals.tokens);
         writeln!(to, "usage measurement: {mode}, tokens={tokens}")?;
+        writeln!(
+            to,
+            "allowance fixture windows: {}",
+            self.allowances.measured_windows()
+        )?;
         for (index, name) in ["Usage snapshot", "Usage paint"].into_iter().enumerate() {
             let frames = self.timing.frames[index];
             let total = self.timing.totals[index];

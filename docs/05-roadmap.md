@@ -183,7 +183,8 @@ times and account verification status.
 
 This standalone addition leaves console and document drawer input and layout
 independent. The first delivery covers local Claude history, with the storage
-and consent decisions recorded in D127.
+and consent decisions recorded in D127. Codex allowances add a separate, manually refreshed account
+observation from an admitted official client, with explicit freshness and account context (D129).
 
 ## Where the cut is
 
@@ -600,12 +601,14 @@ console.
 
 ## AI usage — Standalone addition
 
-- [ ] **A1 — Claude local usage overview.** One opt-in view with bounded
+- [x] **A1 — Claude local usage overview.** One opt-in view with bounded
   background collection, retained normalized accounting, date filters,
   bundled estimates, explicit stop and clear, and named frame costs. D127. (#262)
 - [x] **A2 — Claude subscription allowance snapshots.** A previewed statusline
   overlay for verified native launches, independently expiring observations,
   separate consent and immediate revocation. D128. (#264)
+- [x] **A3 — Codex official allowances.** Independently enable and refresh account-bound
+  snapshots, preserve each quota window, and show freshness only for a verified observation. D129. (#265)
 
 ## Loose ends
 

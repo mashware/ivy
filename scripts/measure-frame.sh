@@ -279,12 +279,20 @@ check_usage_report() {
     usage_tokens=$(sed -n 's/^usage measurement: [^,]*, tokens=\([0-9]*\)$/\1/p' "$REPORT")
     snapshots=$(sed -n 's/^Usage snapshot: frames=\([0-9]*\),.*/\1/p' "$REPORT")
     paint=$(sed -n 's/^Usage paint: frames=\([0-9]*\),.*/\1/p' "$REPORT")
+    allowance_windows=$(sed -n 's/^allowance fixture windows: //p' "$REPORT")
     case "$snapshots:$paint" in
         *[!0-9:]*|:*|*:) invalidate "usage report lacks one count per usage series" ;;
     esac
     if [ "${USAGE:-}" = open ]; then
         [ "$mode" = open ] && [ "$snapshots" -gt 0 ] && [ "$paint" -gt 0 ] ||
             invalidate "usage-open did not measure the visible view"
+    fi
+    if [ "${USAGE:-}" = allowances ]; then
+        [ "$mode" = allowances ] && [ "$snapshots" -gt 0 ] && [ "$paint" -gt 0 ] &&
+            [ "$allowance_windows" = 2 ] ||
+            invalidate "usage-allowances did not paint both synthetic windows"
+    else
+        [ "$allowance_windows" = 0 ] || invalidate "allowance fixture leaked into another batch"
     fi
     if [ "${USAGE:-}" = closed ]; then
         [ "$mode" = closed ] && [ "$snapshots" -gt 0 ] && [ "$paint" -eq 0 ] ||
@@ -725,7 +733,7 @@ case "$BATCH" in
     projects) TABS=1; PANES=2x2; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; CHROME_EXPECTED_VISIBLE=4 ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
-    usage-closed|usage-open) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; INTEGRATED_CHROME=1; USAGE=${BATCH#usage-} ;;
+    usage-closed|usage-open|usage-allowances) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; INTEGRATED_CHROME=1; USAGE=${BATCH#usage-} ;;
     settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
     E)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=search; SEARCH=1 ;; # two, and SEARCHING the left console's scrollback while both dump: its control is C, LEFT against LEFT, because the two consoles of one run already differ with no gesture (D61)
@@ -1291,7 +1299,7 @@ fi
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|usage-closed|usage-open|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|usage-closed|usage-open|usage-allowances|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2

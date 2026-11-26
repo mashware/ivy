@@ -14,6 +14,11 @@ use std::time::{Duration, Instant};
 #[cfg(target_os = "linux")]
 mod child;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use child::Running;
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use child::SERIAL as CHILD_TEST_SERIAL;
+
 #[cfg(target_os = "linux")]
 pub(crate) fn reap_children() {
     child::reap();
@@ -35,6 +40,15 @@ pub(crate) struct Program {
     pub(crate) wrapper: Option<(PathBuf, PathBuf)>,
     #[cfg(test)]
     pub(super) fixture: bool,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) fn native_codex() -> io::Result<PathBuf> {
+    let launch = resolve_launch(Client::Codex)?;
+    match launch.prefix_args.first() {
+        Some(script) => codex_binary(Path::new(script)).ok_or_else(unsupported),
+        None => Ok(launch.program),
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
