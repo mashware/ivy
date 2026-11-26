@@ -53,6 +53,13 @@ impl Timing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    impl super::super::Editor {
+        pub(crate) fn recorded_frame_cost(&self) -> Duration {
+            self.timing.pending.iter().flatten().copied().sum()
+        }
+    }
+
     #[test]
     fn passes_sum_into_one_frame_and_cost_is_discounted_once() {
         let mut timing = Timing::default();

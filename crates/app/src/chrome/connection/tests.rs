@@ -311,6 +311,8 @@ fn fresh_console_opening_is_subtracted_once_from_the_frame() {
     window.mirror_this_frame = Duration::ZERO;
     window.chrome.frame = Duration::ZERO;
     let _ = window.chrome.take_cost();
+    let _ = window.settings_editor.take_cost();
+    let settings_before = window.settings_editor.recorded_frame_cost();
     let frame = eframe::Frame::_new_kittest();
     ctx.run_ui(Default::default(), |ui| {
         begin_pass(&mut window, ui, &frame);
@@ -323,6 +325,11 @@ fn fresh_console_opening_is_subtracted_once_from_the_frame() {
     );
     let chrome_cost = window.chrome.frame;
     assert!(!chrome_cost.is_zero());
+    let settings_cost = window
+        .settings_editor
+        .recorded_frame_cost()
+        .checked_sub(settings_before)
+        .expect("named settings spans reset within the measured pass");
     window.active_mut().panes_mut()[0]
         .timings
         .record_round(crate::measure::Spans::of_a_round(
@@ -335,7 +342,7 @@ fn fresh_console_opening_is_subtracted_once_from_the_frame() {
     let mirror = window.mirror_this_frame;
     let framework = Duration::from_millis(7);
     // Deriving this total from timed_separately would incorporate the duplicate being tested.
-    window.close_the_frame(chrome_cost + mirror + framework);
+    window.close_the_frame(chrome_cost + settings_cost + mirror + framework);
     assert_eq!(
         window.rest_of_frame.mean(),
         framework,
