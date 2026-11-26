@@ -603,7 +603,7 @@ console.
 - [ ] **A1 — Claude local usage overview.** One opt-in view with bounded
   background collection, retained normalized accounting, date filters,
   bundled estimates, explicit stop and clear, and named frame costs. D127. (#262)
-- [ ] **A2 — Claude subscription allowance snapshots.** A previewed statusline
+- [x] **A2 — Claude subscription allowance snapshots.** A previewed statusline
   overlay for verified native launches, independently expiring observations,
   separate consent and immediate revocation. D128. (#264)
 
