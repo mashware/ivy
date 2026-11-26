@@ -340,7 +340,7 @@ fn show(guide: &mut Guide, ctx: &egui::Context, theme: &crate::theme::Theme) {
             crate::settings::editor::view::settings_geometry(ui.style_mut());
             ui.set_width((available.x - 64.0).clamp(80.0, 560.0));
             close |= crate::settings::editor::view::dialog::header(ui, "Connect agents");
-            egui::ScrollArea::vertical()
+            let scroll = egui::ScrollArea::vertical()
                 .id_salt("agent-setup-scroll")
                 .max_height((available.y - 150.0).max(40.0))
                 .min_scrolled_height(if guide.manual_open {
@@ -348,7 +348,16 @@ fn show(guide: &mut Guide, ctx: &egui::Context, theme: &crate::theme::Theme) {
                 } else {
                     40.0
                 })
-                .show(ui, |ui| body(guide, ui));
+                .show_viewport(ui, |ui, viewport| {
+                    body(guide, ui);
+                    viewport.min.y
+                });
+            // The scroll area can move the thumb after laying out the content. Present both at
+            // the same offset, including on a desktop that paints only once for an input event.
+            if scroll.inner != scroll.state.offset.y {
+                ui.ctx()
+                    .request_discard("Connect agents scroll offset changed");
+            }
         });
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         guide.open = false;

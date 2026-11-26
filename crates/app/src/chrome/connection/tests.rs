@@ -751,3 +751,102 @@ fn fresh_console_opening_is_subtracted_once_from_the_frame() {
         "fresh console opening was subtracted twice from the frame"
     );
 }
+
+#[test]
+fn connection_scroll_paints_its_target_in_the_wheel_frame() {
+    fn draw(
+        ctx: &egui::Context,
+        window: &mut Window,
+        time: &mut f64,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        *time += 1.0 / 60.0;
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 640.0),
+                )),
+                time: Some(*time),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(window, ui, &mut frame),
+        );
+        output.textures_delta.clear();
+        output
+    }
+    fn visible(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                let center = text.pos + text.galley.size() / 2.0;
+                shape.clip_rect.contains(center).then_some(center)
+            }
+            _ => None,
+        })
+    }
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    crate::chrome::prepare(&ctx);
+    let mut window = Window::with_tabs(&ctx, 1, crate::OpeningLayout::DEFAULT, None).unwrap();
+    window.chrome.enable();
+    window.headers = window.headers.integrated(true);
+    open(&mut window, &ctx, false);
+    let mut time = 0.0;
+    for _ in 0..24 {
+        draw(&ctx, &mut window, &mut time, vec![]).drop_without_applying_deltas();
+    }
+    let target = "Manual setup and diagnostics";
+    let initial = draw(&ctx, &mut window, &mut time, vec![]);
+    assert!(
+        visible(&initial, target).is_none(),
+        "Connect scroll fixture must initially clip the target"
+    );
+    initial.drop_without_applying_deltas();
+    let scrolled = draw(
+        &ctx,
+        &mut window,
+        &mut time,
+        vec![
+            egui::Event::PointerMoved(egui::pos2(480.0, 400.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(0.0, -100.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    assert!(
+        visible(&scrolled, target).is_some(),
+        "Connect scrolling must paint the visible target in the wheel frame"
+    );
+    let at = visible(&scrolled, target).unwrap();
+    scrolled.drop_without_applying_deltas();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let clicked = draw(
+        &ctx,
+        &mut window,
+        &mut time,
+        vec![egui::Event::PointerMoved(at), button(true), button(false)],
+    );
+    assert!(
+        window.chrome.guide.manual_open,
+        "the next pointer click must open the visible Manual setup control"
+    );
+    clicked.drop_without_applying_deltas();
+    draw(&ctx, &mut window, &mut time, vec![]).drop_without_applying_deltas();
+    let passes = ctx.cumulative_pass_nr();
+    draw(&ctx, &mut window, &mut time, vec![]).drop_without_applying_deltas();
+    assert_eq!(
+        ctx.cumulative_pass_nr(),
+        passes + 1,
+        "an unchanged Connect scroll offset must keep an idle frame to one pass"
+    );
+}
