@@ -1,0 +1,258 @@
+use super::*;
+use std::{
+    env, fs,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
+};
+use term_core::{Pty, Size};
+
+const HELPER_MODE: &str = "IVY_QUOTA_TEST_MODE";
+
+#[test]
+fn native_helper() {
+    let Ok(mode) = env::var(HELPER_MODE) else {
+        return;
+    };
+    let stream = UnixStream::connect(env::var_os(quota::ENDPOINT_ENV).unwrap()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let admission = quota::read_line(&stream, MAX_FRAME);
+    if mode == "foreign" {
+        assert!(admission.is_err());
+    } else {
+        let admission: Admission = serde_json::from_slice(&admission.unwrap()).unwrap();
+        match mode.as_str() {
+            "oversized" => {
+                let mut bytes = vec![b' '; 1025];
+                bytes.push(b'\n');
+                let _ = (&stream).write_all(&bytes);
+            }
+            "stall" => {
+                // A connected peer cannot keep the worker after the frame deadline.
+                let started = Instant::now();
+                (&stream).write_all(b"{").unwrap();
+                assert_eq!((&stream).read(&mut [0; 1]).unwrap(), 0);
+                assert!(started.elapsed() < Duration::from_millis(800));
+            }
+            "revoked" => {
+                println!("quota-fixture-admitted");
+                io::stdin().read_line(&mut String::new()).unwrap();
+                let frame = Frame {
+                    v: 1,
+                    sequence: admission.sequence,
+                    outcome: Outcome::ProducerError,
+                };
+                let _ = quota::write_line(&stream, &frame, MAX_FRAME);
+            }
+            _ => {
+                let frame = match mode.as_str() {
+                    "good" | "expiry" => Frame {
+                        v: 1,
+                        sequence: admission.sequence,
+                        outcome: Outcome::Observed {
+                            five_hour: Some(Window {
+                                used_percentage: Some(0.0),
+                                resets_at: Some(
+                                    unix_seconds() + if mode == "expiry" { 2 } else { 30 },
+                                ),
+                            }),
+                            seven_day: None,
+                        },
+                    },
+                    "wrong-sequence" => Frame {
+                        v: 1,
+                        sequence: admission.sequence + 1,
+                        outcome: Outcome::ProducerError,
+                    },
+                    _ => panic!("unknown fixture mode"),
+                };
+                quota::write_line(&stream, &frame, MAX_FRAME).unwrap();
+            }
+        }
+    }
+    println!("quota-fixture-result={mode}");
+}
+
+struct Launch {
+    pty: Pty,
+    output: mpsc::Receiver<Vec<u8>>,
+}
+
+impl Launch {
+    fn new(endpoint: &Path) -> Self {
+        let test_name = format!(
+            "{}::native_helper",
+            module_path!().split_once("::").unwrap().1
+        );
+        let executable = env::current_exe().unwrap();
+        let script = "while IFS= read -r mode; do [ \"$mode\" = quit ] && break; IVY_QUOTA_TEST_MODE=\"$mode\" \"$1\" --exact \"$2\" --nocapture; done";
+        let (pty, output) = Pty::spawn_with_env_in(
+            "/bin/sh",
+            &["-c", script, "sh", executable.to_str().unwrap(), &test_name],
+            Size {
+                cols: 100,
+                rows: 25,
+            },
+            &[(quota::ENDPOINT_ENV, Some(endpoint.as_os_str()))],
+            None,
+        )
+        .unwrap();
+        Self { pty, output }
+    }
+
+    fn bind(&self, broker: &Broker) {
+        broker
+            .attach(
+                self.pty.foreground_scope().unwrap(),
+                fs::canonicalize("/bin/sh").unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn run(&mut self, mode: &str) {
+        self.pty.write(format!("{mode}\n").as_bytes()).unwrap();
+        self.wait_for_output(&format!("quota-fixture-result={mode}"));
+    }
+
+    fn wait_for_output(&self, witness: &str) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut output = Vec::new();
+        while !String::from_utf8_lossy(&output).contains(witness) {
+            let result = self
+                .output
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()));
+            assert!(
+                result.is_ok(),
+                "helper did not emit {witness}: {}",
+                String::from_utf8_lossy(&output)
+            );
+            output.extend(result.unwrap());
+        }
+    }
+}
+
+fn wait_for(broker: &Broker, predicate: impl Fn(Snapshot) -> bool) -> Snapshot {
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        let snapshot = broker.snapshot();
+        if predicate(snapshot) {
+            return snapshot;
+        }
+        assert!(Instant::now() < deadline, "last quota state: {snapshot:?}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn native_receiver_admits_its_launch_and_rejects_another_live_launch() {
+    let wake = Wake::new(|| {});
+    let first = Broker::prepare(wake.clone()).unwrap();
+    let second = Broker::prepare(wake).unwrap();
+    let mut primary = Launch::new(first.endpoint());
+    primary.bind(&first);
+    let mut foreign = Launch::new(first.endpoint());
+    foreign.bind(&second);
+    foreign.run("foreign");
+    assert_eq!(first.snapshot(), Snapshot::Waiting);
+    assert_eq!(second.snapshot(), Snapshot::Waiting);
+    primary.run("good");
+    let good = wait_for(&first, |snapshot| {
+        matches!(snapshot, Snapshot::Observed { .. })
+    });
+    assert!(matches!(
+        good,
+        Snapshot::Observed {
+            five_hour: WindowState::Reported(Window {
+                used_percentage: Some(0.0),
+                ..
+            }),
+            seven_day: WindowState::Absent,
+            ..
+        }
+    ));
+    for mode in ["wrong-sequence", "oversized", "stall"] {
+        primary.run(mode);
+        assert_eq!(first.snapshot(), good);
+    }
+    assert_eq!(second.snapshot(), Snapshot::Waiting);
+    first.stop();
+    assert_eq!(first.snapshot(), Snapshot::Disconnected);
+    assert_eq!(second.snapshot(), Snapshot::Waiting);
+    foreign.pty.write(b"quit\n").unwrap();
+    wait_for(&second, |snapshot| snapshot == Snapshot::Disconnected);
+}
+
+#[test]
+fn native_receiver_requires_the_expected_executable_and_revokes_in_flight() {
+    let wake = Wake::new(|| {});
+    let mismatched = Broker::prepare(wake.clone()).unwrap();
+    let mut unrelated = Launch::new(mismatched.endpoint());
+    mismatched
+        .attach(
+            unrelated.pty.foreground_scope().unwrap(),
+            fs::canonicalize("/bin/false").unwrap(),
+        )
+        .unwrap();
+    unrelated.run("foreign");
+    assert_eq!(mismatched.snapshot(), Snapshot::Waiting);
+
+    let broker = Broker::prepare(wake).unwrap();
+    let mut primary = Launch::new(broker.endpoint());
+    primary.bind(&broker);
+    primary.pty.write(b"revoked\n").unwrap();
+    primary.wait_for_output("quota-fixture-admitted");
+    broker.stop();
+    primary.pty.write(b"send\n").unwrap();
+    primary.wait_for_output("quota-fixture-result=revoked");
+    assert_eq!(broker.snapshot(), Snapshot::Disconnected);
+}
+
+#[test]
+fn hidden_receipt_and_expiry_do_not_wake_the_view() {
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let count = wakes.clone();
+    let wake = Wake::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    let broker = Broker::prepare(wake).unwrap();
+    let mut primary = Launch::new(broker.endpoint());
+    primary.bind(&broker);
+    primary.run("expiry");
+    wait_for(&broker, |snapshot| {
+        matches!(
+            snapshot,
+            Snapshot::Observed {
+                five_hour: WindowState::Expired,
+                seven_day: WindowState::Absent,
+                ..
+            }
+        )
+    });
+    assert_eq!(wakes.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn visible_updates_coalesce_across_launches_and_stop_when_hidden() {
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let count = wakes.clone();
+    let wake = Wake::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    let first = Broker::prepare(wake.clone()).unwrap();
+    let second = Broker::prepare(wake.clone()).unwrap();
+    wake.set_visible(true);
+    first.stop();
+    second.stop();
+    assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    wake.begin_frame();
+    let third = Broker::prepare(wake.clone()).unwrap();
+    third.stop();
+    assert_eq!(wakes.load(Ordering::Relaxed), 2);
+    wake.set_visible(false);
+    let fourth = Broker::prepare(wake).unwrap();
+    fourth.stop();
+    assert_eq!(wakes.load(Ordering::Relaxed), 2);
+}

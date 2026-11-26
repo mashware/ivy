@@ -618,6 +618,65 @@ fn launch(
     fallback: bool,
     integration: Option<shell_integration::Prepared>,
 ) -> term_core::Result<Pane> {
+    launch_configured(
+        ctx,
+        program,
+        panel,
+        name,
+        reads,
+        LaunchOptions {
+            fallback,
+            integration,
+            #[cfg(target_os = "linux")]
+            quota: None,
+        },
+    )
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn launch_claude_quota(
+    ctx: &egui::Context,
+    program: Launch<'_>,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    quota: crate::usage::QuotaStartup,
+) -> term_core::Result<Pane> {
+    launch_configured(
+        ctx,
+        program,
+        panel,
+        name,
+        reads,
+        LaunchOptions {
+            fallback: false,
+            integration: None,
+            quota: Some(quota),
+        },
+    )
+}
+
+struct LaunchOptions {
+    fallback: bool,
+    integration: Option<shell_integration::Prepared>,
+    #[cfg(target_os = "linux")]
+    quota: Option<crate::usage::QuotaStartup>,
+}
+
+fn launch_configured(
+    ctx: &egui::Context,
+    program: Launch<'_>,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    options: LaunchOptions,
+) -> term_core::Result<Pane> {
+    let LaunchOptions {
+        fallback,
+        integration,
+        #[cfg(target_os = "linux")]
+        quota,
+    } = options;
     let Launch {
         program,
         args,
@@ -639,9 +698,18 @@ fn launch(
     if let Some(prepared) = &integration {
         identity.extend(prepared.env());
     }
+    #[cfg(target_os = "linux")]
+    let quota_endpoint = quota.as_ref().map(|startup| startup.endpoint().to_owned());
+    #[cfg(target_os = "linux")]
+    if let Some(endpoint) = &quota_endpoint {
+        identity.push((
+            panel_control::quota::ENDPOINT_ENV,
+            Some(endpoint.as_os_str()),
+        ));
+    }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     let launch_waker = ctx.clone();
-    let (pty, output) = crate::launch::Process::start(
+    let (pty, output) = crate::launch::Process::start_configured(
         std::sync::Arc::new(move || launch_waker.request_repaint()),
         reads.clone(),
         crate::launch::Request {
@@ -652,6 +720,8 @@ fn launch(
             directory,
             fallback,
         },
+        #[cfg(target_os = "linux")]
+        quota,
     )?;
 
     Ok(assemble_pane(
