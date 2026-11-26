@@ -986,7 +986,7 @@ and leaves the original command available to the running Claude launch.
 
 | Client and platform | Evidence |
 |---|---|
-| Claude Code 2.1.332 · Linux native executable · POSIX `/bin/sh` | Isolated installed-client startup, settings precedence and file overlay, original output and cancellation verified. A native callback from a signed-out profile reported no windows. Measured-zero, expiry, disconnect and isolated producers exercised with fixtures. |
+| Claude Code 2.1.332 · Linux native executable · POSIX `/bin/sh` | Verified installed-client startup, settings precedence, the file overlay, original output and cancellation. The signed-in client emitted both windows after one response. Fixtures cover measured zero, expiry, disconnect and isolated producers. |
 | macOS, Windows and other client versions | Setup unavailable in this delivery. |
 
 The Linux receiver requires kernel peer process handles. Use this setup for

@@ -235,6 +235,70 @@ fn hidden_receipt_and_expiry_do_not_wake_the_view() {
 }
 
 #[test]
+fn received_quota_is_painted_and_measured_only_in_the_open_usage_view() {
+    use eframe::egui;
+
+    let wake = Wake::new(|| {});
+    let broker = Arc::new(Broker::prepare(wake.clone()).unwrap());
+    let mut primary = Launch::new(broker.endpoint());
+    primary.bind(&broker);
+    primary.run("good");
+    wait_for(&broker, |snapshot| {
+        matches!(snapshot, Snapshot::Observed { .. })
+    });
+
+    let ctx = egui::Context::default();
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        ctx.style_mut_of(theme, |style| style.animation_time = 0.0);
+    }
+    let mut window = crate::tests::window_of_tabs([["cat", "cat"]]);
+    window.usage.quota.install_fixture(broker, wake);
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1000.0, 720.0),
+        )),
+        ..Default::default()
+    };
+    let has_quota = |shapes: &[egui::epaint::ClippedShape], needle: &str| {
+        shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains(needle))
+        })
+    };
+    window.usage.open = true;
+    window.usage.quota.open(&ctx);
+    // The first modal pass computes its size before drawing.
+    ctx.run_ui(input(), |ui| crate::usage::begin_pass(&mut window, ui))
+        .textures_delta
+        .clear();
+    window.usage.timing = Default::default();
+    let before = window.timed_separately;
+    let mut visible = ctx.run_ui(input(), |ui| crate::usage::begin_pass(&mut window, ui));
+    visible.textures_delta.clear();
+    assert!(has_quota(&visible.shapes, "0.0% used"));
+    assert!(has_quota(&visible.shapes, "account unverified"));
+    let paint_cost = window.usage.timing.pending[1].unwrap();
+    assert!(paint_cost > Duration::ZERO);
+    assert_eq!(window.timed_separately - before, paint_cost);
+    window.usage.close_frame();
+
+    window.usage.close(&ctx);
+    let before = window.timed_separately;
+    let mut hidden = ctx.run_ui(input(), |ui| crate::usage::begin_pass(&mut window, ui));
+    hidden.textures_delta.clear();
+    assert!(!has_quota(&hidden.shapes, "0.0% used"));
+    assert_eq!(window.timed_separately, before);
+    window.usage.close_frame();
+    let mut report = Vec::new();
+    window.usage.publish(&mut report).unwrap();
+    assert!(
+        String::from_utf8(report)
+            .unwrap()
+            .contains("Usage paint: frames=1")
+    );
+}
+
+#[test]
 fn visible_updates_coalesce_across_launches_and_stop_when_hidden() {
     let wakes = Arc::new(AtomicUsize::new(0));
     let count = wakes.clone();

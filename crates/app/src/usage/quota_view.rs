@@ -103,6 +103,13 @@ impl Startup {
 }
 
 impl QuotaView {
+    #[cfg(test)]
+    pub(super) fn install_fixture(&mut self, broker: Arc<Broker>, wake: Arc<Wake>) {
+        self.enabled.store(true, Ordering::Release);
+        self.wake = Some(wake);
+        self.install(0, broker);
+    }
+
     pub(super) fn open(&mut self, ctx: &egui::Context) {
         if self.directory.is_empty() {
             self.directory = std::env::current_dir()
