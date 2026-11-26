@@ -275,3 +275,72 @@ fn selection_scroll_markdown_copy_requires_keyboard_ownership() {
         ["Witness 001 alpha bravo charlie"]
     );
 }
+
+#[test]
+fn selection_scroll_markdown_touch_drag_pans_the_document() {
+    let p = Probe::new();
+    let from = Pos2::new(85.0, 220.0);
+    let to = Pos2::new(85.0, 50.0);
+    let touch = |phase, pos| Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase,
+        pos,
+        force: None,
+    };
+    p.frame(vec![touch(egui::TouchPhase::Start, from)]);
+    p.frame(vec![
+        touch(egui::TouchPhase::End, from),
+        Event::PointerMoved(from),
+    ]);
+    p.frame(vec![
+        touch(egui::TouchPhase::Start, from),
+        button(from, true),
+    ]);
+    p.frame(vec![
+        touch(egui::TouchPhase::Move, to),
+        Event::PointerMoved(to),
+    ]);
+    p.frame(vec![touch(egui::TouchPhase::End, to), button(to, false)]);
+    let (visible, copied) = p.frame(vec![Event::Copy]);
+    assert!(
+        !visible
+            .iter()
+            .any(|(text, _)| text.starts_with("Witness 001"))
+    );
+    assert!(copied.is_empty(), "a touch scroll must not select text");
+}
+
+#[test]
+fn selection_scroll_markdown_keyboard_scrolls_a_multiline_block() {
+    let mut p = Probe::new();
+    p.document =
+        MarkdownDocument::parse(&"Multiline text for keyboard selection.  \n".repeat(60)).unwrap();
+    for _ in 0..5 {
+        p.frame(vec![]);
+    }
+    let rect = p.frame(vec![]).0[0].1;
+    let original_top = rect.top();
+    let start = rect.left_top() + egui::vec2(12.0, 8.0);
+    p.frame(vec![Event::PointerMoved(start)]);
+    p.frame(vec![button(start, true)]);
+    p.frame(vec![button(start, false)]);
+    for _ in 0..40 {
+        p.frame(vec![Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        }]);
+    }
+    let (visible, copied) = p.frame(vec![Event::Copy]);
+    assert!(
+        visible[0].1.top() < original_top - 30.0,
+        "the multiline block did not scroll"
+    );
+    assert!(
+        copied[0].lines().count() > 30,
+        "the keyboard selection did not extend"
+    );
+}

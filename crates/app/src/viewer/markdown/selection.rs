@@ -43,10 +43,15 @@ pub(super) struct Frame {
 
 impl Frame {
     pub(super) fn new(ui: &egui::Ui, visible: egui::Rect) -> Self {
+        let sense = if ui.input(|input| input.has_touch_screen()) {
+            egui::Sense::click()
+        } else {
+            egui::Sense::click_and_drag()
+        };
         let response = ui.interact(
             visible,
             ui.id().with("document-selection"),
-            egui::Sense::click_and_drag() - egui::Sense::FOCUSABLE,
+            sense - egui::Sense::FOCUSABLE,
         );
         Self {
             visible,
@@ -236,6 +241,13 @@ impl Fragment {
                 range.anchor = self.position(native.secondary);
             }
             range.end = self.position(native.primary);
+            let caret = self
+                .galley
+                .pos_from_cursor(native.primary)
+                .translate(self.origin.to_vec2());
+            if !ui.clip_rect().contains_rect(caret) {
+                ui.scroll_to_rect(caret, None);
+            }
         }
     }
 
@@ -316,6 +328,11 @@ fn copy(blocks: &[Block], selection: Range) -> String {
                     if blank_line_between(&blocks[previous], content) {
                         text.push('\n');
                     }
+                    let blank_code_lines = blocks[previous + 1..block]
+                        .iter()
+                        .filter(|block| matches!(block, Block::Line { code: true, .. }))
+                        .count();
+                    text.extend(std::iter::repeat_n('\n', blank_code_lines));
                 } else if !text.ends_with(char::is_whitespace)
                     && !first.is_whitespace()
                     && !first.is_ascii_punctuation()
@@ -371,6 +388,27 @@ mod tests {
                 }
             ),
             "clair one\n\nParagraph two\n\nA B\nx y",
+        );
+    }
+
+    #[test]
+    fn selection_scroll_markdown_copy_keeps_blank_code_lines() {
+        let document =
+            super::super::MarkdownDocument::parse("```rust\nlet a = 1;\n\n\nlet b = 2;\n```")
+                .unwrap();
+        let anchor = Position {
+            block: 0,
+            column: 0,
+            character: 0,
+        };
+        let end = Position {
+            block: 3,
+            column: 0,
+            character: "let b = 2;".len(),
+        };
+        assert_eq!(
+            copy(&document.blocks, Range { anchor, end }),
+            "let a = 1;\n\n\nlet b = 2;",
         );
     }
 }
