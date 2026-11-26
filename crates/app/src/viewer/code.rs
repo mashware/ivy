@@ -276,18 +276,7 @@ pub(super) fn show(
                 && state.selection.is_some()
                 && let Some(pos) = pointer
             {
-                let distance = pos.y - pos.y.clamp(visible.top(), visible.bottom());
-                let can_scroll = (distance < 0.0 && viewport.min.y > 0.0)
-                    || (distance > 0.0 && viewport.max.y < height);
-                if can_scroll {
-                    let dt = ui.input(|i| i.stable_dt.min(0.05));
-                    let delta = distance.clamp(-80.0, 80.0) * 8.0 * dt;
-                    ui.scroll_with_delta_animation(
-                        egui::vec2(0.0, -delta),
-                        egui::style::ScrollAnimation::none(),
-                    );
-                    ui.ctx().request_repaint();
-                }
+                super::selection_scroll::while_dragging(ui, visible, viewport, height, pos);
             }
         });
     ui.spacing_mut().scroll = previous_scroll;
