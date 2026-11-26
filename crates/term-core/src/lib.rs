@@ -2390,6 +2390,8 @@ mod tests {
     }
 
     const FIXTURE_MODE: &str = "IVY_TERM_CORE_TEST_FIXTURE";
+    #[cfg(unix)]
+    const FIXTURE_SAVE_PATH: &str = "IVY_TERM_CORE_TEST_SAVE_PATH";
     const FIXTURE_ARGS: [&str; 4] = [
         "--exact",
         "tests::pty_subprocess_fixture",
@@ -2424,6 +2426,44 @@ mod tests {
                 None => println!("removed"),
                 Some(value) => println!("TERM={value:?}"),
             },
+            #[cfg(unix)]
+            "save-on-hangup" => {
+                static HUNG_UP: AtomicBool = AtomicBool::new(false);
+                extern "C" fn notice_hangup(_: libc::c_int) {
+                    HUNG_UP.store(true, Ordering::Relaxed);
+                }
+                let path = std::env::var_os(FIXTURE_SAVE_PATH).expect("the save destination");
+                let mut saved = std::fs::File::create(path).expect("open the save destination");
+                // A process-wide handler also covers libtest's other thread. Unblocking this
+                // thread avoids depending on whatever signal mask the harness inherited.
+                unsafe {
+                    let mut action: libc::sigaction = std::mem::zeroed();
+                    action.sa_sigaction = notice_hangup as *const () as usize;
+                    action.sa_flags = libc::SA_RESTART;
+                    assert_eq!(libc::sigemptyset(&mut action.sa_mask), 0);
+                    assert_eq!(
+                        libc::sigaction(libc::SIGHUP, &action, std::ptr::null_mut()),
+                        0
+                    );
+                    let mut mask: libc::sigset_t = std::mem::zeroed();
+                    assert_eq!(libc::sigemptyset(&mut mask), 0);
+                    assert_eq!(libc::sigaddset(&mut mask, libc::SIGHUP), 0);
+                    assert_eq!(
+                        libc::pthread_sigmask(libc::SIG_UNBLOCK, &mask, std::ptr::null_mut()),
+                        0
+                    );
+                }
+                println!("saving");
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !HUNG_UP.load(Ordering::Relaxed) {
+                    assert!(Instant::now() < deadline, "the hang-up never arrived");
+                    thread::sleep(Duration::from_millis(1));
+                }
+                thread::sleep(Duration::from_millis(100));
+                saved
+                    .write_all(b"done")
+                    .expect("finish saving after the hang-up");
+            }
             #[cfg(unix)]
             "survivor-parent" => {
                 use std::os::unix::process::CommandExt;
@@ -3857,26 +3897,23 @@ mod tests {
     /// library's 200 ms, and past anything shorter than it by enough that a loaded machine is not
     /// what decides it.
     ///
-    /// The program's trap runs only once its foreground `sleep` returns, which is why that sleep is
-    /// ten milliseconds and not the whole wait. The save goes to a file, not to the console: the
-    /// reader is being stopped while it happens, so bytes on the pseudoterminal prove nothing. The
-    /// file's path reaches the script as `$0`, never spliced into it, so a temporary directory with a
-    /// space in its name is still the file the assertion reads.
+    /// A native signal handler avoids shell trap deferral and launching another executable inside
+    /// the grace: the literal 100 ms must measure the save, rather than those extra fixture costs.
+    /// The destination is opened before readiness, and only written after the signal and delay.
+    /// The save goes to a file, not to the console: the reader is being stopped while it happens,
+    /// so bytes on the pseudoterminal prove nothing. Its path travels as an environment value.
     #[cfg(unix)]
     #[test]
     fn a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed() {
         const MARKER: &str = "saving";
 
         let saved = std::env::temp_dir().join(format!("term-core-hang-up-{}", std::process::id()));
-        let saved_path = saved.to_str().expect("a temporary path that is text");
         let _ = std::fs::remove_file(&saved);
-        let script = format!(
-            "trap 'sleep 0.1 && printf done > \"$0\" && exit 0' HUP && printf {MARKER} && \
-             while :; do sleep 0.01; done"
+        let (pty, output) = spawn_fixture(
+            "save-on-hangup",
+            &[(FIXTURE_SAVE_PATH, Some(saved.as_os_str()))],
         );
-        let (pty, output) =
-            Pty::spawn("sh", &["-c", &script, saved_path], Size::default()).expect("launch sh");
-        // What the close cost is deliberately not asserted: the save alone takes some 110 ms of a
+        // What the close cost is deliberately not asserted: the save alone needs 100 ms of a
         // 200 ms grace, and a ceiling with less than two-fold headroom on a loaded machine would fail
         // for reasons that are not the grace.
         time_the_close(pty, output, MARKER);
