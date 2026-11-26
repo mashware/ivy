@@ -953,6 +953,22 @@ An executable selected from PATH keeps precedence; unsupported scripts still ref
 falling through to another installation. The native candidate is canonicalized and all existing
 ancestry, foreground, lifetime and same-invocation checks still apply. No launch PATH is rewritten.
 
+### Windows fresh-launch hooks
+
+Windows hooks require the holder and publisher to descend from the same retained native root
+explicitly launched by Ivy. Copying environment variables or using a matching source label does
+not grant authority. The executable catalogue contains only the at most three explicitly selected
+native images, frozen for each invocation. A recognized client nested below that root is refused;
+generic hook/shell descendants are allowed. Unknown installations and interpreter-hosted agents
+are outside that recognition guarantee; this is not a sandbox for malicious descendants.
+
+The existing `panel_publish` document and merge rules remain unchanged. Snapshot contention
+returns `snapshot_busy`; a busy holder delivery slot or full application queue returns `queue_full`.
+Unavailable native evidence, including inspection timeout/pressure, refuses hook authority.
+Queued updates recheck the live root, pane revocation and holder generation before application.
+The publishing helper may exit after admission. A stale update leaves the previous document and
+shows the existing `hook update refused` identity notice.
+
 ## Windows verified-peer connection upgrade
 
 Windows clients may opt into a verified connection before sending ordinary control operations.

@@ -140,6 +140,23 @@ every version of the agent. That is what channel 1 is for.
 
 ---
 
+## Windows native hook inspection
+
+Canonical image resolution can wait on a filesystem after transport cancellation. Windows control
+workers therefore ask a separate native inspection task with a 750 ms caller deadline and
+10 ms revocation checks. At most one unfinished inspection belongs to an invocation and eight to
+an application process. No backlog is created and timeout never frees a still-running slot.
+
+An inspection owns native evidence and a result sender, with no document, publication queue,
+release token, application callback or window capability. A late result cannot publish. Console
+shutdown joins its connection workers without joining filesystem inspection. An unavailable
+filesystem may retain a bounded task until the OS completes it or the process exits; process-wide
+unfinished/timeout/busy/cancel counters expose that residual separately. These limits are selected
+engineering bounds, not measured native timing claims. D90 records the rationale and alternatives.
+
+Native runtime fixtures and an actual installed-client matrix are separate validation obligations.
+Compilation alone proves neither the Windows process topology nor visible client hook behavior.
+
 ## Security
 
 | Risk | Mitigation |

@@ -325,6 +325,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/control/channel/windows_live_hooks.rs",
+        include_str!("../src/control/channel/windows_live_hooks.rs"),
+        1,
+    ),
+    (
         "src/ai_sessions/mod.rs",
         include_str!("../src/ai_sessions/mod.rs"),
         1,

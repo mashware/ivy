@@ -1,6 +1,9 @@
 //! Optional off-frame services share the pane endpoint without changing panel ownership.
 use super::*;
 
+#[cfg(all(test, windows))]
+mod windows_live_hooks;
+
 #[cfg(test)]
 #[cfg(unix)]
 pub(crate) fn open_with_sessions(

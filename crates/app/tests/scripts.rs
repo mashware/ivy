@@ -1375,6 +1375,30 @@ const MODULES: &[(&str, &str)] = &[
         "term-core/tests/idle_console_cpu.rs",
         include_str!("../../term-core/tests/idle_console_cpu.rs"),
     ),
+    (
+        "app/src/control/channel/windows_live_hooks.rs",
+        include_str!("../src/control/channel/windows_live_hooks.rs"),
+    ),
+    (
+        "app/tests/fixtures/windows_hook_agent.rs",
+        include_str!("fixtures/windows_hook_agent.rs"),
+    ),
+    (
+        "panel-control/src/windows_hooks.rs",
+        include_str!("../../panel-control/src/windows_hooks.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/fresh.rs",
+        include_str!("../../term-core/src/foreground/windows/fresh.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/fresh_tests.rs",
+        include_str!("../../term-core/src/foreground/windows/fresh_tests.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/inspection.rs",
+        include_str!("../../term-core/src/foreground/windows/inspection.rs"),
+    ),
 ];
 
 /// The one file of the walked directories [`MODULES`] leaves out, with its reason: this file, whose

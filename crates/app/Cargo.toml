@@ -241,7 +241,7 @@ term-core = { path = "../term-core", features = ["testing"] }
 [target.'cfg(windows)'.dev-dependencies]
 # The native keyboard witness feeds real Windows events through the production adapter.
 egui-winit = { version = "0.36.1", default-features = false }
-windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading"] }
 
 # **So that the bench's tests run with `cargo test`, and not only if somebody remembers to ask for
 # `--examples`.** A cargo example is not a test target by default: the `tests` module of

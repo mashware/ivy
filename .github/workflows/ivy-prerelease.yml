@@ -73,6 +73,9 @@ jobs:
       - name: Check Windows launch helper contracts
         shell: pwsh
         run: ./packaging/windows/test-launch-contract.ps1
+      - name: Prove native live hook through real helpers
+        shell: pwsh
+        run: python scripts/windows-live-hooks.py
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24.14.1'

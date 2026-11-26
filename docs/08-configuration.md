@@ -41,6 +41,40 @@ an explanation and a retained retry target. A client that rejects the target kee
 typing, clicking its notice or pasting starts a fresh shell before any personal input reaches it.
 Closing the console discards that console’s target. A crash recovers the last successfully saved snapshot.
 
+## Fresh native agents on Windows
+
+Open **Connect agents → Open a new agent console**, select Claude, Codex local or OpenCode,
+and enter its installed native `.exe` and a local absolute working directory. The guide shows
+the executable, arguments and directory before opening a new console. Existing consoles continue
+running. Selections last for this window and are not saved in layout or client configuration.
+
+Claude and OpenCode receive no extra arguments. **Codex local** explicitly starts a new session
+with `--no-daemon`, after a bounded help check confirms that option; this session is not shared
+with mobile. Script shims and interpreter executables are unsupported on this launch path. Ivy
+does not search for another installation or substitute a shell when the selected launch fails.
+Selecting an executable trusts that installation; it does not certify the vendor or its code.
+
+Keep the client's existing MCP registration from Connect agents. The client must publish its
+panel with `panel_set` before a configured hook can update it. Ivy does not install hooks or
+change authentication, provider configuration or subscriptions. Hooks publish the document their
+producer declares; terminal output is never used to infer progress or attention.
+
+The existing helper is supplied to this console as `IVY_SESSION_HELPER`. A PowerShell hook can
+send an explicitly declared panel document, for example:
+
+```powershell
+'{"lines":["Updated step"],"phase":"build"}' | & $env:IVY_SESSION_HELPER publish
+```
+
+This example uses ASCII. A hook emitting non-ASCII text must send UTF-8 JSON to the helper's
+standard input. Keep `PANEL_ID`, `PANEL_DIR` and `PANEL_SERVER_PID` inherited from the console;
+never copy them into persistent client settings. A hook without an MCP holder does not acquire
+the panel. A successful helper reply means queue admission, not that the window has painted it.
+
+Only agents opened through this fresh launch receive Windows hook authority. Agents started
+manually in a shell retain ordinary MCP. Reopening recorded conversations on Windows or macOS,
+and Windows shared Codex mobile/panel routing, remain deferred.
+
 ## Directory of a new split
 
 **Split right** and **Split down**, including their shortcuts and compact-menu entries, open the
