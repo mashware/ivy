@@ -211,10 +211,21 @@ def select_observed_opencode(hwnd, evidence):
     record_launcher_action(hwnd, evidence, 25,
                            {'kind': 'click', 'at': [461, row], 'target': 'OpenCode'}, prefix='selector')
     band = range(max(196, row - 4), min(504, row + 5))
-    opencode = selected_pixels(hwnd, origin, (429, 492), band)
-    claude = selected_pixels(hwnd, origin, (225, 280), band)
-    if not opencode or claude:
-        raise RuntimeError('pixel observation did not confirm OpenCode selected and Claude unselected')
+    started = time.monotonic()
+    deadline = started + 5
+    observations = []
+    while True:
+        opencode = selected_pixels(hwnd, origin, (429, 492), band)
+        claude = selected_pixels(hwnd, origin, (225, 280), band)
+        now = time.monotonic()
+        observations.append({'elapsed': now - started, 'opencode_selected_rows': sorted(opencode),
+                             'claude_selected_rows': sorted(claude)})
+        (evidence / 'selector-confirmation.json').write_text(json.dumps(
+            {'clicked_client': [461, row], 'observations': observations}), encoding='utf-8')
+        if opencode and not claude and now <= deadline:
+            break
+        if now >= deadline:
+            raise RuntimeError('pixel observation did not confirm OpenCode selected and Claude unselected within 5 seconds')
     screenshot(hwnd, evidence, 'selector-selected')
     (evidence / 'selector.json').write_text(json.dumps(
         {'client_origin': origin, 'clicked_client': [461, row],

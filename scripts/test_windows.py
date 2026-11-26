@@ -319,14 +319,53 @@ class WindowsObservedSelectorTests(unittest.TestCase):
 
     def test_failed_selection_cannot_continue_to_path_entry(self):
         with tempfile.TemporaryDirectory() as temporary, \
-                patch.object(LAUNCHER, 'click'), \
+                patch.object(LAUNCHER, 'click') as click, \
                 patch.object(LAUNCHER, 'record_launcher_action'), \
-                patch.object(LAUNCHER, 'screenshot') as capture:
+                patch.object(LAUNCHER, 'screenshot') as capture, \
+                patch.object(LAUNCHER.time, 'monotonic', side_effect=[0, .1, 5]):
             evidence = Path(temporary)
-            with self.assertRaisesRegex(RuntimeError, 'did not confirm OpenCode selected'):
+            with self.assertRaisesRegex(RuntimeError, 'did not confirm OpenCode selected.*within 5 seconds'):
                 LAUNCHER.select_observed_opencode(1, evidence)
             self.assertFalse((evidence / 'selector.json').exists())
+            observations = json.loads((evidence / 'selector-confirmation.json').read_text())['observations']
+            self.assertEqual([sample['elapsed'] for sample in observations], [.1, 5])
+            self.assertTrue(all(not sample['opencode_selected_rows'] and sample['claude_selected_rows']
+                                for sample in observations))
+            click.assert_called_once_with(1, 461, 374)
             capture.assert_not_called()
+
+    def test_delayed_selected_pixels_are_reobserved_without_clicking_again(self):
+        read_pixels = LAUNCHER.selected_pixels
+        stale_reads = 0
+
+        def observe(hwnd, origin, columns, rows):
+            nonlocal stale_reads
+            result = read_pixels(hwnd, origin, columns, rows)
+            if columns == (225, 280) and len(rows) == 9:
+                stale_reads += 1
+                if stale_reads == 1:
+                    self.selected = 'OpenCode'
+            return result
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(LAUNCHER, 'click') as click, \
+                patch.object(LAUNCHER, 'selected_pixels', observe), \
+                patch.object(LAUNCHER, 'record_launcher_action'), \
+                patch.object(LAUNCHER, 'screenshot'), \
+                patch.object(LAUNCHER.time, 'monotonic', side_effect=[0, .1, .2]):
+            evidence = Path(temporary)
+            try:
+                LAUNCHER.select_observed_opencode(1, evidence)
+            except RuntimeError as error:
+                self.fail(f'pixel confirmation must reread delayed presentation: {error}')
+            observations = json.loads((evidence / 'selector-confirmation.json').read_text())['observations']
+            self.assertEqual(len(observations), 2)
+            self.assertFalse(observations[0]['opencode_selected_rows'])
+            self.assertTrue(observations[0]['claude_selected_rows'])
+            self.assertTrue(observations[1]['opencode_selected_rows'])
+            self.assertFalse(observations[1]['claude_selected_rows'])
+            click.assert_called_once_with(1, 461, 374)
+            self.assertTrue((evidence / 'selector.json').exists())
 
     def test_search_is_bounded_and_cannot_click_without_a_visible_chip(self):
         self.rows = set()
