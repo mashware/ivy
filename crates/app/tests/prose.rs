@@ -1019,6 +1019,21 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/usage/allowances.rs",
+        include_str!("../src/usage/allowances.rs"),
+        0,
+    ),
+    (
+        "src/usage/allowances/native.rs",
+        include_str!("../src/usage/allowances/native.rs"),
+        8,
+    ),
+    (
+        "src/usage/allowances/wire.rs",
+        include_str!("../src/usage/allowances/wire.rs"),
+        2,
+    ),
+    (
         "src/usage/paint.rs",
         include_str!("../src/usage/paint.rs"),
         1,
