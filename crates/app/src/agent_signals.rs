@@ -126,6 +126,11 @@ impl Signals {
         }
         reply
     }
+    pub(crate) fn can_reply_inline(&self) -> bool {
+        self.enabled.claude
+            && !self.capability_pending
+            && !self.reporter.as_ref().is_some_and(|r| r.connected)
+    }
     pub(crate) fn take_capability_reply(&mut self, queried: bool, writable: bool) -> bool {
         if !self.enabled.claude || self.reporter.as_ref().is_some_and(|r| r.connected) {
             self.capability_pending = false;

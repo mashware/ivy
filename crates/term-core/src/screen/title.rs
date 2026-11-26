@@ -19,6 +19,16 @@ pub(super) struct ReplyBatch {
     pub(super) error: Option<&'static str>,
 }
 
+impl ReplyBatch {
+    fn append(&mut self, bytes: &[u8]) {
+        if bytes.len() > REPLY_LIMIT.saturating_sub(self.bytes.len()) {
+            self.error = Some("too many terminal query replies in one output batch");
+        } else if self.error.is_none() {
+            self.bytes.extend_from_slice(bytes);
+        }
+    }
+}
+
 impl Listener {
     pub(super) fn begin_replies(&self) {
         *self.replies.lock().expect("terminal reply slot poisoned") = Some(ReplyBatch::default());
@@ -30,6 +40,15 @@ impl Listener {
             .expect("terminal reply slot poisoned")
             .take()
             .expect("terminal reply collection was started")
+    }
+
+    pub(super) fn reply_to_program_query(&self) {
+        self.replies
+            .lock()
+            .expect("terminal reply slot poisoned")
+            .as_mut()
+            .expect("terminal reply collection was started")
+            .append(b"\x1b]7501;?\x07");
     }
 
     pub(super) fn take(&self) -> Option<Option<String>> {
@@ -48,10 +67,8 @@ impl EventListener for Listener {
                 if let Some(batch) = slot.as_mut() {
                     if !safe_reply(&text) {
                         batch.error = Some("terminal engine generated an unsupported query reply");
-                    } else if text.len() > REPLY_LIMIT.saturating_sub(batch.bytes.len()) {
-                        batch.error = Some("too many terminal query replies in one output batch");
-                    } else if batch.error.is_none() {
-                        batch.bytes.extend_from_slice(text.as_bytes());
+                    } else {
+                        batch.append(text.as_bytes());
                     }
                 }
                 return;
@@ -308,5 +325,24 @@ mod tests {
         assert_eq!(first.terminal_title(), Some("First"));
         assert_eq!(second.terminal_title(), Some("Second"));
         assert_eq!(screen().terminal_title(), None);
+    }
+
+    #[test]
+    fn capability_reply_stays_between_device_attribute_replies_across_read_boundaries() {
+        let query = b"\x1b[c\x1b]7501;?\x1b\\\x1b[c";
+        for split in 0..=query.len() {
+            let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
+            let mut replies = Vec::new();
+            for chunk in [&query[..split], &query[split..]] {
+                screen
+                    .advance_with_client_replies(chunk, true, |bytes| {
+                        replies.extend_from_slice(bytes);
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            assert_eq!(replies, b"\x1b[?6c\x1b]7501;?\x07\x1b[?6c", "split {split}");
+            assert!(!screen.take_program_query(), "split {split}");
+        }
     }
 }

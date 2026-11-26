@@ -558,9 +558,12 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     // added a reading of its own to the span it was meant to measure.
     let collected_at = Instant::now();
     pane.signals.configure(enabled, &mut pane.screen);
-    if let Err(error) = pane
-        .screen
-        .advance_with_replies(&pane.received, |reply| pane.pty.write(reply))
+    let answer_capability = pane.signals.can_reply_inline() && pane.pty.can_queue_reply();
+    if let Err(error) =
+        pane.screen
+            .advance_with_client_replies(&pane.received, answer_capability, |reply| {
+                pane.pty.write(reply)
+            })
     {
         say_query_error(&error);
     }
@@ -569,7 +572,7 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     // Automatic replies must not consume the backlog reserved for the person's input.
     if pane
         .signals
-        .take_capability_reply(queried, pane.pty.backlog().is_none())
+        .take_capability_reply(queried, pane.pty.can_queue_reply())
         && let Err(error) = pane.pty.write(b"\x1b]7501;?\x07")
     {
         eprintln!("could not answer client status capability: {error}");

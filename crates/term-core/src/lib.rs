@@ -1041,6 +1041,13 @@ impl Pty {
         self.input.backlog()
     }
 
+    /// Whether a protocol reply can join the ordered writer without recording a refusal.
+    pub fn can_queue_reply(&self) -> bool {
+        !self.input.gave_up()
+            && !self.input.refused.load(Ordering::Relaxed)
+            && self.input.owed() < MAX_OWED
+    }
+
     /// How the reading ended, or nothing while nothing has been recorded.
     ///
     /// **`None` is «nobody wrote a reason», and it now covers one case rather than two.** A reader

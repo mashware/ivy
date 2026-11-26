@@ -10,6 +10,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
+const PENDING_INPUT_CEILING: usize = 256 * 1024;
 type Spawned = (Pty, Receiver<Vec<u8>>);
 
 #[derive(Debug)]
@@ -367,6 +368,15 @@ impl Process {
             refusals: self.refusals,
         })
     }
+    pub(crate) fn can_queue_reply(&self) -> bool {
+        self.live.as_ref().is_some_and(|live| {
+            if self.startup_pending() || !self.input.is_empty() {
+                !self.refused && self.input.len() < PENDING_INPUT_CEILING
+            } else {
+                live.can_queue_reply()
+            }
+        })
+    }
     pub(crate) fn resize(&mut self, size: Size) -> term_core::Result<()> {
         if !self.startup_pending()
             && let Some(live) = &mut self.live
@@ -386,7 +396,7 @@ impl Process {
             return Err("the console could not be started".into());
         }
         // Match D60: accept one paste whole, refuse subsequent input while the queue is full.
-        if self.input.len() >= 256 * 1024 {
+        if self.input.len() >= PENDING_INPUT_CEILING {
             self.refused = true;
             self.refusals += 1;
             return Err(

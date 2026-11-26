@@ -71,28 +71,31 @@ fn healthy_native_client_receives_the_exact_capability_response() {
             .unwrap()
             .as_nanos()
     ));
-    let response = b"\x1b]7501;?\x07";
+    let response = b"\x1b[?6c\x1b]7501;?\x07\x1b[?6c";
     let quoted = path.to_string_lossy().replace('\'', "'\\''");
+    // Claude closes its startup probe batch on the second DA answer. With Ivy's
+    // defaults, its XTVERSION and Kitty queries are unanswered.
     let script = format!(
-        "stty raw -echo && printf '\\033]7501;?\\007' && dd bs=1 count={} of='{}' 2>/dev/null && exec sleep 8",
+        "stty raw -echo && printf '\\033[c\\033[>0q\\033[?u\\033]7501;?\\007\\033[c' && dd bs=1 count={} of='{}' 2>/dev/null && exec sleep 8",
         response.len(),
         quoted
     );
     let mut pane = pane_with(&script, 0);
     let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
+    let received = loop {
         pane.pump(enabled());
-        if std::fs::read(&path).ok().as_deref() == Some(response) {
-            break;
+        let received = std::fs::read(&path).unwrap_or_default();
+        if received.len() == response.len() {
+            break received;
         }
         assert!(
             Instant::now() < deadline,
-            "client never received the expected capability bytes"
+            "client received incomplete terminal replies: {received:02x?}"
         );
         std::thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(std::fs::read(&path).unwrap(), response);
+    };
     std::fs::remove_file(path).unwrap();
+    assert_eq!(received, response);
 }
 
 #[test]

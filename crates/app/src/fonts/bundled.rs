@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn pane_titles_paint_claudes_circle_with_the_bundled_fallback() {
+    fn pane_titles_paint_a_plain_half_circle_with_the_bundled_fallback() {
         let ctx = egui::Context::default();
         install(&ctx);
         for rebuilt in [false, true] {
@@ -240,7 +240,7 @@ mod tests {
             }
             for weight in [400, 500, 600] {
                 for size in [8.0, 14.0, 24.0] {
-                    let text = "◐ Siguientes pasos del roadmap";
+                    let text = "◐";
                     let output = ctx.run_ui(Default::default(), |ui| {
                         crate::header::title_text::paint(
                             ui.painter(),
