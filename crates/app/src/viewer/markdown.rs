@@ -204,7 +204,7 @@ impl MarkdownDocument {
         Ok(doc)
     }
 
-    pub(crate) fn show(&self, ui: &mut egui::Ui) {
+    pub(crate) fn show(&self, ui: &mut egui::Ui, keys: bool) {
         egui::ScrollArea::both()
             .id_salt("markdown-content")
             .auto_shrink([false; 2])
@@ -269,6 +269,7 @@ impl MarkdownDocument {
                     height,
                     &mut self.selection.borrow_mut(),
                     &self.blocks,
+                    keys,
                 );
             });
     }
@@ -489,7 +490,7 @@ mod tests {
             "# Title\n\nplain *em* **bold** `inline`\n\n1. first\n   - nested\n2. second\n\n| A | B |\n|---|---|\n| x | y |\n\n```rs\nlet x = 1;\n```\n\n[link](https://example.com) <script>bad</script>",
         ).unwrap();
         let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(Default::default(), |ui| doc.show(ui));
+        let mut output = ctx.run_ui(Default::default(), |ui| doc.show(ui, true));
         let mut jobs = Vec::new();
         for clipped in &output.shapes {
             collect(&clipped.shape, &mut jobs);
@@ -554,7 +555,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(Default::default(), |ui| {
             ui.set_max_height(200.0);
-            doc.show(ui);
+            doc.show(ui, true);
         });
         let mut jobs = Vec::new();
         for shape in &output.shapes {
@@ -573,7 +574,7 @@ mod tests {
             "<div>raw</div>\n\n# Heading\n\n<section>other</section>\n\n| A | B |\n|---|---|\n| x | y |\n",
         ).unwrap();
         let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(Default::default(), |ui| doc.show(ui));
+        let mut output = ctx.run_ui(Default::default(), |ui| doc.show(ui, true));
         let mut jobs = Vec::new();
         for shape in &output.shapes {
             collect(&shape.shape, &mut jobs);
@@ -608,7 +609,7 @@ mod tests {
         let doc = MarkdownDocument::parse("| very long heading | B |\n|---|---|\n| x | second |\n")
             .unwrap();
         let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(Default::default(), |ui| doc.show(ui));
+        let mut output = ctx.run_ui(Default::default(), |ui| doc.show(ui, true));
         let mut found = Vec::new();
         for shape in &output.shapes {
             positions(&shape.shape, &mut found);
@@ -633,7 +634,7 @@ mod tests {
             RENDERED_BLOCKS.with(|count| count.set(0));
             let mut output = ctx.run_ui(Default::default(), |ui| {
                 ui.set_max_height(200.0);
-                doc.show(ui);
+                doc.show(ui, true);
             });
             output.textures_delta.clear();
             RENDERED_BLOCKS
@@ -674,7 +675,7 @@ mod tests {
         let mut fill = egui::Color32::TRANSPARENT;
         let mut output = ctx.run_ui(Default::default(), |ui| {
             fill = ui.visuals().faint_bg_color;
-            doc.show(ui);
+            doc.show(ui, true);
         });
         fn rects(shape: &Shape, fill: egui::Color32, out: &mut Vec<egui::Rect>) {
             match shape {

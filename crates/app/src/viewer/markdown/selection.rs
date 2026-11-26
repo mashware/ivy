@@ -127,6 +127,7 @@ impl Frame {
         height: f32,
         selection: &mut Option<Range>,
         blocks: &[Block],
+        keys: bool,
     ) {
         let pointer = ui.input(|input| input.pointer.interact_pos());
         let dragging = self.response.dragged_by(egui::PointerButton::Primary);
@@ -165,12 +166,12 @@ impl Frame {
             && let Some(pointer) = pointer
         {
             self.click(ui, pointer, selection);
-        } else if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        } else if keys && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             *selection = None;
         }
         self.response
             .on_hover_and_drag_cursor(egui::CursorIcon::Text);
-        if let Some(range) = selection.as_mut() {
+        if keys && let Some(range) = selection.as_mut() {
             if let Some(fragment) = self.fragments.iter().find(|frag| frag.contains(range.end)) {
                 fragment.apply_keys(ui, range);
             }

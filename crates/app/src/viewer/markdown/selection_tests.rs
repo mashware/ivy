@@ -4,6 +4,7 @@ use egui::{Event, OutputCommand, Pos2, Rect};
 struct Probe {
     document: MarkdownDocument,
     context: egui::Context,
+    keys: std::cell::Cell<bool>,
 }
 
 impl Probe {
@@ -16,6 +17,7 @@ impl Probe {
             )
             .unwrap(),
             context: egui::Context::default(),
+            keys: std::cell::Cell::new(true),
         };
         for _ in 0..5 {
             p.frame(vec![]);
@@ -68,7 +70,7 @@ impl Probe {
                 events,
                 ..Default::default()
             },
-            |ui| self.document.show(ui),
+            |ui| self.document.show(ui, self.keys.get()),
         )
     }
 
@@ -258,4 +260,18 @@ fn selection_scroll_markdown_double_click_still_selects_a_word() {
         p.frame(vec![button(word, false)]);
     }
     assert_eq!(p.frame(vec![Event::Copy]).1, ["alpha"]);
+}
+
+#[test]
+fn selection_scroll_markdown_copy_requires_keyboard_ownership() {
+    let p = Probe::new();
+    let to = p.select();
+    p.frame(vec![button(to, false)]);
+    p.keys.set(false);
+    assert!(p.frame(vec![Event::Copy]).1.is_empty());
+    p.keys.set(true);
+    assert_eq!(
+        p.frame(vec![Event::Copy]).1,
+        ["Witness 001 alpha bravo charlie"]
+    );
 }
