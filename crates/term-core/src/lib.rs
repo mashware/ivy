@@ -2391,6 +2391,84 @@ mod tests {
         );
     }
 
+    const FIXTURE_MODE: &str = "IVY_TERM_CORE_TEST_FIXTURE";
+    const FIXTURE_ARGS: [&str; 4] = [
+        "--exact",
+        "tests::pty_subprocess_fixture",
+        "--nocapture",
+        "--test-threads=1",
+    ];
+
+    fn spawn_fixture(mode: &str, env: &[(&str, Option<&OsStr>)]) -> (Pty, Receiver<Vec<u8>>) {
+        let executable = std::env::current_exe().expect("locate the test executable");
+        let mut environment = env.to_vec();
+        environment.push((FIXTURE_MODE, Some(OsStr::new(mode))));
+        Pty::spawn_with_env(
+            executable
+                .to_str()
+                .expect("test executable path is Unicode"),
+            &FIXTURE_ARGS,
+            Size::default(),
+            &environment,
+        )
+        .expect("launch the test fixture")
+    }
+
+    // Run as an ordinary no-op in the suite, or as a child selected by FIXTURE_ARGS. Using the test
+    // executable avoids a shell initializing TERM and avoids depending on the setsid utility.
+    #[test]
+    fn pty_subprocess_fixture() {
+        let Ok(mode) = std::env::var(FIXTURE_MODE) else {
+            return;
+        };
+        match mode.as_str() {
+            "environment" => match std::env::var_os("TERM") {
+                None => println!("removed"),
+                Some(value) => println!("TERM={value:?}"),
+            },
+            #[cfg(unix)]
+            "survivor-parent" => {
+                use std::os::unix::process::CommandExt;
+                // Echo would wake the reader on the writer destructor's final newline and hide
+                // the abandonment path. Configure the inherited slave before launching its holder.
+                let mut attributes = std::mem::MaybeUninit::<libc::termios>::uninit();
+                unsafe {
+                    assert_eq!(
+                        libc::tcgetattr(libc::STDIN_FILENO, attributes.as_mut_ptr()),
+                        0
+                    );
+                    let mut attributes = attributes.assume_init();
+                    attributes.c_lflag &= !(libc::ECHO | libc::ECHONL);
+                    assert_eq!(
+                        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &attributes),
+                        0
+                    );
+                }
+                let mut holder = std::process::Command::new(std::env::current_exe().unwrap());
+                holder
+                    .args(FIXTURE_ARGS)
+                    .env(FIXTURE_MODE, "survivor-holder");
+                // After fork only the async-signal-safe session operation runs before exec.
+                unsafe {
+                    holder.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+                let mut holder = holder.spawn().expect("launch detached slave holder");
+                holder.wait().expect("reap detached slave holder");
+            }
+            #[cfg(unix)]
+            "survivor-holder" => {
+                println!("held");
+                thread::sleep(Duration::from_secs(5));
+            }
+            other => panic!("unknown PTY fixture mode: {other}"),
+        }
+    }
+
     /// **Removing is not not-setting**, and this is the difference that upholds that a console without a
     /// directory does not keep the identity inherited from the application that launched it.
     ///
@@ -2399,13 +2477,7 @@ mod tests {
     /// whoever runs it to have anything in particular.
     #[test]
     fn with_none_by_value_the_variable_is_removed_even_though_the_crate_sets_it() {
-        let (program, args) = shell_invocation(
-            "printf %s \"${TERM-removed}\"",
-            "if ($null -eq $env:TERM) { Write-Output ('re' + 'moved') } else { Write-Output $env:TERM }",
-        );
-        let (mut pty, channel) =
-            Pty::spawn_with_env(program, &args, Size::default(), &[("TERM", None)])
-                .expect("launch sh");
+        let (mut pty, channel) = spawn_fixture("environment", &[("TERM", None)]);
 
         let output = output_through(&mut pty, &channel, "removed");
 
@@ -3389,14 +3461,11 @@ mod tests {
     /// **Two conditions at once are what make it reproduce, and either one missing hides it
     /// completely.**
     ///
-    /// The first is the survivor, which is why the shell here launches one that **announces itself**
-    /// — see [`HELD`]. It holds the slave end open, and by making a session of its own it is exactly
-    /// what a signal to the child, or to the child's group, does not reach. **The brace group around
-    /// it is load-bearing.** Written as `stty -echo && … & exec sleep 5`, the `&` backgrounds the
-    /// *whole* `&&` list: `stty` would run in a subshell while the main shell was already `exec`ing,
-    /// the echo would never go off, and this test would quietly exercise the easy case while claiming
-    /// the hard one. That mistake was made and measured while the example beside this crate was
-    /// being written.
+    /// The first is the survivor: a second instance of the test executable inherits the slave,
+    /// creates its own session with `setsid(2)`, and announces itself — see [`HELD`]. The parent
+    /// configures the slave before spawning the holder, so a marker from that holder proves both
+    /// setup operations succeeded. The operating-system call avoids requiring `setsid(1)`, which
+    /// macOS does not supply. A signal to the immediate child or its group cannot reach the holder.
     ///
     /// The second is the echo being off. On drop, `portable-pty`'s own master writer puts a `\n` and
     /// the terminal's EOF character into the pseudoterminal; while the line discipline echoes, that
@@ -3405,10 +3474,9 @@ mod tests {
     /// back — which is the state a real console's program is in, because turning the echo off is the
     /// first thing `vim`, `htop` or a TUI agent does.
     ///
-    /// **The `stty` sits before the survivor in the same `&&` chain, so the marker proves the mode
-    /// changed too**: it cannot arrive unless `stty` exited 0. That is not decoration — a test over a
-    /// terminal that never set the mode it needs is satisfied by the kernel instead of by its
-    /// subject, and would pass in hundredths of a second over a live bug.
+    /// **The echo setup sits before the survivor is spawned**, and a failed setup aborts that
+    /// subprocess before it can launch the holder. A test over a terminal that never set the mode
+    /// it needs is satisfied by the kernel instead of by its subject.
     ///
     /// **The channel is drained to empty and its receiver is kept alive.** Both are escape routes the
     /// reader has that are not the pseudoterminal: a delivery that fails and a wait for room both end
@@ -3418,7 +3486,7 @@ mod tests {
     ///
     /// **Which parts actually make this test bind was mutated rather than argued**, because a
     /// scenario that prevents the defect by itself is how this bug survived four attempts. Each row
-    /// is one deliberate break, run against a tree with the deadline in `Drop` reverted to the
+    /// records a deliberate break of the original shell fixture, run with the deadline in `Drop` reverted to the
     /// unbounded `join`:
     ///
     /// | Mutation | Result on the broken tree |
@@ -3459,24 +3527,11 @@ mod tests {
         const CLOSE_DEADLINE: Duration = Duration::from_secs(2);
         /// What the **survivor** prints once it is up.
         ///
-        /// **It is the survivor's own and not the shell's, and that is the difference between
-        /// assuming the premise and proving it.** `{ … & }` is a backgrounded list: it exits 0
-        /// whatever happens inside it, so a missing `setsid` — every macOS, and F2.7 is next — would
-        /// let the `&&` chain reach the `exec` with nobody holding the slave end, and this test would
-        /// pass on a build that hangs, measuring the easy case. Seeing this marker come out of the
-        /// master proves the survivor exists *and* that it can write through the descriptor it
-        /// inherited, which is the whole premise. And it is printed last in the chain, so it also
-        /// proves the `stty` before it exited 0.
+        /// **It is the holder's own**, after its new session exists and the parent disabled echo.
+        /// Seeing it come out of the master proves the holder exists and can write through the
+        /// inherited slave descriptor; a parent's marker would only prove it attempted the spawn.
         const HELD: &str = "held";
-        /// How long the shell and its survivor live. Long enough that neither ends inside the
-        /// deadline above — otherwise the close would finish for a reason that is not the fix.
-        const SECONDS_ALIVE: u32 = 5;
-
-        let script = format!(
-            "stty -echo && {{ setsid sh -c 'printf {HELD}; sleep {SECONDS_ALIVE}' & }} && exec sleep {SECONDS_ALIVE}"
-        );
-        let (mut pty, output) =
-            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let (mut pty, output) = spawn_fixture("survivor-parent", &[]);
 
         // A marker somebody prints, never a `sleep`: what makes the bug reproduce is the state, and a
         // fixed wait would time the close against a shell that had not got there yet.
