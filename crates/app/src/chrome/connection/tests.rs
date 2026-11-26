@@ -285,14 +285,16 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
         size: egui::Vec2,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
-        ctx.run_ui(
+        let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
                 events,
                 ..Default::default()
             },
             |ui| show(guide, ui.ctx(), &crate::theme::Theme::default()),
-        )
+        );
+        output.textures_delta.clear();
+        output
     }
     fn key(
         ctx: &egui::Context,
@@ -333,6 +335,8 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
             open: true,
             ..Default::default()
         };
+        // A new egui Area measures itself invisibly before its first painted frame.
+        draw(&ctx, &mut guide, size, vec![]).drop_without_applying_deltas();
         let initial = draw(&ctx, &mut guide, size, vec![]);
         assert!(
             !painted(&initial)
@@ -377,7 +381,18 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
             vec![egui::Event::Text(directory.into())],
         )
         .drop_without_applying_deltas();
-        let bottom = key(&ctx, &mut guide, size, egui::Key::Tab);
+        let focused = key(&ctx, &mut guide, size, egui::Key::Tab);
+        assert_eq!(
+            focused
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .map(|viewport| viewport.repaint_delay),
+            Some(std::time::Duration::ZERO),
+            "focus movement must request the repaint that reveals its scroll target"
+        );
+        focused.drop_without_applying_deltas();
+        // Apply the scroll target on the repaint requested after moving focus.
+        let bottom = draw(&ctx, &mut guide, size, vec![]);
         let at = visible(&bottom, "Open agent console")
             .expect("focus did not scroll the launch button into the short dialog");
         bottom.drop_without_applying_deltas();
