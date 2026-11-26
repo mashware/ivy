@@ -11,6 +11,8 @@ mod arguments;
 mod chain;
 mod fresh;
 pub use fresh::{WindowsInvocation, WindowsInvocationWitness};
+mod inspection;
+pub use inspection::{WindowsInspectionStats, windows_inspection_stats};
 #[cfg(test)]
 mod fresh_tests;
 mod memory;

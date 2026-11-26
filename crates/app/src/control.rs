@@ -311,6 +311,8 @@ pub struct PaneControl {
     windows_plan: panel_control::windows_services::PlanPublisher,
     #[cfg(windows)]
     windows_releases: panel_control::windows_services::ReleaseRegistry,
+    #[cfg(windows)]
+    windows_hooks: panel_control::WindowsHooks,
 }
 
 impl PaneControl {
@@ -767,6 +769,10 @@ fn answer_windows_requests(
                 // Nothing waits on a release —the thread that sends it is on its way out— so
                 // there is nobody to answer and nothing to say.
                 continue;
+            }
+            #[cfg(windows)]
+            What::PublishWindows { .. } => {
+                Answer::Refused("that request is not the window's".to_owned())
             }
             What::Publish { .. }
             | What::PublishAttested { .. }

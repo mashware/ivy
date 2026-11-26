@@ -9,9 +9,13 @@ mod linux;
 mod macos;
 #[cfg(windows)]
 mod windows;
+#[cfg(all(test, not(windows)))]
+#[path = "foreground/windows/inspection.rs"]
+mod windows_inspection_tests;
 #[cfg(windows)]
 pub use windows::{
-    ProcessIdentity, ProcessObservation, WindowsInvocation, WindowsInvocationWitness,
+    ProcessIdentity, ProcessObservation, WindowsInspectionStats, WindowsInvocation,
+    WindowsInvocationWitness, windows_inspection_stats,
 };
 #[cfg(all(test, target_os = "linux"))]
 mod tests;

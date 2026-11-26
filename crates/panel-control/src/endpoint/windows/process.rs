@@ -1,7 +1,7 @@
 //! A pinned process candidate becomes a peer only after a fresh pipe proves its connector.
 
 use std::io;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 use std::sync::Arc;
 
 use windows_sys::Win32::Foundation::{FILETIME, WAIT_TIMEOUT};
@@ -22,6 +22,10 @@ pub(crate) struct WindowsPeer {
 }
 
 impl WindowsPeer {
+    pub(crate) fn handle(&self) -> BorrowedHandle<'_> {
+        self.lifetime.as_handle()
+    }
+
     pub(crate) fn pid(&self) -> u32 {
         self.pid
     }

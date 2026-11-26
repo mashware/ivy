@@ -132,7 +132,8 @@ mod nonblocking;
 pub use foreground::{Ancestry, Argument, ForegroundAncestry, ForegroundScope, NativeProcess};
 #[cfg(windows)]
 pub use foreground::{
-    ProcessIdentity, ProcessObservation, WindowsInvocation, WindowsInvocationWitness,
+    ProcessIdentity, ProcessObservation, WindowsInspectionStats, WindowsInvocation,
+    WindowsInvocationWitness, windows_inspection_stats,
 };
 #[cfg(any(test, feature = "testing"))]
 pub mod received;

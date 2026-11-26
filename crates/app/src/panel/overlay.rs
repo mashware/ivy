@@ -1,6 +1,5 @@
 //! A hook may repaint only the live client invocation that owns the current hold.
-// The Windows control channel does not carry hook publication yet (client attestation exists only
-// on Linux and macOS), so there the admission half of this module is built and never called.
+// Unix admission uses callbacks; Windows uses concrete native snapshots and workers.
 #![cfg_attr(windows, allow(dead_code))]
 
 use panel_contract::{Attention, Panel};
@@ -106,6 +105,8 @@ impl HoldCell {
 
 pub(crate) struct Authority {
     scope: ForegroundScope,
+    #[cfg(windows)]
+    invocation: Option<term_core::WindowsInvocation>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     programs: OnceLock<crate::client_attestation::Programs>,
 }
@@ -114,9 +115,27 @@ impl Authority {
     pub(crate) fn new(scope: ForegroundScope) -> Arc<Self> {
         Arc::new(Self {
             scope,
+            #[cfg(windows)]
+            invocation: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             programs: OnceLock::new(),
         })
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn fresh(
+        scope: ForegroundScope,
+        invocation: term_core::WindowsInvocation,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            scope,
+            invocation: Some(invocation),
+        })
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn invocation(&self) -> Option<term_core::WindowsInvocation> {
+        self.invocation.clone()
     }
 
     fn prepare(&self) {
@@ -256,6 +275,13 @@ fn admit(
 }
 
 impl super::PanelState {
+    #[cfg(windows)]
+    pub(crate) fn hook_hold(&self) -> Option<(Connection, u64, String)> {
+        self.overlay
+            .snapshot()
+            .map(|hold| (hold.connection, hold.incarnation, hold.source))
+    }
+
     pub(crate) fn accepts_overlay(&self, connection: Connection, incarnation: u64) -> bool {
         self.overlay
             .snapshot()

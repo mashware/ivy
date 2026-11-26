@@ -27,6 +27,11 @@ pub struct Peer {
 }
 
 impl Peer {
+    #[cfg(windows)]
+    pub(crate) fn handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
+        self.lifetime.handle()
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
     }

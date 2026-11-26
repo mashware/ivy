@@ -441,6 +441,7 @@ pub struct WindowsServices {
     pub(crate) wake: WindowsWake,
     pub(crate) releases: ReleaseRegistry,
     pub(crate) publication_scope: Option<Arc<term_core::ForegroundScope>>,
+    pub(crate) hooks: crate::WindowsHooks,
 }
 impl WindowsServices {
     pub fn new(hwnd: isize) -> io::Result<(Self, DocumentPublisher, PlanPublisher)> {
@@ -452,6 +453,7 @@ impl WindowsServices {
             wake: WindowsWake::from_hwnd(hwnd)?,
             releases: ReleaseRegistry::new(),
             publication_scope: None,
+            hooks: crate::WindowsHooks::new(None),
         };
         Ok((services, document_publisher, plan_publisher))
     }
@@ -463,10 +465,15 @@ impl WindowsServices {
         self.publication_scope = scope;
         self
     }
+    pub fn with_hooks(mut self, hooks: crate::WindowsHooks) -> Self {
+        self.hooks = hooks;
+        self
+    }
     pub fn release_registry(&self) -> ReleaseRegistry {
         self.releases.clone()
     }
     pub fn revoke(&self) {
+        self.hooks.revoke();
         self.document.0.revoke();
         self.plan.0.revoke();
         self.wake.revoke();

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn fresh_root_rejects_wrong_image_foreign_root_and_console_close() {
+    let _inspection_guard = super::inspection::TEST_LOCK.lock().unwrap();
     let exe = std::env::current_exe().unwrap();
     let root = std::env::var("SystemRoot").unwrap();
     let shell = Path::new(&root).join(r"System32\cmd.exe");
@@ -27,6 +28,7 @@ fn fresh_root_rejects_wrong_image_foreign_root_and_console_close() {
 
 #[test]
 fn fresh_witness_expires_when_root_exits() {
+    let _inspection_guard = super::inspection::TEST_LOCK.lock().unwrap();
     let root = std::env::var("SystemRoot").unwrap();
     let powershell = Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
     let (pty, _output) = Pty::spawn(
@@ -47,6 +49,7 @@ fn fresh_witness_expires_when_root_exits() {
 
 #[test]
 fn fresh_rejects_recognized_nested_process_and_helper_exit_keeps_witness() {
+    let _inspection_guard = super::inspection::TEST_LOCK.lock().unwrap();
     let root = std::env::var("SystemRoot").unwrap();
     let powershell = Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
     let shell = Path::new(&root).join(r"System32\cmd.exe");

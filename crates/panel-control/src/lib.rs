@@ -69,3 +69,8 @@ pub use windows_services::{
     ReleaseRegistry, ReleaseToken, SnapshotReadMetrics, WindowsServices, WindowsWake,
 };
 pub use wire::{Activity, AgentSnapshot, MAX_REQUEST, Reply, Request, Side};
+
+#[cfg(windows)]
+mod windows_hooks;
+#[cfg(windows)]
+pub use windows_hooks::{WindowsHolder, WindowsHooks};

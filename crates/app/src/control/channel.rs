@@ -67,7 +67,11 @@ fn open_services(
     });
     #[cfg(windows)]
     let (opened, windows_publishers) = {
-        let _ = (reader, sessions, authorization);
+        let _ = (reader, sessions);
+        let invocation = authorization
+            .as_ref()
+            .and_then(|(_, authority)| authority.invocation());
+        let hooks = panel_control::WindowsHooks::new(invocation);
         let opened = hwnd
             .ok_or_else(|| {
                 std::io::Error::new(
@@ -82,13 +86,15 @@ fn open_services(
                     dir.path(),
                     dir.id(),
                     sender,
-                    services.with_publication_scope(inspector.flatten()),
+                    services
+                        .with_publication_scope(inspector.flatten())
+                        .with_hooks(hooks.clone()),
                 )
-                .map(|channel| (channel, document, plan, releases))
+                .map(|channel| (channel, document, plan, releases, hooks))
             });
         match opened {
-            Ok((channel, document, plan, releases)) => {
-                (Ok(channel), Some((document, plan, releases)))
+            Ok((channel, document, plan, releases, hooks)) => {
+                (Ok(channel), Some((document, plan, releases, hooks)))
             }
             Err(problem) => (Err(problem), None),
         }
@@ -124,8 +130,9 @@ fn open_services(
                 panel_control::Reply::Failed("this console's project is not known yet".into())
             }));
             #[cfg(windows)]
-            let (windows_document, windows_plan, windows_releases) = windows_publishers
-                .expect("Windows channel creation retains its concrete publishers");
+            let (windows_document, windows_plan, windows_releases, windows_hooks) =
+                windows_publishers
+                    .expect("Windows channel creation retains its concrete publishers");
             Some(PaneControl {
                 authority,
                 plan_identity: None,
@@ -143,6 +150,8 @@ fn open_services(
                 windows_plan,
                 #[cfg(windows)]
                 windows_releases,
+                #[cfg(windows)]
+                windows_hooks,
             })
         }
         // **Binding nothing on a platform that cannot assert who may connect is policy, not a
@@ -163,6 +172,7 @@ fn open_services(
 #[cfg(windows)]
 impl Drop for PaneControl {
     fn drop(&mut self) {
+        self.windows_hooks.revoke();
         self.windows_document.revoke();
         self.windows_plan.revoke();
         self.windows_releases.revoke();

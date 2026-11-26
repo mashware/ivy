@@ -43,6 +43,41 @@ impl PaneControl {
                     delivery.complete();
                 }
 
+                #[cfg(windows)]
+                What::PublishWindows {
+                    source,
+                    panel,
+                    witness,
+                } => {
+                    let answer = match crate::panel::provenance::deliver_observed(
+                        state,
+                        delivery.connection,
+                        &source,
+                        panel,
+                        now,
+                        delivery.origin,
+                    ) {
+                        Ok(()) => {
+                            if let Some((connection, incarnation, source)) = state.hook_hold() {
+                                self.windows_hooks.commit(
+                                    connection,
+                                    incarnation,
+                                    &source,
+                                    witness.map(|w| w.0),
+                                );
+                            }
+                            self.did.applied += 1;
+                            Answer::Taken
+                        }
+                        Err(why) => {
+                            self.did.refused += 1;
+                            Answer::Refused(why)
+                        }
+                    };
+                    delivery.complete();
+                    let _ = delivery.answer.send(answer);
+                }
+
                 What::PublishAttested {
                     source,
                     panel,
@@ -91,6 +126,11 @@ impl PaneControl {
                         delivery.origin,
                     ) {
                         Ok(()) => {
+                            #[cfg(windows)]
+                            if let Some((connection, incarnation, source)) = state.hook_hold() {
+                                self.windows_hooks
+                                    .commit(connection, incarnation, &source, None);
+                            }
                             self.did.applied += 1;
                             Answer::Taken
                         }

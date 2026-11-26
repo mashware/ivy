@@ -10280,6 +10280,20 @@ slot through apply/discard. Contention refuses promptly; it neither waits for th
 that ceiling. Apply rechecks holder incarnation, root lifetime and pane revocation; helper exit
 after admission alone does not invalidate the hook.
 
+Canonical image resolution can wait on a filesystem beyond named-pipe cancellation. Therefore
+native ancestry/image inspection runs in an auxiliary task outside the joined control workers.
+Admission allows one unfinished inspection per invocation and eight per application process, with
+no backlog. A caller waits at most 750 ms, checking pane revocation every 10 ms. A timed-out or
+revoked caller discards its result; the inspection retains its permits until it actually ends.
+Only native evidence and a result sender enter that task, never publication or window capabilities.
+Shutdown joins connection workers, not these inspections. An unavailable filesystem may retain a
+bounded inspection for the process lifetime; process-wide unfinished/timeout/busy/cancel counters
+report that residual separately. The limits are engineering bounds, not native timing measurements.
+
+Discarded: removing canonical image matching (does not establish alias/junction equivalence),
+waiting for filesystem cancellation before joining, terminating native threads, admitting unlimited
+replacement inspections after timeouts, and restricting legitimate hooks to direct/local helpers.
+
 **Why.** Windows already has private MCP, verified peers and native diagnostic ancestry, but none
 of those proves Unix foreground client ownership. The user chose only live hooks for explicitly
 opened fresh agents, leaving recorded-conversation recovery on macOS/Windows and Windows shared

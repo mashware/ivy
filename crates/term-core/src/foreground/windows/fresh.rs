@@ -1,4 +1,4 @@
-use super::{Scope, ancestry, chain, process};
+use super::{Scope, ancestry, chain, inspection, process};
 use std::io;
 use std::os::windows::io::{AsHandle, BorrowedHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ struct Root {
     identity: chain::Identity,
     stop: Weak<AtomicBool>,
     images: Vec<PathBuf>,
+    inspection: inspection::Lane,
 }
 
 impl Root {
@@ -77,6 +78,7 @@ impl Scope {
             },
             stop: self.stop.clone(),
             images,
+            inspection: inspection::Lane::default(),
         })))
     }
 }
@@ -84,6 +86,27 @@ impl Scope {
 impl WindowsInvocation {
     /// Walk and revalidate a kernel-pinned peer chain away from the interface thread.
     pub fn attest(&self, peer: BorrowedHandle<'_>) -> io::Result<WindowsInvocationWitness> {
+        self.attest_with_stop(peer, &AtomicBool::new(false))
+    }
+
+    /// D90 keeps filesystem inspection outside joined control workers.
+    pub fn attest_with_stop(
+        &self,
+        peer: BorrowedHandle<'_>,
+        stop: &AtomicBool,
+    ) -> io::Result<WindowsInvocationWitness> {
+        let peer = peer.try_clone_to_owned()?;
+        let invocation = self.clone();
+        inspection::run(
+            &self.0.inspection,
+            stop,
+            || self.0.current(),
+            inspection::DEADLINE,
+            move || invocation.inspect(peer.as_handle()),
+        )
+    }
+
+    fn inspect(&self, peer: BorrowedHandle<'_>) -> io::Result<WindowsInvocationWitness> {
         if !self.0.current() {
             return Err(denied());
         }

@@ -11,6 +11,8 @@ impl PaneControl {
     pub(super) fn apply_closed(&mut self, state: &mut PanelState, delivery: Delivery) {
         if state.release(delivery.connection) == Released::Given {
             self.did.released += 1;
+            #[cfg(windows)]
+            self.windows_hooks.clear();
         }
         self.waiting_on_the_window.push(delivery);
         (self.wake)();
@@ -95,6 +97,10 @@ impl Window {
             .panel_state
             .retire(connection, baseline, result)
             .expect("retirement authority was verified in the same interface pass");
+        #[cfg(windows)]
+        if let Some(control) = origin_pane.control.as_ref() {
+            control.windows_hooks.clear();
+        }
         let detached = self
             .detach_panes_called(&closing, ctx)
             .expect("every retirement target was validated in the same interface pass");

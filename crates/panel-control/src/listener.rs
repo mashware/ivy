@@ -49,6 +49,10 @@ struct Services {
     plan_snapshot: Option<crate::windows_services::PlanReader>,
     #[cfg(windows)]
     test_hooks: Option<Arc<TestHooks>>,
+    #[cfg(windows)]
+    hooks: Option<crate::WindowsHooks>,
+    #[cfg(windows)]
+    native_wake: Option<crate::WindowsWake>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -194,6 +198,12 @@ pub enum What {
         source: String,
         panel: Panel,
         peer: Arc<Peer>,
+    },
+    #[cfg(windows)]
+    PublishWindows {
+        source: String,
+        panel: Panel,
+        witness: Option<crate::WindowsHolder>,
     },
     /// An authenticated hook overlay admitted off-frame for apply beside ordinary panel writes.
     Overlay {
@@ -509,6 +519,8 @@ impl Channel {
             document_snapshot: Some(document),
             plan_snapshot: Some(plan),
             test_hooks,
+            hooks: Some(windows.hooks.clone()),
+            native_wake: Some(windows.wake.clone()),
         };
         let acceptor_thread = std::thread::Builder::new()
             .name(format!("panel-control {id}"))
@@ -798,12 +810,14 @@ fn serve(
                         Err(_) => return,
                     };
                     #[cfg(windows)]
-                    let peer = (services.session.is_some() || services.publisher.is_some())
-                        .then_some(())
-                        .map(|_| {
-                            Peer::capture(&stream)
-                                .map_err(|_| "verified socket peer unavailable".to_owned())
-                        });
+                    let peer = (services.session.is_some()
+                        || services.publisher.is_some()
+                        || services.hooks.is_some())
+                    .then_some(())
+                    .map(|_| {
+                        Peer::capture(&stream)
+                            .map_err(|_| "verified socket peer unavailable".to_owned())
+                    });
                     #[cfg(windows)]
                     if stop.load(Ordering::Acquire) {
                         return;
@@ -1054,11 +1068,54 @@ fn converse(
             }
             if let Incoming::Request(Request::PanelPublish { document }) = &incoming {
                 saw_publish = true;
+                #[cfg(windows)]
+                let reply = match (&services.hooks, &services.releases, &services.native_wake) {
+                    (Some(hooks), Some(releases), Some(wake)) => hooks.admit(
+                        peer.as_ref().and_then(|p| p.as_ref().ok()),
+                        document,
+                        to_the_window,
+                        releases,
+                        wake,
+                    ),
+                    _ => Reply::Failed("publication service unavailable".into()),
+                };
+                #[cfg(not(windows))]
                 let reply = match (&services.publisher, &peer) {
                     (Some(handler), Some(Ok(peer))) if peer.is_alive() => {
                         (handler.publish)(peer.clone(), connection, document.clone())
                     }
                     _ => Reply::Failed("publisher identity is unavailable".into()),
+                };
+                if write_reply(&mut stream, &reply).is_err() {
+                    break 'connected;
+                }
+                continue;
+            }
+            #[cfg(windows)]
+            if let Incoming::Request(Request::PanelSet { source, document }) = &incoming {
+                used_panel_protocol = true;
+                let witness = peer
+                    .as_ref()
+                    .and_then(|p| p.as_ref().ok())
+                    .and_then(|peer| services.hooks.as_ref()?.attest(peer))
+                    .map(crate::WindowsHolder);
+                let reply = match panel_contract::parse_document_noting(document) {
+                    Ok((panel, dropped)) => with_what_fell(
+                        ask_the_window(
+                            Wants::Taken,
+                            What::PublishWindows {
+                                source: source.clone(),
+                                panel,
+                                witness,
+                            },
+                            connection,
+                            origin,
+                            to_the_window,
+                            wake,
+                        ),
+                        &dropped,
+                    ),
+                    Err(problem) => Reply::Failed(problem.to_string()),
                 };
                 if write_reply(&mut stream, &reply).is_err() {
                     break 'connected;
