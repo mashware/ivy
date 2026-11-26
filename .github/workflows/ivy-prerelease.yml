@@ -566,8 +566,7 @@ jobs:
           if-no-files-found: error
 
   windows:
-    needs: windows-startup-checks
-    if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && needs.windows-startup-checks.result == 'success' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-2025
     timeout-minutes: 40
     env:

@@ -45,27 +45,150 @@ LAUNCHER_SPEC.loader.exec_module(LAUNCHER)
 
 
 class WindowsInstalledLauncherTests(unittest.TestCase):
+    def test_ordered_mouse_packet_updates_cached_cursor_before_click(self):
+        desktop = {76: -1920, 77: -1080, 78: 3840, 79: 2160}
+        window = (-1600, -700)
+        for expected in [(-1920, -1080), (-1919, -1079), (-1297, -259), (0, 0), (1919, 1079)]:
+            with self.subTest(screen=expected):
+                cached = (800, 400)
+                down = None
+                clicks = []
+                packets = []
+
+                def to_screen(_hwnd, pointer):
+                    point = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.wintypes.POINT)).contents
+                    point.x += window[0]
+                    point.y += window[1]
+                    return 1
+
+                def send(count, pointer, size):
+                    nonlocal cached, down
+                    self.assertEqual(size, ctypes.sizeof(LAUNCHER.gui.Input))
+                    events = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.gui.Input))
+                    flags = []
+                    for index in range(count):
+                        self.assertEqual(events[index].type, 0)
+                        mouse = events[index].u.mouse
+                        flags.append(mouse.flags)
+                        if mouse.flags & 1:
+                            cached = (desktop[76] + mouse.x * desktop[78] // 65536,
+                                      desktop[77] + mouse.y * desktop[79] // 65536)
+                        if mouse.flags & 2:
+                            down = cached
+                        if mouse.flags & 4 and down == cached:
+                            clicks.append(cached)
+                    packets.append(flags)
+                    return count
+
+                api = SimpleNamespace(ClientToScreen=to_screen, GetSystemMetrics=desktop.__getitem__,
+                                      SendInput=send)
+                with patch.object(LAUNCHER.gui, 'U', api, create=True), \
+                        patch.object(LAUNCHER.time, 'sleep') as delay:
+                    LAUNCHER.click(1, expected[0] - window[0], expected[1] - window[1])
+                self.assertEqual(clicks, [expected],
+                                 'ordered mouse packets must click the exact requested pixel')
+                self.assertEqual(packets, [[0xE001, 2, 4]],
+                                 'move, no-coalesce, virtual-desktop and absolute flags precede one click')
+                delay.assert_called_once_with(.4)
+
     def test_signed_wheel_input_reaches_both_scroll_anchors(self):
         offset = 0
+        cached = None
+        observed = []
+        packets = []
 
         def send(count, pointer, _size):
-            nonlocal offset
+            nonlocal offset, cached
             events = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.gui.Input))
+            flags = []
             for index in range(count):
                 mouse = events[index].u.mouse
+                flags.append(mouse.flags)
+                if events[index].type == 0 and mouse.flags & 1:
+                    cached = (mouse.x * 1920 // 65536, mouse.y * 1080 // 65536)
                 if events[index].type == 0 and mouse.flags & 0x0800:
                     lines = ctypes.c_int32(mouse.data).value / 120
                     offset = min(800, max(0, offset - lines * 40))
+                    observed.append((cached, lines))
+            packets.append(flags)
             return count
 
-        api = SimpleNamespace(ClientToScreen=lambda *_: 1, SetCursorPos=lambda *_: 1,
-                              SendInput=send)
+        api = SimpleNamespace(ClientToScreen=lambda *_: 1, SendInput=send,
+                              GetSystemMetrics={76: 0, 77: 0, 78: 1920, 79: 1080}.__getitem__)
         with patch.object(LAUNCHER.gui, 'U', api, create=True), \
                 patch.object(LAUNCHER.time, 'sleep'):
             LAUNCHER.wheel(1, 480, 400, -100)
             self.assertEqual(offset, 800, 'negative native wheel input must expose the bottom')
             LAUNCHER.wheel(1, 480, 400, 100)
             self.assertEqual(offset, 0, 'positive native wheel input must expose the top')
+        self.assertEqual(observed, [((480, 400), -100), ((480, 400), 100)],
+                         'wheel actions must use the requested cached cursor and signed delta')
+        self.assertEqual(packets, [[0xE001, 0x0800], [0xE001, 0x0800]])
+
+    def test_invalid_virtual_desktop_or_target_never_sends_input(self):
+        for width, height, point, reason in [
+                (0, 1080, (480, 400), 'positive'),
+                (1920, 0, (480, 400), 'positive'),
+                (-1, 1080, (480, 400), 'positive'),
+                (1920, 1080, (-1, 400), 'outside'),
+                (1920, 1080, (1920, 400), 'outside'),
+                (1920, 1080, (480, 1080), 'outside')]:
+            with self.subTest(width=width, height=height, point=point):
+                def send(*_args):
+                    self.fail('invalid desktop geometry must not insert any input')
+                api = SimpleNamespace(ClientToScreen=lambda *_: 1, SendInput=send,
+                                      GetSystemMetrics={76: 0, 77: 0, 78: width, 79: height}.__getitem__)
+                with patch.object(LAUNCHER.gui, 'U', api, create=True), \
+                        self.assertRaisesRegex((RuntimeError, ValueError), reason):
+                    LAUNCHER.click(1, *point)
+
+    def test_partial_mouse_packet_is_rejected_before_the_action_delay(self):
+        api = SimpleNamespace(ClientToScreen=lambda *_: 1, SendInput=lambda count, *_: count - 1,
+                              GetSystemMetrics={76: 0, 77: 0, 78: 1920, 79: 1080}.__getitem__)
+        for action in [lambda: LAUNCHER.click(1, 303, 441), lambda: LAUNCHER.wheel(1, 480, 400, -100)]:
+            with patch.object(LAUNCHER.gui, 'U', api, create=True), \
+                    patch.object(LAUNCHER.time, 'sleep') as delay, \
+                    self.assertRaisesRegex(RuntimeError, 'SendInput inserted'):
+                action()
+            delay.assert_not_called()
+
+    def test_each_launcher_action_records_coordinates_and_keeps_named_captures(self):
+        def position(pointer):
+            point = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.wintypes.POINT)).contents
+            point.x, point.y = -1297, -259
+            return 1
+
+        def to_client(_hwnd, pointer):
+            point = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.wintypes.POINT)).contents
+            point.x += 1600
+            point.y += 700
+            return 1
+
+        def capture(_hwnd, path):
+            path.write_bytes(b'portable screenshot placeholder')
+
+        api = SimpleNamespace(GetCursorPos=position, ScreenToClient=to_client)
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(LAUNCHER.gui, 'U', api, create=True), \
+                patch.object(LAUNCHER.gui, 'failure_screenshot', capture), \
+                patch.object(LAUNCHER.time, 'time', return_value=12.5):
+            evidence = Path(temporary)
+            action = {'kind': 'click', 'at': [303, 441], 'target': 'Open a new agent console',
+                      'capture': '02-launcher'}
+            LAUNCHER.record_launcher_action(1, evidence, 1, action)
+            LAUNCHER.record_launcher_action(1, evidence, 2,
+                                            {'kind': 'text', 'target': 'OpenCode executable',
+                                             'value': 'executable'})
+            records = [json.loads(line) for line in (evidence / 'launcher-actions.jsonl').read_text().splitlines()]
+            self.assertEqual(records[0], {'index': 1, 'action': 'click', 'target': action['target'],
+                                         'requested_client': [303, 441], 'cursor_client': [303, 441],
+                                         'cursor_screen': [-1297, -259], 'timestamp': 12.5},
+                             'launcher action trace must preserve actual client and screen coordinates')
+            self.assertIsNone(records[1]['requested_client'])
+            self.assertEqual({path.name for path in evidence.glob('*.png')},
+                             {'launcher-action-01-click.png', 'launcher-action-02-text.png',
+                              '02-launcher.png'},
+                             'each action must retain a screenshot and the existing named captures')
 
     def test_text_action_replaces_existing_input_with_literal_utf16(self):
         with tempfile.TemporaryDirectory() as temporary:

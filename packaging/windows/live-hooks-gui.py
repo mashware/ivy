@@ -63,32 +63,41 @@ def text_only(value):
         raise ctypes.WinError(ctypes.get_last_error())
 
 
-def click(hwnd, x, y):
+def mouse_at(hwnd, x, y, transitions):
     point = wintypes.POINT(int(x), int(y))
     if not gui.U.ClientToScreen(hwnd, ctypes.byref(point)):
         raise ctypes.WinError(ctypes.get_last_error())
-    if not gui.U.SetCursorPos(point.x, point.y):
-        raise ctypes.WinError(ctypes.get_last_error())
-    for flags in (2, 4):
+    left, top, width, height = (gui.U.GetSystemMetrics(metric) for metric in (76, 77, 78, 79))
+    if width <= 0 or height <= 0:
+        raise RuntimeError('virtual desktop dimensions must be positive')
+    if not left <= point.x < left + width or not top <= point.y < top + height:
+        raise ValueError('mouse target is outside the virtual desktop')
+    # Aim at each pixel's centre in the 16-bit absolute coordinate space.
+    absolute_x = ((point.x - left) * 2 + 1) * 65536 // (width * 2)
+    absolute_y = ((point.y - top) * 2 + 1) * 65536 // (height * 2)
+    move = gui.Input()
+    move.type = 0
+    move.u.mouse = gui.MouseInput(absolute_x, absolute_y, 0, 0xE001, 0, 0)
+    events = [move]
+    for flags, value in transitions:
         event = gui.Input()
         event.type = 0
-        event.u.mouse = gui.MouseInput(0, 0, 0, flags, 0, 0)
-        if gui.U.SendInput(1, ctypes.byref(event), ctypes.sizeof(event)) != 1:
-            raise ctypes.WinError(ctypes.get_last_error())
+        event.u.mouse = gui.MouseInput(0, 0, value, flags, 0, 0)
+        events.append(event)
+    # One SendInput array orders an uncoalesced virtual-desktop move before the action.
+    packet = (gui.Input * len(events))(*events)
+    sent = gui.U.SendInput(len(events), packet, ctypes.sizeof(gui.Input))
+    if sent != len(events):
+        raise RuntimeError(f'SendInput inserted {sent} of {len(events)} mouse events')
+
+
+def click(hwnd, x, y):
+    mouse_at(hwnd, x, y, ((2, 0), (4, 0)))
     time.sleep(.4)
 
 
 def wheel(hwnd, x, y, lines):
-    point = wintypes.POINT(int(x), int(y))
-    if not gui.U.ClientToScreen(hwnd, ctypes.byref(point)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    if not gui.U.SetCursorPos(point.x, point.y):
-        raise ctypes.WinError(ctypes.get_last_error())
-    event = gui.Input()
-    event.type = 0
-    event.u.mouse = gui.MouseInput(0, 0, int(lines) * 120, 0x0800, 0, 0)
-    if gui.U.SendInput(1, ctypes.byref(event), ctypes.sizeof(event)) != 1:
-        raise ctypes.WinError(ctypes.get_last_error())
+    mouse_at(hwnd, x, y, ((0x0800, int(lines) * 120),))
     time.sleep(.4)
 
 
@@ -110,6 +119,23 @@ def launcher_action(hwnd, action, values):
 
 def screenshot(hwnd, evidence, name):
     gui.failure_screenshot(hwnd, evidence / (name + '.png'))
+
+
+def record_launcher_action(hwnd, evidence, index, action):
+    screen = wintypes.POINT()
+    if not gui.U.GetCursorPos(ctypes.byref(screen)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    client = wintypes.POINT(screen.x, screen.y)
+    if not gui.U.ScreenToClient(hwnd, ctypes.byref(client)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    record = {'index': index, 'action': action['kind'], 'target': action['target'],
+              'requested_client': action.get('at'), 'cursor_client': [client.x, client.y],
+              'cursor_screen': [screen.x, screen.y], 'timestamp': time.time()}
+    with (evidence / 'launcher-actions.jsonl').open('a', encoding='utf-8') as output:
+        output.write(json.dumps(record) + '\n')
+    screenshot(hwnd, evidence, f"launcher-action-{index:02d}-{action['kind']}")
+    if capture := action.get('capture'):
+        screenshot(hwnd, evidence, capture)
 
 
 def process_tree(app_pid, opencode, evidence, name, *, require_bridge=True):
@@ -150,7 +176,9 @@ def main():
     gui.U.SetProcessDPIAware()
     gui.U.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
     gui.U.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
-    gui.U.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+    gui.U.GetSystemMetrics.argtypes = [ctypes.c_int]
+    gui.U.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    gui.U.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
     gui.U.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     app = server = None
     hwnd = None
@@ -229,11 +257,10 @@ def main():
             stage = 'connect dialog'
             click(hwnd, width - 159, 20)
             screenshot(hwnd, evidence, '02-connect')
-            for action in recipe['actions']:
+            for index, action in enumerate(recipe['actions'], 1):
                 stage = f"launcher: {action['target']}"
                 launcher_action(hwnd, action, {'executable': str(opencode), 'directory': str(work)})
-                if capture := action.get('capture'):
-                    screenshot(hwnd, evidence, capture)
+                record_launcher_action(hwnd, evidence, index, action)
             stage = 'open fresh console'
             time.sleep(12)
             launched_pid = process_tree(app.pid, opencode, evidence, 'processes-launched', require_bridge=False)
