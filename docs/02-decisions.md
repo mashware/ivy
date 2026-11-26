@@ -9716,6 +9716,20 @@ validation remains F2.7. Shell startup scripts may themselves change directory. 
 validation happens before invoking it. A directory removed between that check and the dependency's
 own check can still fall back to home; this is not an atomic directory-pinning guarantee.
 
+**Fresh Windows agent amendment (26 November 2026, #185).** A new explicit agent launch (D90)
+opts into a required working directory at the command-builder boundary. The chosen path is passed
+to Windows without the dependency's `is_dir()` filter or home substitution; an unavailable target
+therefore fails the launch. Ordinary shells/splits and Unix behavior retain the policy above.
+The published portable-pty 0.9.0 source is vendored with licensing, original byte hashes and a narrow
+patch guard because its public API provides no strict directory option. The new default-false mode
+preserves legacy builders and serialized input. Only the fresh Windows entry point selects it.
+
+Discarded: another pre-check (the race follows it), changing HOME/USERPROFILE (changes client
+configuration and authentication), directory rename guards alone (later metadata errors can still
+select home), process-global cwd, a shell wrapper and silently weakening the displayed-directory
+promise. This is an exact-path-or-error rule, not immutable directory identity against namespace
+replacement by the same user.
+
 
 ## D79 — Project identity is a theme-aware header cue independent of the console title
 
@@ -10267,6 +10281,11 @@ working directory. Only that direct PTY child, retained through its actual proce
 against the selected image path, is a Windows hook root. The holder and publisher must have verified
 native ancestry to that same live root. Ordinary shell-launched agents keep MCP without this new
 hook authority; Windows diagnostic ancestry is not relabelled as Unix foreground evidence.
+
+The selected working directory uses D78's opt-in required Windows command-builder mode. No
+failed metadata check can silently replace it with the person's home directory. The OS receives
+the requested path and rejects it when unavailable; no provider environment or ordinary launch
+policy is changed. The dependency patch and native mutation proof belong to this explicit path.
 
 The native recognition catalogue is the finite set of explicitly selected client images, frozen
 for each invocation. A second recognized client below the root, including the same executable again,

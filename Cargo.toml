@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["vendor/portable-pty"]
 
 [workspace.package]
 version = "0.1.0-alpha.22"
@@ -54,3 +55,6 @@ egui-winit = { path = "vendor/egui-winit" }
 
 # Prep-only instructionless fonts need automatic hinting; see vendor/epaint/IVY-PATCH.md.
 epaint = { path = "vendor/epaint" }
+
+# Fresh Windows launches require the requested directory or a visible failure.
+portable-pty = { path = "vendor/portable-pty" }

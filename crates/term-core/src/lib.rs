@@ -33,6 +33,11 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::time::Instant;
 
+#[cfg(all(test, windows))]
+thread_local! {
+    static EXACT_CWD_BEFORE_SPAWN: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 #[cfg(test)]
 struct DeliveryTest {
     capacity: usize,
@@ -670,6 +675,27 @@ impl Pty {
         )
     }
 
+    /// On Windows, use the selected directory or return the native spawn error.
+    #[cfg(windows)]
+    pub fn spawn_with_exact_cwd(
+        program: &str,
+        args: &[&str],
+        size: Size,
+        env: &[(&str, Option<&OsStr>)],
+        directory: &std::path::Path,
+    ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        let args: Vec<_> = args.iter().map(std::ffi::OsString::from).collect();
+        Self::spawn_with_lang_mode(
+            OsStr::new(program),
+            &args,
+            size,
+            env,
+            Some(directory),
+            console_lang(),
+            true,
+        )
+    }
+
     fn spawn_os_with_env_in(
         program: &OsStr,
         args: &[std::ffi::OsString],
@@ -691,6 +717,18 @@ impl Pty {
         env: &[(&str, Option<&OsStr>)],
         directory: Option<&std::path::Path>,
         lang: Option<&str>,
+    ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        Self::spawn_with_lang_mode(program, args, size, env, directory, lang, false)
+    }
+
+    fn spawn_with_lang_mode(
+        program: &OsStr,
+        args: &[std::ffi::OsString],
+        size: Size,
+        env: &[(&str, Option<&OsStr>)],
+        directory: Option<&std::path::Path>,
+        lang: Option<&str>,
+        #[cfg_attr(not(windows), allow(unused_variables))] exact_cwd: bool,
     ) -> Result<(Self, Receiver<Vec<u8>>)> {
         if let Some(directory) = directory
             && (!directory.is_absolute() || !directory.is_dir())
@@ -742,8 +780,21 @@ impl Pty {
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
         if let Some(directory) = directory {
+            #[cfg(windows)]
+            if exact_cwd {
+                cmd.cwd_required(directory);
+            } else {
+                cmd.cwd(directory);
+            }
+            #[cfg(not(windows))]
             cmd.cwd(directory);
         }
+        #[cfg(all(test, windows))]
+        EXACT_CWD_BEFORE_SPAWN.with(|hook| {
+            if let Some(path) = hook.borrow_mut().take() {
+                std::fs::remove_dir(path).expect("remove directory after validation");
+            }
+        });
         for (name, value) in FIXED_ENV {
             cmd.env(name, value);
         }
@@ -4338,5 +4389,92 @@ mod tests {
             }
         }
         text
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_exact_cwd_reaches_the_child() {
+        let dir = std::env::temp_dir().join(format!("ivy-exact-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let report =
+            std::env::temp_dir().join(format!("ivy-cwd-report-{}.txt", std::process::id()));
+        let temporary = report.with_extension("tmp");
+        let _ = std::fs::remove_file(&report);
+        let quote = |path: &std::path::Path| path.to_string_lossy().replace(char::from(39), "''");
+        let script = format!(
+            "[IO.File]::WriteAllText('{}',[Environment]::CurrentDirectory); [IO.File]::Move('{}','{}')",
+            quote(&temporary),
+            quote(&temporary),
+            quote(&report)
+        );
+        let program = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        let (pty, output) = Pty::spawn_with_exact_cwd(
+            program.to_str().unwrap(),
+            &["-NoProfile", "-NonInteractive", "-Command", &script],
+            Size::default(),
+            &[],
+            &dir,
+        )
+        .unwrap();
+        // D30: only a child-written file proves execution; ConPTY paints before the child.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut diagnostic = Vec::new();
+        let cwd = loop {
+            if let Ok(cwd) = std::fs::read_to_string(&report) {
+                break cwd;
+            }
+            for chunk in output.try_iter() {
+                diagnostic.extend(chunk);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "child cwd witness missing: {:?}",
+                String::from_utf8_lossy(&diagnostic)
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(
+            std::fs::canonicalize(cwd).unwrap(),
+            std::fs::canonicalize(&dir).unwrap()
+        );
+        drop(pty);
+        std::fs::remove_file(report).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_exact_cwd_removed_after_validation_fails_instead_of_using_home() {
+        let dir = std::env::temp_dir().join(format!("ivy-exact-removed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let home =
+            std::env::var_os("USERPROFILE").expect("valid home required for fallback witness");
+        assert!(std::path::Path::new(&home).is_dir());
+        EXACT_CWD_BEFORE_SPAWN.with(|hook| *hook.borrow_mut() = Some(dir.clone()));
+        let cmd = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join(r"System32\cmd.exe");
+        let result = Pty::spawn_with_exact_cwd(
+            cmd.to_str().unwrap(),
+            &["/d", "/c", "cd"],
+            Size::default(),
+            &[],
+            &dir,
+        );
+        assert!(
+            !dir.exists(),
+            "the post-validation removal hook must execute"
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("missing selected directory launched via home fallback"),
+        };
+        // portable-pty formats this native error into its anyhow message rather than retaining it.
+        let message = error.to_string();
+        let directory_error = message.contains("CreateProcessW")
+            && (message.contains("(os error 267)") || message.contains("(os error 3)"));
+        assert!(
+            directory_error,
+            "expected native directory failure, got {error}"
+        );
     }
 }

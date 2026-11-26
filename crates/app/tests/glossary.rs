@@ -359,6 +359,7 @@ const GLOSSARY_PENDING_FILES: &[&str] = &[
     "app/tests/scripts.rs",
     "app/tests/shape.rs",
     "app/tests/vendor_patch.rs",
+    "app/tests/portable_pty_patch.rs",
 ];
 
 /// Files whose **citations** are checked, though their identifiers are not yet.
@@ -690,6 +691,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/scripts.rs", "app"),
     ("app/tests/batches.rs", "app"),
     ("app/tests/vendor_patch.rs", "app"),
+    ("app/tests/portable_pty_patch.rs", "app"),
     ("app/tests/windows_altgr.rs", "app"),
     ("app/tests/waits.rs", "app"),
     ("app/tests/decisions.rs", "app"),

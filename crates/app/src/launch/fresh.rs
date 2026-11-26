@@ -112,12 +112,12 @@ pub(crate) fn start(
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_deref()))
                 .collect();
-            let spawned = Pty::spawn_with_env_in(
+            let spawned = Pty::spawn_with_exact_cwd(
                 program,
                 selection.client.args(),
                 size,
                 &borrowed,
-                Some(directory),
+                directory,
             )?;
             let invocation = spawned
                 .0

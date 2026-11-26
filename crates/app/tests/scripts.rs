@@ -1362,6 +1362,10 @@ const MODULES: &[(&str, &str)] = &[
     ("app/tests/shape.rs", include_str!("shape.rs")),
     ("app/tests/vendor_patch.rs", include_str!("vendor_patch.rs")),
     (
+        "app/tests/portable_pty_patch.rs",
+        include_str!("portable_pty_patch.rs"),
+    ),
+    (
         "app/tests/windows_altgr.rs",
         include_str!("windows_altgr.rs"),
     ),
