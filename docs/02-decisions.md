@@ -10282,9 +10282,10 @@ against the selected image path, is a Windows hook root. The holder and publishe
 native ancestry to that same live root. Ordinary shell-launched agents keep MCP without this new
 hook authority; Windows diagnostic ancestry is not relabelled as Unix foreground evidence.
 
-The launcher starts collapsed after the guide's observed panel status. An expanded form ahead of
-that status was discarded because it pushed existing connection help outside the initial viewport;
-opening an optional launch form must not hide whether a panel has been published.
+The launcher starts collapsed after the existing connection instructions. This preserves the
+positions of both the observed panel status and the manual setup controls. An expanded form ahead
+of that status was discarded because it pushed existing connection help outside the initial viewport;
+optional launch configuration must not displace the help already there.
 
 The selected working directory uses D78's opt-in required Windows command-builder mode. No
 failed metadata check can silently replace it with the person's home directory. The OS receives

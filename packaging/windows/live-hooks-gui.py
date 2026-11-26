@@ -204,7 +204,7 @@ def main():
             click(hwnd, width - 159, 20)
             screenshot(hwnd, evidence, '02-connect')
             stage = 'expand fresh launcher'
-            tabs(2)
+            tabs(4)
             press(0x20)
             time.sleep(.4)
             screenshot(hwnd, evidence, '02-launcher')

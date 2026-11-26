@@ -321,6 +321,23 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
             _ => None,
         })
     }
+    fn requested_paint(
+        ctx: &egui::Context,
+        guide: &mut Guide,
+        size: egui::Vec2,
+        focused: egui::FullOutput,
+    ) -> egui::FullOutput {
+        assert_eq!(
+            focused
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .map(|viewport| viewport.repaint_delay),
+            Some(std::time::Duration::ZERO),
+            "native launcher keyboard workflow: focus must request its scroll repaint"
+        );
+        focused.drop_without_applying_deltas();
+        draw(ctx, guide, size, vec![])
+    }
 
     for (size, mouse) in [
         (egui::vec2(600.0, 400.0), true),
@@ -342,28 +359,50 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
             !painted(&initial)
                 .iter()
                 .any(|text| text == "Claude executable" || text == "OpenCode executable"),
-            "fresh launch fields must start collapsed"
+            "native launcher keyboard workflow: fresh launch fields must start collapsed"
         );
         assert!(visible(&initial, "No panels published yet").is_some());
         assert!(visible(&initial, "Reconnect an existing Claude session").is_some());
         initial.drop_without_applying_deltas();
-        // Real modal focus order: Close, section, three clients, three executable
-        // fields, directory, launch. Focus must scroll controls into the clip.
+        // Traverse the existing Close, reconnect-copy and manual controls before
+        // entering the optional launcher, without changing their focus order.
+        for _ in 0..3 {
+            key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
+        }
+        let focused = key(&ctx, &mut guide, size, egui::Key::Tab);
+        let header = requested_paint(&ctx, &mut guide, size, focused);
+        assert!(
+            visible(&header, "Open a new agent console").is_some(),
+            "native launcher keyboard workflow: focused header must be visible"
+        );
+        header.drop_without_applying_deltas();
+        let expanded = key(&ctx, &mut guide, size, egui::Key::Space);
+        assert!(
+            guide.open,
+            "native launcher keyboard workflow: expansion closed the dialog"
+        );
+        expanded.drop_without_applying_deltas();
+        let focused = key(&ctx, &mut guide, size, egui::Key::Tab);
+        let first = requested_paint(&ctx, &mut guide, size, focused);
+        assert!(
+            visible(&first, "Claude").is_some(),
+            "native launcher keyboard workflow: first activation must reveal the Claude selector"
+        );
+        first.drop_without_applying_deltas();
         for _ in 0..2 {
             key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
         }
-        let expanded = key(&ctx, &mut guide, size, egui::Key::Space);
-        assert!(guide.open, "keyboard expansion closed the dialog");
-        assert!(visible(&expanded, "Claude executable").is_some());
-        assert!(visible(&expanded, "Open agent console").is_none());
-        expanded.drop_without_applying_deltas();
-        for _ in 0..3 {
-            key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
-        }
         key(&ctx, &mut guide, size, egui::Key::Space).drop_without_applying_deltas();
-        for _ in 0..3 {
+        for _ in 0..2 {
             key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
         }
+        let focused = key(&ctx, &mut guide, size, egui::Key::Tab);
+        let field = requested_paint(&ctx, &mut guide, size, focused);
+        assert!(
+            visible(&field, "OpenCode executable").is_some(),
+            "native launcher keyboard workflow: focused executable field must be visible"
+        );
+        field.drop_without_applying_deltas();
         let executable = r"C:\Program Files\OpenCode\opencode.exe";
         draw(
             &ctx,
@@ -372,7 +411,13 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
             vec![egui::Event::Text(executable.into())],
         )
         .drop_without_applying_deltas();
-        key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
+        let focused = key(&ctx, &mut guide, size, egui::Key::Tab);
+        let field = requested_paint(&ctx, &mut guide, size, focused);
+        assert!(
+            visible(&field, "Working directory").is_some(),
+            "native launcher keyboard workflow: focused directory field must be visible"
+        );
+        field.drop_without_applying_deltas();
         let directory = r"C:\work\project with spaces";
         draw(
             &ctx,
@@ -382,19 +427,9 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
         )
         .drop_without_applying_deltas();
         let focused = key(&ctx, &mut guide, size, egui::Key::Tab);
-        assert_eq!(
-            focused
-                .viewport_output
-                .get(&egui::ViewportId::ROOT)
-                .map(|viewport| viewport.repaint_delay),
-            Some(std::time::Duration::ZERO),
-            "focus movement must request the repaint that reveals its scroll target"
-        );
-        focused.drop_without_applying_deltas();
-        // Apply the scroll target on the repaint requested after moving focus.
-        let bottom = draw(&ctx, &mut guide, size, vec![]);
+        let bottom = requested_paint(&ctx, &mut guide, size, focused);
         let at = visible(&bottom, "Open agent console")
-            .expect("focus did not scroll the launch button into the short dialog");
+            .expect("native launcher keyboard workflow: focused launch button must be visible");
         bottom.drop_without_applying_deltas();
         assert!(guide.fresh.request.is_none());
         if mouse {

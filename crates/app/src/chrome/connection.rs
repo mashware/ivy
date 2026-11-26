@@ -473,8 +473,6 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     } else {
         "A panel has been published"
     });
-    #[cfg(windows)]
-    fresh::show(&mut guide.fresh, ui);
     ui.strong("Reconnect an existing Claude session");
     ui.label("If Ivy is already listed in /mcp, reconnect it. Use its existing server name if it differs from ivy.");
     copyable(
@@ -507,6 +505,8 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
         }
         manual(published, &mut guide.copied, ui);
     }
+    #[cfg(windows)]
+    fresh::show(&mut guide.fresh, ui);
     if SHOW_SESSION_RECOVERY {
         let translocated = ui
             .ctx()

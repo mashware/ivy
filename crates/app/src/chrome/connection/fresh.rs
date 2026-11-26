@@ -9,9 +9,10 @@ pub(super) struct Form {
 
 pub(super) fn show(form: &mut Form, ui: &mut egui::Ui) {
     ui.separator();
-    egui::CollapsingHeader::new("Open a new agent console")
+    let section = egui::CollapsingHeader::new("Open a new agent console")
         .default_open(false)
         .show(ui, |ui| fields(form, ui));
+    reveal_on_focus(section.header_response);
 }
 
 fn reveal_on_focus(response: egui::Response) -> egui::Response {
