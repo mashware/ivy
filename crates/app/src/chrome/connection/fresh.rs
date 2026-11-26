@@ -9,7 +9,9 @@ pub(super) struct Form {
 
 pub(super) fn show(form: &mut Form, ui: &mut egui::Ui) {
     ui.separator();
-    ui.strong("Open a new agent console");
+    egui::CollapsingHeader::new("Open a new agent console")
+        .default_open(false)
+        .show(ui, |ui| {
     ui.label("Live hook updates require an agent opened here. Agents started in a shell can still use MCP.");
     ui.horizontal(|ui| {
         ui.selectable_value(&mut form.selection.client, Client::Claude, "Claude");
@@ -43,4 +45,5 @@ pub(super) fn show(form: &mut Form, ui: &mut egui::Ui) {
     if ui.button("Open agent console").clicked() {
         form.request = Some(form.selection.clone());
     }
+        });
 }

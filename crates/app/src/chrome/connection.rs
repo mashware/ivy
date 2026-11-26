@@ -463,8 +463,6 @@ fn setup_prompt(bridge: &Bridge) -> String {
 }
 
 fn body(guide: &mut Guide, ui: &mut egui::Ui) {
-    #[cfg(windows)]
-    fresh::show(&mut guide.fresh, ui);
     let published = guide.published;
     ui.label(
         "Set up Ivy once per AI client. Ivy updates normally keep your saved MCP registration.",
@@ -475,6 +473,8 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     } else {
         "A panel has been published"
     });
+    #[cfg(windows)]
+    fresh::show(&mut guide.fresh, ui);
     ui.strong("Reconnect an existing Claude session");
     ui.label("If Ivy is already listed in /mcp, reconnect it. Use its existing server name if it differs from ivy.");
     copyable(

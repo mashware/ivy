@@ -19,6 +19,7 @@ LIVE = "control::channel::windows_live_hooks::windows_live_hook_real_bridge_and_
 FRESH = "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane"
 CAPABILITY = "control::channel::windows_live_hooks::windows_fresh_codex_without_local_capability_is_painted_without_authority"
 ACCOUNTING = "chrome::connection::tests::fresh_console_opening_is_subtracted_once_from_the_frame"
+LAUNCHER = "chrome::connection::tests::fresh_launch_fields_and_button_are_reachable_in_a_short_modal"
 IMAGE = "foreground::windows::fresh_tests::fresh_root_rejects_wrong_image_foreign_root_and_console_close"
 IDENTITY = "foreground::windows::fresh_tests::fresh_registration_rechecks_captured_root_identity_and_sequence"
 SEQUENCE = "foreground::windows::chain::tests::later_reused_parent_is_unknown_despite_earlier_wall_clock_birth"
@@ -26,6 +27,12 @@ CWD = "tests::windows_exact_cwd_removed_after_validation_fails_instead_of_using_
 
 # label, source, unique before, replacement, package, exact test, assertion witness
 CASES = (
+    ("fresh-launcher-expanded-by-default", "crates/app/src/chrome/connection/fresh.rs",
+     ".default_open(false)", ".default_open(true)",
+     "app", LAUNCHER, "fresh launch fields must start collapsed"),
+    ("fresh-launcher-request", "crates/app/src/chrome/connection/fresh.rs",
+     "form.request = Some(form.selection.clone());", "form.request = None;",
+     "app", LAUNCHER, "fresh launch controls must submit the selected program"),
     ("fresh-opening-double-accounting", "crates/app/src/opening/fresh.rs",
      "window.bring_to_front(Ok(tab), ctx);",
      "let before = Instant::now(); window.bring_to_front(Ok(tab), ctx); window.timed_separately += before.elapsed();",

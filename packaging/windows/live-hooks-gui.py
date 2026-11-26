@@ -48,6 +48,12 @@ def press(vk):
     key(vk, False)
 
 
+def tabs(count):
+    for _ in range(count):
+        press(0x09)
+        time.sleep(.2)
+
+
 def text_only(value):
     events = []
     raw = value.encode('utf-16-le')
@@ -197,20 +203,26 @@ def main():
             stage = 'connect dialog'
             click(hwnd, width - 159, 20)
             screenshot(hwnd, evidence, '02-connect')
-            # The fresh-launch controls are first in the modal; screenshots preserve the exact
-            # result if platform font or geometry changes invalidate these native coordinates.
+            stage = 'expand fresh launcher'
+            tabs(2)
+            press(0x20)
+            time.sleep(.4)
+            screenshot(hwnd, evidence, '02-launcher')
             stage = 'select OpenCode and enter paths'
-            left = (width - 560) / 2
-            top = (height - 540) / 2
-            click(hwnd, left + 184, top + 108)
-            click(hwnd, left + 160, top + 250)
+            tabs(3)
+            press(0x20)
+            time.sleep(.3)
+            tabs(3)
             text_only(str(opencode))
-            click(hwnd, left + 160, top + 295)
+            time.sleep(.3)
+            tabs(1)
             key(0x11); press(0x41); key(0x11, False)
             text_only(str(work))
+            time.sleep(.3)
+            tabs(1)
             screenshot(hwnd, evidence, '03-preview')
             stage = 'open fresh console'
-            click(hwnd, left + 100, top + 390)
+            press(13)
             time.sleep(12)
             screenshot(hwnd, evidence, '04-client')
             stage = 'proof prompt'

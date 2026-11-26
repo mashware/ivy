@@ -43,7 +43,7 @@ Closing the console discards that console’s target. A crash recovers the last 
 
 ## Fresh native agents on Windows
 
-Open **Connect agents → Open a new agent console**, select Claude, Codex local or OpenCode,
+Open **Connect agents**, expand **Open a new agent console**, then select Claude, Codex local or OpenCode,
 and enter its installed native `.exe` and a local absolute working directory. The guide shows
 the executable, arguments and directory before opening a new console. Existing consoles continue
 running. Selections last for this window and are not saved in layout or client configuration.

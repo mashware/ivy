@@ -278,6 +278,144 @@ fn the_last_step_asks_the_person_to_check_the_client_themselves() {
 
 #[cfg(windows)]
 #[test]
+fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
+    fn draw(
+        ctx: &egui::Context,
+        guide: &mut Guide,
+        size: egui::Vec2,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| show(guide, ui.ctx(), &crate::theme::Theme::default()),
+        )
+    }
+    fn key(
+        ctx: &egui::Context,
+        guide: &mut Guide,
+        size: egui::Vec2,
+        key: egui::Key,
+    ) -> egui::FullOutput {
+        let event = |pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        draw(ctx, guide, size, vec![event(true)]).drop_without_applying_deltas();
+        draw(ctx, guide, size, vec![event(false)])
+    }
+    fn visible(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                let center = text.pos + text.galley.size() / 2.0;
+                shape.clip_rect.contains(center).then_some(center)
+            }
+            _ => None,
+        })
+    }
+
+    for (size, mouse) in [
+        (egui::vec2(600.0, 400.0), true),
+        (egui::vec2(960.0, 640.0), false),
+    ] {
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut guide = Guide {
+            open: true,
+            ..Default::default()
+        };
+        let initial = draw(&ctx, &mut guide, size, vec![]);
+        assert!(visible(&initial, "No panels published yet").is_some());
+        assert!(visible(&initial, "Reconnect an existing Claude session").is_some());
+        assert!(
+            !painted(&initial)
+                .iter()
+                .any(|text| text == "Claude executable" || text == "OpenCode executable"),
+            "fresh launch fields must start collapsed"
+        );
+        initial.drop_without_applying_deltas();
+        // Real modal focus order: Close, section, three clients, three executable
+        // fields, directory, launch. Focus must scroll controls into the clip.
+        for _ in 0..2 {
+            key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
+        }
+        let expanded = key(&ctx, &mut guide, size, egui::Key::Space);
+        assert!(guide.open, "keyboard expansion closed the dialog");
+        assert!(visible(&expanded, "Claude executable").is_some());
+        assert!(visible(&expanded, "Open agent console").is_none());
+        expanded.drop_without_applying_deltas();
+        for _ in 0..3 {
+            key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
+        }
+        key(&ctx, &mut guide, size, egui::Key::Space).drop_without_applying_deltas();
+        for _ in 0..3 {
+            key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
+        }
+        let executable = r"C:\Program Files\OpenCode\opencode.exe";
+        draw(
+            &ctx,
+            &mut guide,
+            size,
+            vec![egui::Event::Text(executable.into())],
+        )
+        .drop_without_applying_deltas();
+        key(&ctx, &mut guide, size, egui::Key::Tab).drop_without_applying_deltas();
+        let directory = r"C:\work\project with spaces";
+        draw(
+            &ctx,
+            &mut guide,
+            size,
+            vec![egui::Event::Text(directory.into())],
+        )
+        .drop_without_applying_deltas();
+        let bottom = key(&ctx, &mut guide, size, egui::Key::Tab);
+        let at = visible(&bottom, "Open agent console")
+            .expect("focus did not scroll the launch button into the short dialog");
+        bottom.drop_without_applying_deltas();
+        assert!(guide.fresh.request.is_none());
+        if mouse {
+            for pressed in [true, false] {
+                draw(
+                    &ctx,
+                    &mut guide,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+                .drop_without_applying_deltas();
+            }
+        } else {
+            key(&ctx, &mut guide, size, egui::Key::Enter).drop_without_applying_deltas();
+        }
+        let request = guide
+            .fresh
+            .request
+            .take()
+            .expect("fresh launch controls must submit the selected program");
+        assert_eq!(request.client, crate::launch::fresh::Client::OpenCode);
+        assert_eq!(
+            request.images,
+            [String::new(), String::new(), executable.into()]
+        );
+        assert_eq!(request.directory, directory);
+    }
+}
+
+#[cfg(windows)]
+#[test]
 fn fresh_console_opening_is_subtracted_once_from_the_frame() {
     use std::time::Duration;
 
