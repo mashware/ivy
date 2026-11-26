@@ -461,12 +461,16 @@ fn show(
                         *launch = view.quota.show(ui);
                     }
                     #[cfg(not(target_os = "linux"))]
-                    ui.small("Claude allowance reporting is unavailable on this platform.");
+                    ui.small("Claude allowance unavailable · This platform has not been verified.");
                     ui.separator();
                     view.body(ui);
                 });
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        #[cfg(target_os = "linux")]
+        {
+            launch.take();
+        }
         view.close(ctx);
     }
 }

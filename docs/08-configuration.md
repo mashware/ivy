@@ -969,11 +969,13 @@ keeps its flat roadmap order. No new configuration keys are introduced.
 
 Open **AI usage**, then select **Enable allowance reporting**. Choose a launch
 directory and preview the Claude Code statusline before launching it in an
-Ivy tab. Local history has its own consent and uses its own data.
+Ivy tab. Allowance consent applies to the current Ivy window and starts off
+in each new window. Local history has its own consent and uses its own data.
 
-A launch previews the existing command. Its input, output and exit status
-stay with Claude Code. Ivy adds a private settings overlay for this launch
-and keeps the client settings files intact. To change the original command,
+A launch previews the existing command and supported statusline options. Its
+input, output and exit status stay with Claude Code. Ivy adds a private
+settings overlay for this launch. Claude continues to resolve the other
+statusline options. To change the original command,
 use an ordinary Claude launch or preview it again before a new Ivy launch.
 A custom statusline can hide some native Claude footer hints.
 
@@ -987,7 +989,8 @@ and leaves the original command available to the running Claude launch.
 | Claude Code 2.1.332 · Linux native executable · POSIX `/bin/sh` | Isolated installed-client startup, settings precedence and file overlay, original output and cancellation verified. A native callback from a signed-out profile reported no windows. Measured-zero, expiry, disconnect and isolated producers exercised with fixtures. |
 | macOS, Windows and other client versions | Setup unavailable in this delivery. |
 
-The Linux receiver requires kernel peer process handles. A locally managed
-Claude settings installation or an unresolved project statusline leaves
-allowance setup unavailable. Managed Claude policy retains its native
-precedence. [Claude Code statusline](https://code.claude.com/docs/en/statusline)
+The Linux receiver requires kernel peer process handles. Use this setup for
+an unmanaged Claude profile. The **Setting sources** section in Claude
+Code's `/status` shows any server-managed policy. A locally managed Claude
+installation or an unresolved project statusline leaves setup unavailable.
+Managed Claude policy keeps its native precedence. [Claude Code statusline](https://code.claude.com/docs/en/statusline)

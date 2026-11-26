@@ -70,7 +70,7 @@ impl Wake {
         self.state.lock().unwrap().pending = false;
     }
 
-    fn changed(&self) {
+    pub(super) fn changed(&self) {
         let mut state = self.state.lock().unwrap();
         if state.visible && !state.pending {
             state.pending = true;
@@ -87,6 +87,13 @@ struct Root {
 }
 
 impl Root {
+    fn is_alive(&self) -> bool {
+        let mut event = [poll_input(self.lifetime.as_raw_fd())];
+        // SAFETY: the pidfd is pinned by Root for the duration of the nonblocking poll.
+        let ready = unsafe { libc::poll(event.as_mut_ptr(), 1, 0) };
+        ready == 0 && event[0].revents == 0
+    }
+
     fn owns(&self, peer: &Peer) -> bool {
         peer.is_alive()
             && self
@@ -113,7 +120,9 @@ struct State {
 impl State {
     fn finish(&self, snapshot: Snapshot) {
         let mut model = self.model.lock().unwrap();
-        if model.stopped {
+        if model.stopped
+            && (model.snapshot == Snapshot::Disconnected || snapshot != Snapshot::Disconnected)
+        {
             return;
         }
         model.stopped = true;
@@ -131,6 +140,7 @@ impl State {
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, root))
             || !root.scope.is_open()
+            || !root.is_alive()
         {
             return;
         }
@@ -331,7 +341,7 @@ fn run(state: &State, listener: UnixListener, signal: UnixStream) -> io::Result<
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
                 Err(error) => return Err(error),
             };
-            if let Ok(frame) = receive(stream, &root, &signal, &mut sequence) {
+            if let Ok(frame) = receive(stream, state, &root, &signal, &mut sequence) {
                 state.publish(&root, frame);
             }
         }
@@ -340,6 +350,7 @@ fn run(state: &State, listener: UnixListener, signal: UnixStream) -> io::Result<
 
 fn receive(
     stream: UnixStream,
+    state: &State,
     root: &Root,
     signal: &UnixStream,
     sequence: &mut u64,
@@ -363,6 +374,7 @@ fn receive(
     )?;
     let reader = FrameReader {
         stream,
+        state,
         root,
         signal,
         deadline,
@@ -378,6 +390,7 @@ fn receive(
 
 struct FrameReader<'a> {
     stream: UnixStream,
+    state: &'a State,
     root: &'a Root,
     signal: &'a UnixStream,
     deadline: Instant,
@@ -395,7 +408,12 @@ impl Read for FrameReader<'_> {
             if now >= self.deadline {
                 return Err(io::ErrorKind::TimedOut.into());
             }
-            wait(&mut events, Some(self.deadline - now))?;
+            let frame_wait = self.deadline - now;
+            let wait_for = self
+                .state
+                .expire()
+                .map_or(frame_wait, |expiry| expiry.min(frame_wait));
+            wait(&mut events, Some(wait_for))?;
             if (events[0].revents != 0 && stopped(self.signal)) || events[1].revents != 0 {
                 return Err(io::ErrorKind::NotConnected.into());
             }

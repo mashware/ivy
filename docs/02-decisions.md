@@ -12574,7 +12574,8 @@ usage association the local logs cannot prove.
 
 ## D128 — Claude allowance reporting is scoped to a previewed launch
 
-**Decision.** AI usage has a separate opt-in for Claude subscription snapshots.
+**Decision.** AI usage has a separate, window-local opt-in for Claude
+subscription snapshots.
 An explicit launch previews the effective prior statusline command and extends
 Claude Code only for that process. The original command is pinned to the
 preview for that launch. Claude keeps responsibility for the other statusline

@@ -62,6 +62,16 @@ impl Preview {
         self.statusline.as_ref()?.get("command")?.as_str()
     }
 
+    pub(super) fn options(&self) -> impl Iterator<Item = (&'static str, &Value)> {
+        [
+            ("Padding", "padding"),
+            ("Refresh interval (seconds)", "refreshInterval"),
+            ("Hide Vim mode indicator", "hideVimModeIndicator"),
+        ]
+        .into_iter()
+        .filter_map(|(label, option)| Some((label, self.statusline.as_ref()?.get(option)?)))
+    }
+
     pub(super) fn overlay(&self) -> io::Result<String> {
         let helper = self
             .helper
@@ -171,22 +181,23 @@ fn statusline_for_profile(
     profile: &Path,
 ) -> io::Result<Option<Map<String, Value>>> {
     let user_settings = profile.join("settings.json");
+    let project = directory.join(".claude");
+    let local = project.join("settings.local.json");
+    let root_local =
+        project_local_root(directory)?.map(|root| root.join(".claude/settings.local.json"));
     let mut statusline = read_statusline(&user_settings)?;
-    for parent in directory.ancestors() {
-        let path = parent.join(".claude");
-        for name in ["settings.json", "settings.local.json"] {
-            let settings = path.join(name);
-            if settings == user_settings {
-                continue;
-            }
-            if let Some(project) = read_statusline(&settings)? {
-                if parent != directory {
-                    return Err(io::Error::other(
-                        "Open the project root to preview its Claude Code statusline.",
-                    ));
-                }
-                statusline.get_or_insert_with(Map::new).extend(project);
-            }
+    let project_settings = project.join("settings.json");
+    for source in [
+        Some(&project_settings),
+        Some(&local),
+        root_local.as_ref().filter(|path| **path != local),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|path| **path != user_settings)
+    {
+        if let Some(project) = read_statusline(source)? {
+            statusline.get_or_insert_with(Map::new).extend(project);
         }
     }
     if let Some(statusline) = &statusline
@@ -201,6 +212,55 @@ fn statusline_for_profile(
         ));
     }
     Ok(statusline)
+}
+
+fn project_local_root(directory: &Path) -> io::Result<Option<PathBuf>> {
+    let mut checkout = None;
+    for ancestor in directory.ancestors() {
+        if ancestor.join(".git").try_exists()? {
+            checkout = Some(ancestor);
+            break;
+        }
+    }
+    let Some(checkout) = checkout else {
+        return Ok(None);
+    };
+    let identity = crate::project::resolve(directory)
+        .map_err(|_| io::Error::other("Could not resolve the Claude project settings scope."))?;
+    let crate::project::Key::Repository(common) = identity.key else {
+        return Err(io::Error::other(
+            "Could not resolve the Claude project settings scope.",
+        ));
+    };
+    let Some(main) = common
+        .parent()
+        .filter(|_| common.file_name().is_some_and(|name| name == ".git"))
+    else {
+        return Err(io::Error::other(
+            "This Git repository uses an unverified Claude settings scope.",
+        ));
+    };
+    if std::env::home_dir().as_deref() == Some(main)
+        || !owned(main)?
+        || !owned(&common)?
+        || !owned(checkout)?
+        || !owned(&checkout.join(".git"))?
+    {
+        return Ok(None);
+    }
+    let config = main.join(".claude");
+    match fs::symlink_metadata(&config) {
+        Ok(_) if !owned(&config)? => return Ok(None),
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    Ok(Some(main.to_owned()))
+}
+
+fn owned(path: &Path) -> io::Result<bool> {
+    // SAFETY: querying the process's effective user has no preconditions.
+    Ok(fs::symlink_metadata(path)?.uid() == unsafe { libc::geteuid() })
 }
 
 fn read_statusline(path: &Path) -> io::Result<Option<Map<String, Value>>> {
@@ -297,5 +357,60 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, command.as_bytes());
+    }
+
+    #[test]
+    fn linked_checkout_preserves_the_main_checkouts_local_statusline() {
+        let directory = panel_contract::PanelDir::create().unwrap();
+        let main = directory.path().join("main");
+        let linked = directory.path().join("linked");
+        fs::create_dir(&main).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .arg("-C")
+                .arg(&main)
+                .args([
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                ])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet", "--initial-branch=main"]);
+        git(&["commit", "--allow-empty", "--quiet", "-m", "Fixture"]);
+        git(&[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "linked",
+            linked.to_str().unwrap(),
+        ]);
+        for (checkout, command) in [(&main, "main statusline"), (&linked, "linked statusline")] {
+            fs::create_dir(checkout.join(".claude")).unwrap();
+            fs::write(
+                checkout.join(".claude/settings.local.json"),
+                serde_json::json!({"statusLine":{"type":"command","command":command}}).to_string(),
+            )
+            .unwrap();
+        }
+        let statusline = statusline_for_profile(&linked, &directory.path().join("profile"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(statusline["command"], "main statusline");
+        fs::remove_dir_all(linked).unwrap();
+        fs::remove_dir_all(main).unwrap();
     }
 }

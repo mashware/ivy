@@ -6,13 +6,16 @@ use std::{
     io::{self, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
 };
 
 #[derive(Default)]
 pub(super) struct View {
-    enabled: bool,
-    loaded: bool,
+    enabled: Arc<AtomicBool>,
     directory: String,
     wake: Option<Arc<Wake>>,
     pending: Option<mpsc::Receiver<io::Result<Update>>>,
@@ -24,7 +27,6 @@ pub(super) struct View {
 }
 
 enum Update {
-    Consent(bool),
     Preview(Preview),
     Launch(Launch),
 }
@@ -38,6 +40,7 @@ pub(crate) struct Startup {
     preview: Preview,
     broker: Arc<Broker>,
     overlay: Arc<Overlay>,
+    enabled: Arc<AtomicBool>,
 }
 
 struct Overlay {
@@ -76,7 +79,9 @@ impl Startup {
 
     pub(crate) fn verify(&self) -> io::Result<()> {
         self.preview.recheck()?;
-        if matches!(self.broker.snapshot(), Snapshot::Disconnected) || !read_consent()? {
+        if matches!(self.broker.snapshot(), Snapshot::Disconnected)
+            || !self.enabled.load(Ordering::Acquire)
+        {
             return Err(io::Error::other("Claude allowance reporting was disabled."));
         }
         Ok(())
@@ -105,12 +110,14 @@ impl View {
                 .and_then(|directory| directory.into_os_string().into_string().ok())
                 .unwrap_or_default();
         }
-        if !self.loaded && self.pending.is_none() {
-            self.request(ctx, || read_consent().map(Update::Consent));
-        }
-        if let Some(wake) = &self.wake {
-            wake.set_visible(true);
-        }
+        self.wake_for(ctx).set_visible(true);
+    }
+
+    fn wake_for(&mut self, ctx: &egui::Context) -> Arc<Wake> {
+        Arc::clone(self.wake.get_or_insert_with(|| {
+            let ctx = ctx.clone();
+            Wake::new(move || ctx.request_repaint())
+        }))
     }
 
     pub(super) fn close(&mut self) {
@@ -129,12 +136,13 @@ impl View {
         operation: impl FnOnce() -> io::Result<Update> + Send + 'static,
     ) {
         let (send, receive) = mpsc::channel();
-        let ctx = ctx.clone();
+        let wake = self.wake_for(ctx);
         match std::thread::Builder::new()
             .name("claude-quota-setup".into())
             .spawn(move || {
-                let _ = send.send(operation());
-                ctx.request_repaint();
+                if send.send(operation()).is_ok() {
+                    wake.changed();
+                }
             }) {
             Ok(_) => {
                 self.error = None;
@@ -155,14 +163,9 @@ impl View {
         self.pending = None;
         self.launching = false;
         match result {
-            Ok(Update::Consent(enabled)) => {
-                self.loaded = true;
-                self.enabled = enabled;
-            }
             Ok(Update::Preview(preview)) => self.preview = Some(preview),
             Ok(Update::Launch(launch)) => return Some(launch),
             Err(error) => {
-                self.loaded = true;
                 self.error = Some(error.to_string());
             }
         }
@@ -173,41 +176,24 @@ impl View {
         let ready = self.poll();
         ui.strong("Claude Code · Subscription allowances");
         if let Some(error) = &self.error {
-            ui.label(error);
+            ui.label(format!("Claude allowance unavailable · {error}"));
         }
         if self.pending.is_some() {
             ui.label("Preparing Claude allowance settings…");
         }
-        if !self.enabled {
+        if !self.enabled.load(Ordering::Acquire) {
+            ui.small("For unmanaged Claude profiles. Claude Code’s /status shows managed settings under Setting sources.");
             if ui
-                .add_enabled(
-                    self.pending.is_none(),
-                    egui::Button::new("Enable allowance reporting"),
-                )
+                .button("Enable for this unmanaged Claude profile")
                 .clicked()
             {
-                self.request(ui.ctx(), || {
-                    write_consent(true).map(|()| Update::Consent(true))
-                });
+                self.enabled.store(true, Ordering::Release);
+                ui.ctx().request_repaint();
             }
             return None;
         }
-        if ui
-            .add_enabled(
-                self.pending.is_none(),
-                egui::Button::new("Disable allowance reporting"),
-            )
-            .clicked()
-        {
-            self.enabled = false;
-            self.preview = None;
-            for (_, broker) in self.brokers.drain(..) {
-                broker.stop();
-            }
-            self.disconnected = false;
-            self.request(ui.ctx(), || {
-                write_consent(false).map(|()| Update::Consent(false))
-            });
+        if ui.button("Disable allowance reporting").clicked() {
+            self.disable();
             return None;
         }
         if let Some(wake) = &self.wake {
@@ -220,6 +206,9 @@ impl View {
                 Some(command) => {
                     ui.label("Existing statusline command for this launch");
                     ui.code(command);
+                    for (name, value) in preview.options() {
+                        ui.small(format!("{name} · {value}"));
+                    }
                     ui.small("Edits to the statusline apply on relaunch. Preview it again before using allowance reporting.");
                 }
                 None => {
@@ -231,12 +220,9 @@ impl View {
                 .clicked()
             {
                 let preview = self.preview.take().expect("preview displayed");
-                let wake = self.wake.get_or_insert_with(|| {
-                    let ctx = ui.ctx().clone();
-                    Wake::new(move || ctx.request_repaint())
-                });
+                let wake = self.wake_for(ui.ctx());
                 wake.set_visible(true);
-                let wake = Arc::clone(wake);
+                let enabled = Arc::clone(&self.enabled);
                 self.request(ui.ctx(), move || {
                     let directory = panel_contract::PanelDir::create()?;
                     let path = directory.path().join("claude-allowance-settings.json");
@@ -260,6 +246,7 @@ impl View {
                             preview,
                             broker,
                             overlay,
+                            enabled,
                         },
                     }))
                 });
@@ -291,6 +278,17 @@ impl View {
             }
         }
         ready
+    }
+
+    fn disable(&mut self) {
+        self.enabled.store(false, Ordering::Release);
+        self.pending = None;
+        self.launching = false;
+        self.preview = None;
+        for (_, broker) in self.brokers.drain(..) {
+            broker.stop();
+        }
+        self.disconnected = false;
     }
 
     pub(super) fn install(&mut self, name: usize, broker: Arc<Broker>) {
@@ -394,42 +392,44 @@ fn paint_window(ui: &mut egui::Ui, label: &str, state: WindowState) {
     ui.label(format!("{label} · {value}"));
 }
 
-fn consent_file() -> io::Result<PathBuf> {
-    crate::session::directory()
-        .map(|directory| directory.join("claude-allowance-reporting"))
-        .ok_or_else(|| io::Error::other("Ivy's configuration directory is unavailable."))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
 
-fn read_consent() -> io::Result<bool> {
-    match fs::symlink_metadata(consent_file()?) {
-        Ok(metadata) if metadata.is_file() && metadata.len() == 0 => Ok(true),
-        Ok(_) => Err(io::Error::other(
-            "Ivy's Claude allowance consent file is invalid.",
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
+    #[test]
+    fn opening_and_closing_the_view_controls_its_quota_wakes() {
+        let repaints = Arc::new(AtomicUsize::new(0));
+        let callback = Arc::clone(&repaints);
+        let wake = Wake::new(move || {
+            callback.fetch_add(1, Ordering::Relaxed);
+        });
+        let mut view = View {
+            wake: Some(Arc::clone(&wake)),
+            ..View::default()
+        };
+        let ctx = egui::Context::default();
+        view.open(&ctx);
+        wake.changed();
+        wake.changed();
+        assert_eq!(repaints.load(Ordering::Relaxed), 1);
+        view.close();
+        wake.changed();
+        assert_eq!(repaints.load(Ordering::Relaxed), 1);
+        view.open(&ctx);
+        wake.changed();
+        assert_eq!(repaints.load(Ordering::Relaxed), 2);
     }
-}
 
-fn write_consent(enabled: bool) -> io::Result<()> {
-    let file = consent_file()?;
-    if enabled {
-        if read_consent()? {
-            return Ok(());
-        }
-        let directory = file
-            .parent()
-            .ok_or_else(|| io::Error::other("Ivy's configuration directory is unavailable."))?;
-        fs::create_dir_all(directory)?;
-        let _file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(file)?;
-        return Ok(());
-    }
-    match fs::remove_file(file) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        result => result,
+    #[test]
+    fn consent_is_window_local_and_disable_revokes_the_shared_launch_flag() {
+        let mut first = View::default();
+        let second = View::default();
+        first.enabled.store(true, Ordering::Release);
+        let launch_flag = Arc::clone(&first.enabled);
+        assert!(!second.enabled.load(Ordering::Acquire));
+        assert!(launch_flag.load(Ordering::Acquire));
+        first.disable();
+        assert!(!launch_flag.load(Ordering::Acquire));
     }
 }
