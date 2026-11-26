@@ -392,6 +392,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         window.chrome.menu = false;
     }
     let owned = window.chrome.guide_blocked(&ctx)
+        || window.usage.blocks(&ctx)
         || menu_owned
         || ((over || edge.is_some()) && gesture)
         || window.chrome.held

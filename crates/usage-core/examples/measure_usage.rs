@@ -331,7 +331,12 @@ fn import(cache: PathBuf, source: &Path, expected: u128, timeout: Duration) -> i
             first_published.get_or_insert_with(|| started.elapsed());
         }
         match snapshot.status {
-            Status::Ready | Status::Empty | Status::Error | Status::Unsupported | Status::Limit => {
+            Status::Ready
+            | Status::Empty
+            | Status::Error
+            | Status::Unsupported
+            | Status::Incompatible
+            | Status::Limit => {
                 break;
             }
             Status::Partial if tokens == Some(expected) => break,
@@ -365,7 +370,12 @@ fn cancellation(cache: PathBuf, source: &Path, timeout: Duration) -> io::Result<
                 active = true;
                 break;
             }
-            Status::Ready | Status::Empty | Status::Error | Status::Unsupported | Status::Limit => {
+            Status::Ready
+            | Status::Empty
+            | Status::Error
+            | Status::Unsupported
+            | Status::Incompatible
+            | Status::Limit => {
                 break;
             }
             _ => {}

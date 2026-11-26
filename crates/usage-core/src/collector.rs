@@ -60,6 +60,7 @@ pub enum Status {
     Limit,
     WaitingToClear,
     Unsupported,
+    Incompatible,
     Error,
     Stale,
 }
@@ -114,7 +115,7 @@ pub struct Snapshot {
 }
 
 enum Command {
-    Enable(Vec<PathBuf>),
+    Enable(Vec<PathBuf>, Option<[u8; 16]>),
     Stop,
     Clear,
 }
@@ -125,7 +126,8 @@ struct Mailbox {
     cancel: Arc<AtomicBool>,
     commands: VecDeque<Command>,
     range: Option<DateRange>,
-    reply: Option<Snapshot>,
+    reply: Option<(Snapshot, Option<[u8; 16]>)>,
+    observed_clear: Option<[u8; 16]>,
     finish: bool,
 }
 
@@ -158,33 +160,37 @@ impl Service {
             .spawn(move || Worker::new(cache_dir).run(&work, repaint));
         if handler.is_err() {
             let mut mailbox = shared.mailbox.lock().unwrap();
-            mailbox.reply = Some(Snapshot {
-                status: Status::Error,
-                ..Snapshot::default()
-            });
+            mailbox.reply = Some((
+                Snapshot {
+                    status: Status::Error,
+                    ..Snapshot::default()
+                },
+                None,
+            ));
             mailbox.finish = true;
         }
         Self { shared }
     }
 
     pub fn enable(&self, roots: Vec<PathBuf>) -> bool {
-        self.command(Command::Enable(roots))
+        self.command(|mailbox| Command::Enable(roots, mailbox.observed_clear))
     }
 
     pub fn stop(&self) -> bool {
-        self.command(Command::Stop)
+        self.command(|_| Command::Stop)
     }
 
     pub fn clear(&self) -> bool {
-        self.command(Command::Clear)
+        self.command(|_| Command::Clear)
     }
 
-    fn command(&self, command: Command) -> bool {
+    fn command(&self, make: impl FnOnce(&Mailbox) -> Command) -> bool {
         let mut mailbox = self.shared.mailbox.lock().unwrap();
         if mailbox.finish || mailbox.commands.len() >= MAX_COMMANDS {
             return false;
         }
         mailbox.invalidate();
+        let command = make(&mailbox);
         mailbox.commands.push_back(command);
         self.shared.changed.notify_one();
         true
@@ -203,11 +209,11 @@ impl Service {
     }
 
     pub fn poll(&self) -> Option<Snapshot> {
-        let reply = self.shared.mailbox.lock().unwrap().reply.take();
-        if reply.is_some() {
-            self.shared.changed.notify_one();
-        }
-        reply
+        let mut mailbox = self.shared.mailbox.lock().unwrap();
+        let (reply, generation) = mailbox.reply.take()?;
+        mailbox.observed_clear = generation;
+        self.shared.changed.notify_one();
+        Some(reply)
     }
 }
 
@@ -434,6 +440,15 @@ impl Worker {
             return Ok(IDLE_POLL);
         }
         if self.control.pending_clear()? {
+            if matches!(self.pending_action, Some(Command::Enable(..))) {
+                self.pending_action = None;
+            }
+            shared
+                .mailbox
+                .lock()
+                .unwrap()
+                .commands
+                .retain(|command| !matches!(command, Command::Enable(..)));
             if self.writer.is_some()
                 || self.last_store.is_some()
                 || self.reply_guard.is_some()
@@ -442,7 +457,11 @@ impl Worker {
                 self.discard(shared);
             }
             match self.control.complete_clear() {
-                Ok(()) => self.deliver_status(shared, generation, Status::Disabled, repaint),
+                Ok(()) => {
+                    self.consent = self.control.read()?;
+                    self.last = None;
+                    self.deliver_status(shared, generation, Status::Disabled, repaint);
+                }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     self.deliver_status(shared, generation, Status::WaitingToClear, repaint)
                 }
@@ -452,12 +471,15 @@ impl Worker {
         }
         if let Some(command) = self.pending_action.take() {
             let result = match &command {
-                Command::Enable(paths) => self.control.set_enabled(paths.clone()),
-                Command::Stop => self.control.stop(),
-                Command::Clear => self.control.begin_clear(),
+                Command::Enable(paths, observed) => {
+                    self.control.set_enabled(paths.clone(), *observed)
+                }
+                Command::Stop => self.control.stop().map(|()| true),
+                Command::Clear => self.control.begin_clear().map(|()| true),
             };
             match result {
-                Ok(()) => {
+                Ok(false) => self.next_query = Instant::now(),
+                Ok(true) => {
                     if matches!(command, Command::Clear) {
                         self.discard(shared);
                         self.deliver_status(shared, generation, Status::WaitingToClear, repaint);
@@ -515,7 +537,7 @@ impl Worker {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
                 Err(error) => return Err(error),
             };
-            let lifecycle = match self.control.reader() {
+            let lifecycle = match self.control.reader(true) {
                 Ok(lock) => lock,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
                 Err(error) => return Err(error),
@@ -615,17 +637,17 @@ impl Worker {
             self.deliver_status(shared, generation, fallback, repaint);
             return Ok(());
         };
-        let path = match self.control.database(false) {
-            Ok(path) => path,
+        let (guard, path) = match self
+            .control
+            .reader(false)
+            .and_then(|guard| self.control.database(false).map(|path| (guard, path)))
+        {
+            Ok(pair) => pair,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.last_store = None;
                 self.deliver_status(shared, generation, fallback, repaint);
                 return Ok(());
             }
-            Err(error) => return Err(error),
-        };
-        let guard = match self.control.reader() {
-            Ok(guard) => guard,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
             Err(error) => return Err(error),
         };
@@ -661,17 +683,21 @@ impl Worker {
                         }
                     }
                 }
-                let coverage_pending =
-                    self.consent.enabled && snapshot.last_success_at_ms.is_none();
-                snapshot.totals.partial |= source_partial || summary.partial || coverage_pending;
+                let importing = self.writer.is_some() && (!self.sweep.complete || self.sweep.more);
+                let coverage_pending = self.consent.enabled
+                    && (importing
+                        || self.writer.is_none()
+                        || snapshot.last_success_at_ms.is_none());
+                let partial = source_partial || summary.partial || coverage_pending;
+                snapshot.totals.partial |= partial;
                 if let Some(cost) = &mut snapshot.totals.estimate {
                     cost.partial |= snapshot.totals.partial;
                 }
                 snapshot.status = self.failure.unwrap_or(if !self.consent.enabled {
                     Status::Disabled
-                } else if self.writer.is_some() && !self.sweep.complete {
+                } else if importing {
                     Status::Importing
-                } else if source_partial || summary.partial {
+                } else if partial {
                     Status::Partial
                 } else if !summary.has_events {
                     Status::Empty
@@ -751,7 +777,7 @@ impl Worker {
         let mut mailbox = shared.mailbox.lock().unwrap();
         if mailbox.generation == generation && !mailbox.finish {
             self.last = Some(snapshot.clone());
-            mailbox.reply = Some(snapshot);
+            mailbox.reply = Some((snapshot, self.consent.clear_generation));
             self.reply_guard = guard;
             drop(mailbox);
             repaint();
@@ -761,7 +787,7 @@ impl Worker {
 
 fn ledger_status(error: &LedgerError) -> Status {
     match error {
-        LedgerError::FutureVersion | LedgerError::Invalid => Status::Unsupported,
+        LedgerError::FutureVersion | LedgerError::Invalid => Status::Incompatible,
         LedgerError::Limit => Status::Limit,
         LedgerError::Deadline | LedgerError::Cancelled => Status::Stale,
         LedgerError::Sql(error)
@@ -780,10 +806,11 @@ fn selected_paths(roots: &[Binding]) -> Vec<PathBuf> {
     roots.iter().map(|root| root.path.clone()).collect()
 }
 
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos", windows)))]
 mod tests {
     use super::*;
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::DirBuilderExt;
     use std::path::Path;
 
@@ -799,7 +826,10 @@ mod tests {
                 .canonicalize()
                 .unwrap()
                 .join(format!("ivy-usage-{:016x}", u64::from_le_bytes(suffix)));
+            #[cfg(unix)]
             fs::DirBuilder::new().mode(0o700).create(&base).unwrap();
+            #[cfg(windows)]
+            fs::create_dir(&base).unwrap();
             Self(base)
         }
     }
@@ -867,10 +897,11 @@ mod tests {
 
         let follower = Service::new(control.clone(), || {});
         follower.request(range());
-        assert_eq!(
-            await_snapshot(&follower, |state| state.totals.tokens == 160).last_success_at_ms,
-            found.last_success_at_ms
-        );
+        let following = await_snapshot(&follower, |state| state.totals.tokens == 160);
+        assert_eq!(following.last_success_at_ms, found.last_success_at_ms);
+        assert_eq!(following.status, Status::Partial);
+        assert!(following.totals.partial);
+        assert!(following.totals.estimate.unwrap().partial);
 
         assert!(service.stop());
         let stopped = await_snapshot(&service, |state| state.status == Status::Disabled);
@@ -895,9 +926,9 @@ mod tests {
         let fixture = Fixture::new();
         let (root, control_path) = address(&fixture.0);
         let control = Control::new(control_path.clone());
-        control.set_enabled(vec![root]).unwrap();
+        control.set_enabled(vec![root], None).unwrap();
         let owner = control.owner().unwrap();
-        let reader = control.reader().unwrap();
+        let reader = control.reader(true).unwrap();
         let db = control.database(true).unwrap();
         drop(Ledger::open_writer(&db).unwrap());
         control.begin_clear().unwrap();
@@ -914,6 +945,41 @@ mod tests {
     }
 
     #[test]
+    fn preclear_enable_cannot_reopen_a_cleared_ledger() {
+        let fixture = Fixture::new();
+        let (root, path) = address(&fixture.0);
+        let control = Control::new(path.clone());
+        assert!(control.set_enabled(vec![root.clone()], None).unwrap());
+        let lease = control.reader(true).unwrap();
+        let db = control.database(true).unwrap();
+        drop(Ledger::open_writer(&db).unwrap());
+        control.begin_clear().unwrap();
+        assert!(!control.set_enabled(vec![root.clone()], None).unwrap());
+        assert_eq!(
+            control.complete_clear().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(lease);
+        control.complete_clear().unwrap();
+
+        assert!(!control.set_enabled(vec![root.clone()], None).unwrap());
+        let _lease = control.reader(false).unwrap();
+        assert_eq!(
+            control.database(false).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert!(!db.parent().unwrap().exists());
+        let consent = control.read().unwrap();
+        assert!(consent.clear_generation.is_some());
+        assert!(!consent.enabled);
+        assert!(
+            control
+                .set_enabled(vec![root], consent.clear_generation)
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn missing_source_retains_published_counts_and_timestamp_after_restart() {
         let fixture = Fixture::new();
         let (root, control) = address(&fixture.0);
@@ -924,6 +990,22 @@ mod tests {
             state.status == Status::Ready && state.last_success_at_ms.is_some()
         });
         drop(service);
+        let previous_owner = Control::new(control.clone());
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match previous_owner.owner() {
+                Ok(lease) => {
+                    drop(lease);
+                    break;
+                }
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("previous collector did not release its owner lock: {error}"),
+            }
+        }
         fs::remove_file(root.join("conversation.jsonl")).unwrap();
 
         let restarted = Service::new(control, || {});
@@ -941,7 +1023,7 @@ mod tests {
             let fixture = PathBuf::from(path);
             let control = Control::new(fixture.join("control"));
             let _owner = control.owner().unwrap();
-            let _lifecycle = control.reader().unwrap();
+            let _lifecycle = control.reader(true).unwrap();
             let mut db = Ledger::open_writer(&control.database(true).unwrap()).unwrap();
             let stale_source = [18; 32];
             let stale = RECORD.replace("req_test", "req_abandoned");
@@ -962,7 +1044,7 @@ mod tests {
         let fixture = Fixture::new();
         let (root, cache) = address(&fixture.0);
         let control = Control::new(cache.clone());
-        control.set_enabled(vec![root]).unwrap();
+        control.set_enabled(vec![root], None).unwrap();
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",

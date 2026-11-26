@@ -35,8 +35,8 @@ const SHARED: u32 = PINNED_SHARE | FILE_SHARE_DELETE;
 const DIR_ACCESS: u32 = FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
 const MAX_DEPTH: usize = 64;
 
-pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
-    crate::control::windows::private_directory(path)
+pub(crate) fn private_directory(path: &Path, create: bool) -> io::Result<()> {
+    crate::control::windows::private_directory(path, create)
 }
 
 fn name_units(name: &OsStr) -> io::Result<Vec<u16>> {

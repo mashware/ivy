@@ -277,7 +277,7 @@ fn require_fixed_drive(drive: &str) -> io::Result<()> {
 }
 
 impl DirectoryPin {
-    pub(super) fn open(path: &Path) -> io::Result<Self> {
+    pub(super) fn open(path: &Path, create: bool) -> io::Result<Self> {
         let (drive, names) = drive_and_components(path)?;
         require_fixed_drive(&drive)?;
         let mut ancestor = PathBuf::from(format!("\\\\?\\{drive}"));
@@ -288,7 +288,7 @@ impl DirectoryPin {
             ancestor.push(name);
             let leaf = index + 1 == depth;
             let file = match open_directory(&ancestor) {
-                Err(error) if leaf && error.kind() == io::ErrorKind::NotFound => {
+                Err(error) if create && leaf && error.kind() == io::ErrorKind::NotFound => {
                     let security = user.descriptor(true)?;
                     let result = unsafe {
                         CreateDirectoryW(
@@ -329,8 +329,8 @@ fn open_directory(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
-    DirectoryPin::open(path).map(drop)
+pub(crate) fn private_directory(path: &Path, create: bool) -> io::Result<()> {
+    DirectoryPin::open(path, create).map(drop)
 }
 
 pub(super) fn private_file(path: &Path, create: bool, truncate: bool) -> io::Result<File> {
@@ -405,12 +405,12 @@ mod tests {
         let ordinary = fixture.0.join("ordinary");
         fs::create_dir(&ordinary).unwrap();
         assert_eq!(
-            private_directory(&ordinary).unwrap_err().kind(),
+            private_directory(&ordinary, false).unwrap_err().kind(),
             io::ErrorKind::PermissionDenied
         );
 
         let cache = fixture.0.join("private");
-        let pin = DirectoryPin::open(&cache).unwrap();
+        let pin = DirectoryPin::open(&cache, true).unwrap();
         let landmark = cache.join("owned");
         drop(private_file(&landmark, true, false).unwrap());
         let alias = cache.join("alias");
@@ -437,7 +437,7 @@ mod tests {
         drop(writer);
 
         let follower = Control::new(fixture.0.join("store"));
-        let lease = follower.reader().unwrap();
+        let lease = follower.reader(false).unwrap();
         let ledger = Ledger::open_reader(&follower.database(false).unwrap()).unwrap();
         assert_eq!(ledger.info().unwrap().store_id, store_id);
         drop(ledger);

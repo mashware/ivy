@@ -67,7 +67,7 @@ mod native {
         }
     }
 
-    fn open_absolute(path: &Path, create_private: bool) -> io::Result<File> {
+    fn open_absolute(path: &Path, private: bool, create: bool) -> io::Result<File> {
         let mut components = path.components().peekable();
         if components.next() != Some(Component::RootDir) {
             return Err(io::ErrorKind::InvalidInput.into());
@@ -78,7 +78,7 @@ mod native {
         while let Some(component) = components.next() {
             let name = normal(component)?;
             directory = match open_at(directory.as_fd(), name, DIR_FLAGS) {
-                Err(err) if create_private && err.kind() == io::ErrorKind::NotFound => {
+                Err(err) if create && err.kind() == io::ErrorKind::NotFound => {
                     let name_buf = name_bytes(name)?;
                     let created =
                         unsafe { libc::mkdirat(directory.as_raw_fd(), name_buf.as_ptr(), 0o700) };
@@ -91,7 +91,7 @@ mod native {
                 }
                 result => result?,
             };
-            if create_private {
+            if private {
                 let metadata = directory.metadata()?;
                 let mode = metadata.mode();
                 let private_leaf = components.peek().is_none();
@@ -112,12 +112,12 @@ mod native {
         Ok(directory)
     }
 
-    pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
-        open_absolute(path, true).map(drop)
+    pub(crate) fn private_directory(path: &Path, create: bool) -> io::Result<()> {
+        open_absolute(path, true, create).map(drop)
     }
 
     pub(crate) fn bind(path: PathBuf) -> io::Result<Binding> {
-        let directory = open_absolute(&path, false)?;
+        let directory = open_absolute(&path, false, false)?;
         let metadata = directory.metadata()?;
         open_source(directory.as_fd(), Path::new("."))?;
         Ok(Binding {
@@ -135,7 +135,7 @@ mod native {
 
     impl Root {
         pub(crate) fn open(binding: Binding) -> io::Result<Self> {
-            let directory = open_absolute(&binding.path, false)?;
+            let directory = open_absolute(&binding.path, false, false)?;
             let metadata = directory.metadata()?;
             if metadata.dev() != binding.device || metadata.ino() != binding.inode {
                 return Err(io::ErrorKind::PermissionDenied.into());
@@ -372,7 +372,7 @@ mod native {
     use std::io;
     use std::path::{Path, PathBuf};
 
-    pub(crate) fn private_directory(_: &Path) -> io::Result<()> {
+    pub(crate) fn private_directory(_: &Path, _: bool) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
 

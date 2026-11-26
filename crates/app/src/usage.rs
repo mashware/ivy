@@ -71,6 +71,11 @@ fn local_boundary(day: NaiveDate, zone: &impl TimeZone) -> Option<i64> {
 }
 
 impl View {
+    #[cfg(test)]
+    pub(crate) fn open_for_test(&mut self) {
+        self.open = true;
+    }
+
     pub(crate) fn blocks(&self, ctx: &egui::Context) -> bool {
         self.open || self.awaiting_release || self.blocked_frame == Some(ctx.cumulative_frame_nr())
     }
@@ -157,7 +162,11 @@ impl View {
         } else {
             ui.label("Loading local usage settings…");
         }
-        if !waiting && supported && !enabled && !clearing {
+        let incompatible = self
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.status == Status::Incompatible);
+        if !waiting && supported && !enabled && !clearing && !incompatible {
             ui.label("Choose the local folders containing Claude Code history.");
             ui.horizontal(|ui| {
                 ui.add(
@@ -219,7 +228,10 @@ impl View {
                 service.stop();
             }
             let has_history = self.snapshot.as_ref().is_some_and(|s| {
-                s.has_history || s.enabled || !s.roots.is_empty() || s.status == Status::Error
+                s.has_history
+                    || s.enabled
+                    || !s.roots.is_empty()
+                    || matches!(s.status, Status::Error | Status::Incompatible)
             });
             if ui
                 .add_enabled(
@@ -277,12 +289,14 @@ fn status_label(status: Status) -> &'static str {
         Status::Limit => "Import limit reached. Previously imported history is retained.",
         Status::WaitingToClear => "Waiting to clear history.",
         Status::Unsupported => "Local history is unavailable on this platform.",
+        Status::Incompatible => "Ivy cannot open this version of the saved history.",
         Status::Error => "Could not read local usage.",
         Status::Stale => "Stale results from the last successful collection.",
     }
 }
 
 fn paint_summary(ui: &mut egui::Ui, snapshot: &Snapshot) {
+    ui.small("Saved history includes earlier selections until cleared.");
     let totals = &snapshot.totals;
     ui.heading(if totals.tokens_known {
         format!("{} tokens", token_label(totals))
@@ -519,6 +533,18 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
 }
 
 fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
+    let now = chrono::Utc::now().timestamp_millis();
+    if view
+        .requested_range
+        .is_some_and(|range| now >= range.end_ms)
+    {
+        view.request();
+    }
+    if let Some(range) = view.requested_range
+        && let Ok(remaining) = u64::try_from(range.end_ms - now)
+    {
+        ctx.request_repaint_after(Duration::from_millis(remaining));
+    }
     let available = ctx.content_rect().size();
     let mut close = false;
     egui::Modal::new(egui::Id::new("ai-usage"))

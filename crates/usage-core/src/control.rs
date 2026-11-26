@@ -14,6 +14,8 @@ const MAX_ROOTS: usize = 64;
 pub(crate) struct Consent {
     pub enabled: bool,
     pub roots: Vec<Binding>,
+    #[serde(default)]
+    pub clear_generation: Option<[u8; 16]>,
 }
 
 pub(crate) struct Control {
@@ -33,18 +35,18 @@ impl Control {
         }
     }
 
-    fn ready(&self) -> io::Result<()> {
+    fn ready(&self, create: bool) -> io::Result<()> {
         #[cfg(windows)]
         {
             if self.pinned_directory.get().is_none() {
-                let pin = windows::DirectoryPin::open(&self.directory)?;
+                let pin = windows::DirectoryPin::open(&self.directory, create)?;
                 let _ = self.pinned_directory.set(pin);
             }
             Ok(())
         }
         #[cfg(not(windows))]
         {
-            confined::private_directory(&self.directory)
+            confined::private_directory(&self.directory, create)
         }
     }
 
@@ -53,8 +55,8 @@ impl Control {
         if self.directory.as_os_str().is_empty() {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        match fs::symlink_metadata(&self.directory) {
-            Ok(_) => self.ready().map(|()| true),
+        match self.ready(false) {
+            Ok(()) => Ok(true),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(err),
         }
@@ -92,13 +94,17 @@ impl Control {
         }
     }
 
-    pub(crate) fn set_enabled(&self, paths: Vec<PathBuf>) -> io::Result<()> {
+    pub(crate) fn set_enabled(
+        &self,
+        paths: Vec<PathBuf>,
+        expected_generation: Option<[u8; 16]>,
+    ) -> io::Result<bool> {
         if paths.is_empty() || paths.len() > MAX_ROOTS {
             return Err(io::ErrorKind::InvalidInput.into());
         }
         let _consent = self.lock_exclusive("consent.lock")?;
-        if self.pending_clear()? {
-            return Err(io::ErrorKind::WouldBlock.into());
+        if self.pending_clear()? || self.read()?.clear_generation != expected_generation {
+            return Ok(false);
         }
         let mut roots = Vec::new();
         for path in paths {
@@ -114,7 +120,9 @@ impl Control {
         self.write_consent(&Consent {
             enabled: true,
             roots,
-        })
+            clear_generation: expected_generation,
+        })?;
+        Ok(true)
     }
 
     pub(crate) fn stop(&self) -> io::Result<()> {
@@ -148,13 +156,19 @@ impl Control {
         if !self.pending_clear()? {
             return Ok(());
         }
-        self.write_consent(&Consent::default())?;
+        let mut generation = [0; 16];
+        getrandom::fill(&mut generation)
+            .map_err(|_| io::Error::other("could not fence cleared usage consent"))?;
+        self.write_consent(&Consent {
+            clear_generation: Some(generation),
+            ..Consent::default()
+        })?;
         let ledger = self.directory.join("ledger");
         #[cfg(windows)]
         let ledger = self.quarantine_ledger(&ledger)?;
         match fs::symlink_metadata(&ledger) {
             Ok(_) => {
-                confined::private_directory(&ledger)?;
+                confined::private_directory(&ledger, false)?;
                 for name in [
                     "usage.sqlite3",
                     "usage.sqlite3-journal",
@@ -176,15 +190,12 @@ impl Control {
     pub(crate) fn database(&self, create: bool) -> io::Result<PathBuf> {
         #[cfg(windows)]
         if create {
-            self.ready()?;
+            self.ready(true)?;
         } else if !self.verify_existing()? {
             return Err(io::ErrorKind::NotFound.into());
         }
         let directory = self.directory.join("ledger");
-        if !create {
-            fs::symlink_metadata(&directory)?;
-        }
-        confined::private_directory(&directory)?;
+        confined::private_directory(&directory, create)?;
         let path = directory.join("usage.sqlite3");
         // Opening then closing the database with a raw fd releases this process's POSIX locks.
         match fs::symlink_metadata(&path) {
@@ -230,11 +241,9 @@ impl Control {
         self.lock_exclusive("owner.lock")
     }
 
-    pub(crate) fn reader(&self) -> io::Result<File> {
-        // A follower never creates the DB, but an old owner may not have initialized
-        // the shared lock file if it exited between acquiring ownership and opening it.
-        self.ready()?;
-        let file = private_file(&self.directory.join("lifecycle.lock"), true, false)?;
+    pub(crate) fn reader(&self, create: bool) -> io::Result<File> {
+        self.ready(create)?;
+        let file = private_file(&self.directory.join("lifecycle.lock"), create, false)?;
         file.try_lock_shared().map_err(lock_error)?;
         if self.pending_clear()? {
             return Err(io::ErrorKind::WouldBlock.into());
@@ -243,7 +252,7 @@ impl Control {
     }
 
     fn lock_exclusive(&self, name: &str) -> io::Result<File> {
-        self.ready()?;
+        self.ready(true)?;
         let file = private_file(&self.directory.join(name), true, false)?;
         file.try_lock().map_err(lock_error)?;
         Ok(file)
@@ -284,7 +293,7 @@ impl Control {
         let quarantine = self.directory.join("ledger.pending-delete");
         match fs::symlink_metadata(ledger) {
             Ok(_) => {
-                confined::private_directory(ledger)?;
+                confined::private_directory(ledger, false)?;
                 windows::replace_file(ledger, &quarantine, false)?;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
