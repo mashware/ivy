@@ -375,12 +375,13 @@ pub(crate) fn keys(
         window.viewer.keys = false;
     }
     let owned = !blocked && before_keys(window, ui, metrics);
-    delivery::deliver(window, ui.ctx());
+    delivery::before_keys(window, ui.ctx());
     let requests = if blocked || owned {
         Vec::new()
     } else {
         crate::settings::editor::before_keys(window, ui, metrics)
     };
+    delivery::deliver(window, ui.ctx());
     (owned, requests)
 }
 

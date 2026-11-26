@@ -11763,8 +11763,8 @@ starts its serials again, since the opening already tells its fields apart.
 - **types one line into that console**: `Annotated screenshot: <copy> · 1: <note> · 2: <note> ·
   Note: <general>`, empty parts left out, every control character turned into a space. That text is
   painted under the image and its notes before the click, from the same function that composes what
-  is sent — inside the paste markers when the console asks for them — together with «It is added to
-  whatever is already typed at that console's prompt, and Enter runs it.» The paste is composed for
+  is sent — inside the paste markers when the console asks for them — together with «If something
+  is typed at this console's prompt, Send asks first; Enter runs the line.» The paste is composed for
   the paste mode the console has when it is sent, after the copy is closed. The notes sit in a fixed
   column beside the image, so the image keeps its height however many markers there are, and go
   under it only where the drawer is too narrow for both; the line takes a band of its own under
@@ -11794,7 +11794,12 @@ Enter**, which writes the copy and the line with no Enter, clears the marks and 
 and **Cancel**, which types nothing, keeps the marks and notes, and removes a copy already written.
 The bit is checked at the click and, while the person has not answered, once more when the copy is
 written, just before the line would be typed: what was typed while the copy was being written is
-asked about too, with the copy kept for the answer. Once answered, a Send is not asked again — what
+asked about too, with the copy kept for the answer. **The completed-copy check follows the current
+frame's console input**, because checking first missed a draft typed in the very frame the copy
+finished and the later Enter submitted both without asking. An Enter already owed for a line typed
+in an earlier frame goes **before** new console input; moving all delivery after input would join
+the next draft to that already-written line instead. The Git review's insertion retains its place
+before console input. Once answered, a Send is not asked again — what
 is typed after «Send anyway» goes with the line, as the person chose. Closing the image or its
 console while the question waits drops the Send, a closed console said where the image is still
 shown, and a copy it had written is removed with the folder of a closed console. A window that

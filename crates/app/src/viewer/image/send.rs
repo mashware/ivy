@@ -419,8 +419,28 @@ thread_local! {
     pub(super) static TOLD: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// D113: keep an already-owed Enter ahead of the next frame's console typing.
+pub(crate) fn owes_enter(window: &crate::Window) -> bool {
+    matches!(window.image.send.phase, Phase::Enter(..))
+}
+
+pub(crate) fn press_enter(window: &mut crate::Window, ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    if !matches!(&window.image.send.phase, Phase::Enter(_, at, _) if frame > *at) {
+        return;
+    }
+    let Phase::Enter(enter, _, request) = std::mem::take(&mut window.image.send.phase) else {
+        unreachable!("an Enter is owed");
+    };
+    if let Err(refusal) = delivery::press(window, enter) {
+        let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
+        say(window, (request.pane, &request.console), said);
+    }
+}
+
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
+    press_enter(window, ctx);
     // A console that closed took its image, and the Cancel painted under it: its Send is taken
     // back as Cancel would, so its worker, if it has one, is parked and removes what it wrote, and
     // every other console's Send says what it waits for. That covers every way a console leaves.
@@ -448,15 +468,7 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
         let parked = window.image.send.parked.take().expect("a parked worker");
         forsake(window, &parked.request, parked.closed_told, written);
     }
-    let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
-        Phase::Enter(enter, at, request) if frame > at => {
-            if let Err(refusal) = delivery::press(window, enter) {
-                let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
-                say(window, (request.pane, &request.console), said);
-            }
-            Phase::Idle
-        }
         Phase::Confirm(request, copy) if !answerable(window, &request) => {
             if let Some(path) = copy {
                 forsake(window, &request, false, Ok(path));

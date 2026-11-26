@@ -5438,6 +5438,86 @@ mod tests {
         late_draft("annotated-draft-late-cancel", true);
     }
 
+    // Unix PTY fixture: stty makes the receiver report the console's input byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn typing_in_the_copy_completion_frame_is_asked_about_before_the_line() {
+        let received = term_core::received::Received::new("annotated-completion-input");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        let at = origin_pane(&mut window)
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        press(&mut window, &ctx, at);
+        assert!(!window.viewer.keyboard, "the drawer still holds the keys");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![egui::Event::Text("late".into())]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [&b"late"[..], &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "the screenshot line or Enter bypassed the same-frame draft question"
+        );
+        assert!(text_rect(&shapes, |t| t == question(&window)).is_some());
+        for answer in ["Send anyway", "Type without Enter", "Cancel"] {
+            place_of(&mut window, &ctx, answer);
+        }
+        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        assert!(copy.exists(), "the pending question lost its written copy");
+    }
+
+    // Unix PTY fixture: stty makes the receiver report the console's input byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn an_enter_already_owed_precedes_text_typed_in_the_next_frame() {
+        let received = term_core::received::Received::new("annotated-enter-before-input");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        let at = origin_pane(&mut window)
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        press(&mut window, &ctx, at);
+        assert!(!window.viewer.keyboard, "the drawer still holds the keys");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!line.is_empty());
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes(),
+            "the line was not delivered before the next frame"
+        );
+        painted(&mut window, &ctx, vec![egui::Event::Text("next".into())]);
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [line.as_bytes(), &b"\rnext"[..], &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "new console input arrived before the Enter already owed"
+        );
+        assert!(marks_of(&window).is_empty());
+        let _ = std::fs::remove_file(copy);
+    }
+
     /// As above, and «Send anyway» types the line that names the copy already written.
     #[cfg(unix)]
     #[test]

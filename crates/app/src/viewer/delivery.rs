@@ -2,6 +2,18 @@
 //! opened the review, and Send's line, with its Enter, to the console an image came from.
 use eframe::egui;
 
+/// D113: an Enter already owed precedes new console input; the draft check follows that input.
+pub(super) fn before_keys(window: &mut crate::Window, ctx: &egui::Context) {
+    if window.viewer.pending_send.is_none() && !super::image::send::owes_enter(window) {
+        return;
+    }
+    let started = std::time::Instant::now();
+    deliver_inner(window, ctx);
+    super::image::send::press_enter(window, ctx);
+    window.viewer.record(started.elapsed());
+    window.timed_separately += window.viewer.take_cost();
+}
+
 pub(super) fn deliver(window: &mut crate::Window, ctx: &egui::Context) {
     if window.viewer.pending_send.is_none()
         && !window.image.send_pending()
