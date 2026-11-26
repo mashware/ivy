@@ -21,6 +21,7 @@ pub(super) fn show(
         ("What's new", Action::Updates(false), None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
+        ("AI usage", Action::Usage, None, false),
         (
             "Files",
             Action::Tool(crate::sidebar::Tool::Files),

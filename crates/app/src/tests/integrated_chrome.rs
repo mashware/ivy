@@ -2719,6 +2719,7 @@ mod tests {
             "What's new",
             "Preferences",
             "Keyboard shortcuts",
+            "AI usage",
             "Connect agents",
             "Search console",
         ] {

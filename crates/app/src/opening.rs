@@ -338,6 +338,7 @@ fn initial_window(
         last_frame_with_buttons: None,
         header_input: crate::header::actions::Input::default(),
         settings_editor: crate::settings::editor::Editor::default(),
+        usage: crate::usage::View::default(),
         chrome: crate::chrome::Chrome::default(),
         pane_view: crate::pane_view::State::default(),
         clipboard: crate::clipboard::Service::default(),

@@ -12510,3 +12510,30 @@ helper. The additional process belongs to this plugin's connection, not to a bac
 installed OpenCode desktop interoperability. Neither source review nor cross-compilation proves
 Windows runtime behavior. Native CI, mutations and installed-client checks must report their own
 results. This delivery leaves #174's conversation-recovery reporters deferred.
+
+
+## D127 — Claude usage is opt-in local accounting
+
+**Decision.** Ivy's application menu opens a dedicated AI usage screen. A
+person selects local Claude roots and explicitly enables collection. Each
+root is bound to its opened directory identity. Only normalized accounting
+and minimized, store-local keyed evidence enter the private SQLite ledger.
+The app retains accepted accounting across source removal, reports partial
+coverage and prices only known token categories with bundled versioned USD
+list rates. The original history is read-only. Stop revokes collection.
+Clear removes the derived ledger, and removed originals can make rebuilding
+impossible.
+
+**Why.** Streaming Claude code records can repeat with different timestamps
+and switch from a bare prompt count to an explicit cache split. A ledger
+that keeps only the winner cannot reproduce conflicts after logs disappear.
+A staged epoch publishes a consistent result after bounded collection and
+reconciliation. A separate window-level modal preserves the drawer and the
+producer's authority over task state (D6).
+
+**Discarded.** The upstream public parser materializes whole files, and its
+default pricing path can contact a server. Adapt the proven Claude extraction
+rules at the pinned revision with its MIT notice. A ledger copy would double
+the needed staging space. A standalone append journal would need separate
+indexed replay and date queries. A per-console or Board view would imply a
+usage association the local logs cannot prove.

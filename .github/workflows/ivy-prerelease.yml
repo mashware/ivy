@@ -52,6 +52,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Test native panel routing and Codex launcher
         run: cargo test --locked -p panel-control
+      - name: Test native Claude usage collection and storage
+        run: cargo test --locked -p usage-core
       - name: Prove native Codex daemon attribution regression
         run: python3 scripts/macos-codex-mutations.py
 

@@ -137,6 +137,7 @@ enum Action {
     Updates(bool),
     Menu,
     Preferences,
+    Usage,
     Shortcuts,
     Minimize,
     Maximize,
@@ -239,7 +240,7 @@ pub(crate) fn open_for_tests(window: &mut Window, ctx: &egui::Context, guide: bo
 
 /// Whether the title bar holds a modal surface — its menu or a dialog — that dims the consoles.
 pub(crate) fn is_modal(window: &Window, ctx: &egui::Context) -> bool {
-    window.chrome.menu || window.chrome.guide_blocked(ctx)
+    window.chrome.menu || window.chrome.guide_blocked(ctx) || window.usage.blocks(ctx)
 }
 
 /// Paint and claim the titlebar before settings and terminal input dispatch.
@@ -349,6 +350,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     if window.settings_editor.is_open()
         || window.pane_view.is_modal()
+        || window.usage.blocks(&ctx)
         || window.chrome.guide_blocked(&ctx)
     {
         action = None;
@@ -413,6 +415,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     window.chrome.record_work(elapsed);
     if window.settings_editor.is_open()
         || window.pane_view.is_modal()
+        || window.usage.blocks(&ctx)
         || window.chrome.guide_blocked(&ctx)
         || !ui.is_enabled()
         || (crate::board::blocked(window, &ctx)
@@ -432,6 +435,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             action,
             Some(
                 Action::Preferences
+                    | Action::Usage
                     | Action::Shortcuts
                     | Action::Connect
                     | Action::Updates(_)
@@ -482,6 +486,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             window.chrome.menu = false;
             window.settings_editor.open_from_chrome();
         }
+        Some(Action::Usage) => crate::usage::open(window, &ctx),
         Some(Action::Shortcuts) => window.settings_editor.open_shortcuts_from_chrome(),
         Some(Action::Minimize) => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
         Some(Action::Maximize) => {

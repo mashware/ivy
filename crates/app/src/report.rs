@@ -445,6 +445,7 @@ impl Window {
 
 fn publish_views(window: &Window, to: &mut dyn std::io::Write) -> std::io::Result<()> {
     window.settings_editor.publish(to)?;
+    window.usage.publish(to)?;
     window.chrome.publish(to)?;
     window.viewer.publish_combined(&window.viewer_other, to)?;
     window.projects.publish(to)?;
@@ -457,6 +458,7 @@ fn publish_views(window: &Window, to: &mut dyn std::io::Write) -> std::io::Resul
 
 fn close_views(window: &mut Window) {
     window.settings_editor.close_frame();
+    window.usage.close_frame();
     window.chrome.close_frame();
     window.viewer.close_combined_frame(&mut window.viewer_other);
     window.board.timing.close_frame();

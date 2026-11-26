@@ -1516,3 +1516,11 @@ windows_unix_omission!(
     the_large_pair_is_judged_on_the_size_the_pane_wrote_out,
     "unix-only: invokes sh to execute the measurement guard script"
 );
+
+#[test]
+fn usage_batches_require_their_scope_and_a_synthetic_import() {
+    assert!(invalidates_on("[ \"${USAGE:-}\" = open ]"));
+    assert!(invalidates_on("[ \"${USAGE:-}\" = closed ]"));
+    assert!(invalidates_on("[ -z \"${USAGE:-}\" ]"));
+    assert!(MEASURE.contains(r#"[ "$usage_tokens" = 160 ] ||"#));
+}
