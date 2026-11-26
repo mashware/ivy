@@ -43,6 +43,10 @@ pub(super) fn scope(pty: &crate::Pty) -> io::Result<Scope> {
 }
 
 impl Scope {
+    pub(super) fn root_lifetime(&self) -> io::Result<OwnedFd> {
+        self.child_lifetime.try_clone()
+    }
+
     pub(super) fn classify_ancestry(&self, pid: u32) -> Ancestry {
         self.diagnostic_ancestry(pid).unwrap_or(Ancestry::Unknown)
     }

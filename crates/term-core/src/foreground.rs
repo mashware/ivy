@@ -267,6 +267,12 @@ pub(crate) fn scope(pty: &crate::Pty) -> io::Result<ForegroundScope> {
 }
 
 impl ForegroundScope {
+    /// Duplicates the lifetime witness for the original PTY child.
+    #[cfg(target_os = "linux")]
+    pub fn root_lifetime(&self) -> io::Result<std::os::fd::OwnedFd> {
+        self.native.root_lifetime()
+    }
+
     /// Classifies process ancestry without foreground-group or executable restrictions.
     /// Callers should supply a PID obtained from native socket credentials.
     pub fn classify_ancestry(&self, pid: u32) -> Ancestry {

@@ -80,3 +80,82 @@ pub(super) fn assemble_pane(
         taken_over: None,
     }
 }
+
+pub(super) struct LaunchOptions {
+    pub(super) fallback: bool,
+    pub(super) integration: Option<shell_integration::Prepared>,
+    #[cfg(target_os = "linux")]
+    pub(super) quota: Option<crate::usage::QuotaStartup>,
+}
+
+pub(super) fn launch_configured(
+    ctx: &egui::Context,
+    program: Launch<'_>,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    options: LaunchOptions,
+) -> term_core::Result<Pane> {
+    let LaunchOptions {
+        fallback,
+        integration,
+        #[cfg(target_os = "linux")]
+        quota,
+    } = options;
+    let Launch {
+        program,
+        args,
+        directory,
+        path,
+    } = program;
+    let args = integration
+        .as_ref()
+        .map_or(args, |prepared| prepared.args());
+    let mut identity = crate::panel::pane::launch_identity(panel.as_ref());
+    let helper = crate::resume::helper_path();
+    identity.push((
+        "IVY_SESSION_HELPER",
+        helper.as_deref().map(std::path::Path::as_os_str),
+    ));
+    if let Some(path) = path {
+        identity.push(("PATH", Some(path)));
+    }
+    if let Some(prepared) = &integration {
+        identity.extend(prepared.env());
+    }
+    #[cfg(target_os = "linux")]
+    let quota_endpoint = quota.as_ref().map(|startup| startup.endpoint().to_owned());
+    #[cfg(target_os = "linux")]
+    if let Some(endpoint) = &quota_endpoint {
+        identity.push((
+            panel_control::quota::ENDPOINT_ENV,
+            Some(endpoint.as_os_str()),
+        ));
+    }
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    let launch_waker = ctx.clone();
+    let (pty, output) = crate::launch::Process::start_configured(
+        std::sync::Arc::new(move || launch_waker.request_repaint()),
+        reads.clone(),
+        crate::launch::Request {
+            program,
+            args: &borrowed,
+            size: INITIAL_GRID,
+            env: &identity,
+            directory,
+            fallback,
+        },
+        #[cfg(target_os = "linux")]
+        quota,
+    )?;
+
+    Ok(assemble_pane(
+        ctx,
+        name,
+        reads,
+        panel,
+        integration,
+        pty,
+        output,
+    ))
+}

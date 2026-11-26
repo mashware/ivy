@@ -176,6 +176,11 @@ displayed date range, stop collecting and clear the derived history. The screen
 shows coverage and the last successful collection. Previously imported history
 remains available when original logs disappear.
 
+Claude subscription allowances have a separate opt-in. An explicit Claude
+launch shows the statusline setup before it starts. The screen can show
+independent five-hour and seven-day snapshots from that launch, with reset
+times and account verification status.
+
 This standalone addition leaves console and document drawer input and layout
 independent. The first delivery covers local Claude history, with the storage
 and consent decisions recorded in D127.
@@ -598,6 +603,9 @@ console.
 - [ ] **A1 — Claude local usage overview.** One opt-in view with bounded
   background collection, retained normalized accounting, date filters,
   bundled estimates, explicit stop and clear, and named frame costs. D127. (#262)
+- [x] **A2 — Claude subscription allowance snapshots.** A previewed statusline
+  overlay for verified native launches, independently expiring observations,
+  separate consent and immediate revocation. D128. (#264)
 
 ## Loose ends
 

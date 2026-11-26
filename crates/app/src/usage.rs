@@ -11,6 +11,15 @@ use usage_core::{DateRange, Service, Snapshot, Status};
 mod paint;
 use paint::paint_summary;
 
+#[cfg(target_os = "linux")]
+mod quota_broker;
+#[cfg(target_os = "linux")]
+mod quota_setup;
+#[cfg(target_os = "linux")]
+mod quota_view;
+#[cfg(target_os = "linux")]
+pub(crate) use quota_view::{Lease as QuotaLease, Startup as QuotaStartup};
+
 #[derive(Default)]
 pub(crate) struct View {
     open: bool,
@@ -27,6 +36,8 @@ pub(crate) struct View {
     requested_range: Option<DateRange>,
     timing: Timing,
     measured: Option<Measurement>,
+    #[cfg(target_os = "linux")]
+    quota: quota_view::QuotaView,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -86,6 +97,8 @@ impl View {
     fn close(&mut self, ctx: &egui::Context) {
         self.open = false;
         self.confirm_clear = false;
+        #[cfg(target_os = "linux")]
+        self.quota.close();
         ctx.memory_mut(|memory| {
             memory.stop_text_input();
             if let Some(id) = self.focus.take() {
@@ -339,6 +352,8 @@ pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
     }
     view.focus = ctx.memory(|memory| memory.focused());
     view.open = true;
+    #[cfg(target_os = "linux")]
+    view.quota.open(ctx);
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.pointer.any_down());
     view.request();
@@ -372,8 +387,16 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
         return;
     }
     let started = Instant::now();
+    #[cfg(target_os = "linux")]
+    let mut launch = None;
     if view.open {
-        show(view, &ctx, &window.theme);
+        show(
+            view,
+            &ctx,
+            &window.theme,
+            #[cfg(target_os = "linux")]
+            &mut launch,
+        );
     }
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.focused && input.pointer.any_down());
@@ -392,9 +415,18 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     });
     ui.disable();
     window.timed_separately += view.timing.record(1, started.elapsed());
+    #[cfg(target_os = "linux")]
+    if let Some(launch) = launch {
+        launch_quota(window, &ctx, launch);
+    }
 }
 
-fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
+fn show(
+    view: &mut View,
+    ctx: &egui::Context,
+    theme: &Theme,
+    #[cfg(target_os = "linux")] launch: &mut Option<quota_view::Launch>,
+) {
     let now = chrono::Utc::now().timestamp_millis();
     if view
         .requested_range
@@ -424,12 +456,70 @@ fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
                 .max_height((available.y - 150.0).max(40.0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
+                    #[cfg(target_os = "linux")]
+                    {
+                        *launch = view.quota.show(ui);
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    ui.small("Claude allowance unavailable · This platform has not been verified.");
+                    ui.separator();
                     view.body(ui);
                 });
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        #[cfg(target_os = "linux")]
+        {
+            launch.take();
+        }
         view.close(ctx);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn launch_quota(window: &mut Window, ctx: &egui::Context, launch: quota_view::Launch) {
+    let started = Instant::now();
+    let result = (|| -> term_core::Result<_> {
+        let program = launch
+            .program()
+            .to_str()
+            .ok_or("Claude Code executable path is not UTF-8")?
+            .to_owned();
+        let directory = launch.directory().to_owned();
+        let path = launch.path().to_owned();
+        let broker = std::sync::Arc::clone(launch.broker());
+        let name = window.next_pane_name;
+        window.next_pane_name += 1;
+        let tab_name = window.next_name;
+        window.next_name += 1;
+        let pane = crate::opening::launch_claude_quota(
+            ctx,
+            crate::opening::Launch {
+                program: &program,
+                args: &["--settings".into(), launch.overlay],
+                directory: Some(&directory),
+                path: Some(&path),
+            },
+            crate::panel_or_none(panel_contract::PanelDir::create()),
+            name,
+            window.control.read_activity(),
+            launch.gate,
+        )?;
+        let layout = crate::OpeningLayout {
+            columns: 1,
+            rows: 1,
+        };
+        let tab = crate::Tab::with_panes(vec![pane], &layout, tab_name);
+        window.usage.quota.install(name, broker);
+        Ok(tab)
+    })();
+    match result {
+        Ok(tab) => {
+            window.usage.close(ctx);
+            window.bring_to_front(Ok(tab), ctx);
+        }
+        Err(error) => window.usage.quota.failed(error.to_string()),
+    }
+    window.timed_separately += window.usage.timing.record(0, started.elapsed());
 }
 
 #[derive(Default)]

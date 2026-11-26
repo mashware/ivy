@@ -999,6 +999,26 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/startup.rs", include_str!("../src/startup.rs"), 51),
     ("src/usage.rs", include_str!("../src/usage.rs"), 1),
     (
+        "src/usage/quota_broker.rs",
+        include_str!("../src/usage/quota_broker.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_broker/tests.rs",
+        include_str!("../src/usage/quota_broker/tests.rs"),
+        0,
+    ),
+    (
+        "src/usage/quota_setup.rs",
+        include_str!("../src/usage/quota_setup.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_view.rs",
+        include_str!("../src/usage/quota_view.rs"),
+        0,
+    ),
+    (
         "src/usage/paint.rs",
         include_str!("../src/usage/paint.rs"),
         1,
