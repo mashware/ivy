@@ -342,6 +342,18 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/markdown.rs"),
     ),
     (
+        "src/viewer/markdown/selection.rs",
+        include_str!("../src/viewer/markdown/selection.rs"),
+    ),
+    (
+        "src/viewer/markdown/selection_tests.rs",
+        include_str!("../src/viewer/markdown/selection_tests.rs"),
+    ),
+    (
+        "src/viewer/selection_scroll.rs",
+        include_str!("../src/viewer/selection_scroll.rs"),
+    ),
+    (
         "src/viewer/tests.rs",
         include_str!("../src/viewer/tests.rs"),
     ),
