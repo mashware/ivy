@@ -3,6 +3,10 @@ use eframe::egui::{self, FontId, TextFormat, text::LayoutJob};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::{cell::RefCell, sync::Arc};
 
+mod selection;
+#[cfg(test)]
+mod selection_tests;
+
 // A single text layout must not monopolize the window thread.
 const MAX_BLOCK_BYTES: usize = 16 * 1024;
 
@@ -37,6 +41,7 @@ enum Block {
 pub(crate) struct MarkdownDocument {
     blocks: Vec<Block>,
     heights: RefCell<(f32, Vec<f32>, Vec<f32>)>,
+    selection: RefCell<Option<selection::Range>>,
 }
 
 impl MarkdownDocument {
@@ -204,6 +209,8 @@ impl MarkdownDocument {
             .id_salt("markdown-content")
             .auto_shrink([false; 2])
             .show_viewport(ui, |ui, viewport| {
+                let visible = viewport.translate(ui.max_rect().min.to_vec2());
+                let mut selection = selection::Frame::new(ui, visible);
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let width = ui.available_width().max(1.0);
                 let mut cache = self.heights.borrow_mut();
@@ -234,8 +241,16 @@ impl MarkdownDocument {
                     };
                     let first_code = is_code(index) && (index == 0 || !is_code(index - 1));
                     let last_code = is_code(index) && !is_code(index + 1);
-                    let response =
-                        ui.scope(|ui| render_block(ui, &self.blocks[index], first_code, last_code));
+                    let response = ui.scope(|ui| {
+                        render_block(
+                            ui,
+                            &self.blocks[index],
+                            index,
+                            first_code,
+                            last_code,
+                            &mut selection,
+                        );
+                    });
                     let height =
                         response.response.rect.height().max(1.0) + ui.spacing().item_spacing.y;
                     if (cache.1[index] - height).abs() > 0.01 {
@@ -247,6 +262,14 @@ impl MarkdownDocument {
                 if changed {
                     rebuild_offsets(&mut cache);
                 }
+                let height = cache.2[self.blocks.len()];
+                selection.finish(
+                    ui,
+                    viewport,
+                    height,
+                    &mut self.selection.borrow_mut(),
+                    &self.blocks,
+                );
             });
     }
 }
@@ -290,7 +313,14 @@ fn estimate_height(block: &Block, width: f32) -> f32 {
     }
 }
 
-fn render_block(ui: &mut egui::Ui, block: &Block, first_code: bool, last_code: bool) {
+fn render_block(
+    ui: &mut egui::Ui,
+    block: &Block,
+    index: usize,
+    first_code: bool,
+    last_code: bool,
+    selection: &mut selection::Frame,
+) {
     #[cfg(test)]
     tests::RENDERED_BLOCKS.with(|count| count.set(count.get() + 1));
     match block {
@@ -315,16 +345,23 @@ fn render_block(ui: &mut egui::Ui, block: &Block, first_code: bool, last_code: b
                     })
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
-                        ui.add(
+                        selection.label(
+                            ui,
+                            index,
+                            0,
                             egui::Label::new(layout(ui, runs, *heading, true))
-                                .wrap_mode(egui::TextWrapMode::Extend)
-                                .selectable(true),
+                                .wrap_mode(egui::TextWrapMode::Extend),
                         );
                     });
             } else {
                 ui.horizontal(|ui| {
                     ui.add_space(*indent as f32 * 20.0);
-                    ui.add(egui::Label::new(layout(ui, runs, *heading, false)).selectable(true));
+                    selection.label(
+                        ui,
+                        index,
+                        0,
+                        egui::Label::new(layout(ui, runs, *heading, false)),
+                    );
                 });
             }
             ui.add_space(if *code && last_code {
@@ -337,17 +374,19 @@ fn render_block(ui: &mut egui::Ui, block: &Block, first_code: bool, last_code: b
         }
         Block::Table { cells, widths } => {
             ui.horizontal(|ui| {
-                for (index, cell) in cells.iter().enumerate() {
-                    let width = widths.get(index).copied().unwrap_or(1) as f32 * 14.0 + 12.0;
+                for (column, cell) in cells.iter().enumerate() {
+                    let width = widths.get(column).copied().unwrap_or(1) as f32 * 14.0 + 12.0;
                     ui.allocate_ui_with_layout(
                         egui::vec2(width, 20.0),
                         egui::Layout::left_to_right(egui::Align::Min),
                         |ui| {
                             ui.set_min_width(width);
-                            ui.add(
+                            selection.label(
+                                ui,
+                                index,
+                                column,
                                 egui::Label::new(layout(ui, cell, None, false))
-                                    .wrap_mode(egui::TextWrapMode::Extend)
-                                    .selectable(true),
+                                    .wrap_mode(egui::TextWrapMode::Extend),
                             );
                         },
                     );
