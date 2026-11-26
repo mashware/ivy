@@ -362,6 +362,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "launch::tests::native_capability_reply_keeps_its_place_in_buffered_startup",
+    "reason": "unix-only: runs /bin/sh in raw PTY mode to capture startup replies"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "launch::tests::normal_restored_fallback_and_takeover_paths_use_the_explicit_ivy_launcher",
     "reason": "unix-only: requires the built target/debug/app and a real systemd user manager",
     "linux_ignore_reason": "requires the built target/debug/app and a real systemd user manager"
