@@ -1,16 +1,20 @@
 """Portable rejection and payload tests for Windows packaging (not native runtime proof)."""
 import hashlib
 import ctypes
+from contextlib import redirect_stdout
+import io
 from unittest.mock import patch
 import importlib.util
 import json
 import shutil
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
+from types import SimpleNamespace
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -24,6 +28,86 @@ GUI_SPEC = importlib.util.spec_from_file_location(
     'windows_gui_check', SCRIPTS.parent / 'packaging/windows/gui-check.py')
 GUI = importlib.util.module_from_spec(GUI_SPEC)
 GUI_SPEC.loader.exec_module(GUI)
+
+LIVE_SPEC = importlib.util.spec_from_file_location(
+    'windows_live_hooks', SCRIPTS / 'windows-live-hooks.py')
+LIVE = importlib.util.module_from_spec(LIVE_SPEC)
+LIVE_SPEC.loader.exec_module(LIVE)
+MUTATION_SPEC = importlib.util.spec_from_file_location(
+    'windows_live_hook_mutations', SCRIPTS / 'windows-live-hook-mutations.py')
+MUTATIONS = importlib.util.module_from_spec(MUTATION_SPEC)
+MUTATION_SPEC.loader.exec_module(MUTATIONS)
+
+
+@unittest.skipUnless(shutil.which('rustc'), 'Rust compiler unavailable for real libtest fixture')
+class WindowsLiveHookDriverTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix='ivy-libtest-output-')
+        cls.addClassCleanup(cls.temp.cleanup)
+        source = Path(cls.temp.name, 'witness.rs')
+        source.write_text('''
+#[test]
+fn noisy_witness() { eprintln!("fixture diagnostic witness"); }
+#[test]
+fn failing_witness() { panic!("intended fixture assertion"); }
+''', encoding='utf-8')
+        cls.executable = Path(cls.temp.name, 'witness.exe' if sys.platform == 'win32' else 'witness')
+        subprocess.run([shutil.which('rustc'), '--edition=2024', '--test', str(source),
+                        '-o', str(cls.executable)], check=True, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, timeout=60)
+
+    def run_libtest(self, command):
+        arguments = command[command.index('--') + 1:]
+        result = subprocess.run([str(self.executable), *arguments], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, timeout=30)
+        return result.returncode, result.stdout
+
+    def test_native_and_vendor_commands_preserve_exact_named_result_with_real_diagnostics(self):
+        runs = []
+
+        def execute(_label, command, **_options):
+            if '--lib' not in command:
+                self.assertEqual(command[1], 'build')
+                return 0, ''
+            result = self.run_libtest(command)
+            runs.append(result)
+            return result
+
+        # Only the Cargo transport is replaced: named() and the standalone vendor
+        # command both hand their actual libtest flags to the compiled fixture.
+        with patch.object(LIVE, 'execute', execute), \
+                patch.object(LIVE, 'sys', SimpleNamespace(platform='win32')), \
+                patch.object(LIVE, 'APP_TESTS', ('noisy_witness',)), \
+                patch.object(LIVE, 'TERM_TESTS', ()), \
+                patch.object(LIVE, 'VENDOR_TESTS', ('noisy_witness',)), \
+                redirect_stdout(io.StringIO()):
+            LIVE.main()
+        self.assertEqual(len(runs), 2)
+        for code, output in runs:
+            self.assertIn('fixture diagnostic witness', output)
+            LIVE.require_pass('noisy_witness', code, output)
+
+    def test_mutation_commands_accept_real_noisy_pass_and_named_assertion_only(self):
+        passed = self.run_libtest(MUTATIONS.test_command('fixture', 'noisy_witness'))
+        self.assertIn('fixture diagnostic witness', passed[1])
+        self.assertTrue(MUTATIONS.passed_once('noisy_witness', *passed))
+        LIVE.require_pass('noisy_witness', *passed)
+        failed = self.run_libtest(MUTATIONS.test_command('fixture', 'failing_witness'))
+        marker = 'intended fixture assertion'
+        self.assertTrue(MUTATIONS.detected('failing_witness', marker, *failed))
+        zero = self.run_libtest(MUTATIONS.test_command('fixture', 'missing_witness'))
+        for name, result in [('noisy_witness', zero), ('wrong_witness', passed),
+                             ('failing_witness', failed), ('noisy_witness', (None, passed[1]))]:
+            with self.subTest(name=name, code=result[0]):
+                self.assertFalse(MUTATIONS.passed_once(name, *result))
+                with self.assertRaises(SystemExit):
+                    LIVE.require_pass(name, *result)
+        for name, result in [('failing_witness', zero), ('wrong_witness', failed),
+                             ('failing_witness', passed), ('failing_witness', (None, failed[1])),
+                             ('failing_witness', (1, 'error: could not compile fixture\n' + failed[1]))]:
+            with self.subTest(name=name, code=result[0]):
+                self.assertFalse(MUTATIONS.detected(name, marker, *result))
 
 
 def pe(machine=0x8664, marker=b'', subsystem=3):

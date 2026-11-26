@@ -48,7 +48,7 @@ def require_pass(name, code, output):
 
 def named(label, package, name, env):
     command = ["cargo", "test", "--locked", "-p", package, "--lib", "--", name,
-               "--exact", "--nocapture", "--test-threads=1"]
+               "--exact", "--show-output", "--test-threads=1"]
     require_pass(name, *execute(label, command, env=env))
 
 
@@ -77,7 +77,7 @@ def main():
         for index, name in enumerate(VENDOR_TESTS, 1):
             command = ["cargo", "test", "--manifest-path", str(copy / "Cargo.toml"),
                        "--features", "serde_support", "--lib", "--", name, "--exact",
-                       "--nocapture", "--test-threads=1"]
+                       "--show-output", "--test-threads=1"]
             require_pass(name, *execute(f"vendor-{index}", command, env=vendor_env))
     count = len(APP_TESTS) + len(TERM_TESTS) + len(VENDOR_TESTS)
     print(f"PASS all {count} named native live hook and cwd witnesses", flush=True)

@@ -91,7 +91,7 @@ def invoke(label, command, env):
 
 def test_command(package, name):
     return ["cargo", "test", "--locked", "-p", package, "--lib", "--", name,
-            "--exact", "--nocapture", "--test-threads=1"]
+            "--exact", "--show-output", "--test-threads=1"]
 
 
 def passed_once(name, code, output):
