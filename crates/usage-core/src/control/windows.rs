@@ -430,10 +430,12 @@ mod tests {
         let fixture = Fixture::new();
         let first = Control::new(fixture.0.join("store"));
         let writer = first.owner().unwrap();
+        let lifecycle = first.reader(true).unwrap();
         let database = first.database(true).unwrap();
         let ledger = Ledger::open_writer(&database).unwrap();
         let store_id = ledger.info().unwrap().store_id;
         drop(ledger);
+        drop(lifecycle);
         drop(writer);
 
         let follower = Control::new(fixture.0.join("store"));
