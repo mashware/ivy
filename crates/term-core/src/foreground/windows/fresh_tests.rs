@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use crate::{Pty, Size};
 use std::os::windows::io::AsHandle;

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 // A child-owned result file distinguishes process execution from ConPTY echo (D90).
 use super::*;
 use std::ffi::OsStr;
