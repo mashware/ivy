@@ -9774,8 +9774,14 @@ complete eligible snapshot is required. Incomplete child/pending hydration canno
 No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
 
-Automatic capability replies reuse the existing PTY write queue only when it has no backlog;
-at most one reply is deferred. They cannot spend or clear the person's refused-input state.
+Automatic capability replies share the bounded terminal reply batch and the ordered PTY writer.
+Claude Code 2.1.332 ends negotiation when it receives the second primary device-attributes reply.
+If it receives that reply before the capability reply, it omits native declarations even when both
+responses arrive in a single write. The one fixed-size capability reply has its own allowance.
+Preserve query order, including when the terminator starts a new read. An already
+queued reply is allowed to finish ahead of this batch. At most one capability reply is deferred
+when the writer reaches its ceiling or has a standing input refusal. Inferred client identity was
+discarded because it would bypass the native opt-in and would leave the broken handshake in place.
 A fresh enabled native declaration can replace a disconnected TUI reporter; an untagged clear or
 capability probe cannot withdraw that reporter's unconfirmed wait. Transient signal channel queue-full/timeouts carry an explicit retryable flag and retry
 on the same connection; legacy tool replies keep their shape. Repeatedly reconnecting while a
@@ -10698,6 +10704,12 @@ the added fallback only supplies missing characters and survives every definitio
 Discarded: requiring a system font (machine-dependent coverage and discovery), adding another
 font asset (coverage already ships), and drawing or replacing the published symbol ourselves
 (the text font already contains it). This changes neither terminal font selection nor title text.
+
+**Half-circle animation, #276.** Claude Code 2.1.332 alternates U+25D0 and U+25D1 at the start of
+its title. At 14 points the bundled faces paint them at 9 × 10 and 13 × 13 pixels and shift the
+following text by four pixels. Draw those leading half-circle symbols with one circular outline,
+two opposite fills and one advance. Choosing a common font was discarded because its glyphs can
+still have different outlines or advances. Elsewhere the symbols keep the existing font fallback.
 
 **D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell within
 a hundredth of a point. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
