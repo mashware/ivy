@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 const MAX_CHILDREN: usize = 4;
 static RESERVED: AtomicUsize = AtomicUsize::new(0);
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
+#[cfg(test)]
+pub(crate) static SERIAL: Mutex<()> = Mutex::new(());
 
 struct Slot;
 
@@ -40,15 +42,15 @@ struct Pending {
     _slot: Slot,
 }
 
-pub(super) struct Running {
-    pub(super) child: Option<Child>,
-    pub(super) stdout: ChildStdout,
+pub(crate) struct Running {
+    pub(crate) child: Option<Child>,
+    pub(crate) stdout: ChildStdout,
     pub(super) lifetime: Option<Arc<OwnedFd>>,
     slot: Option<Slot>,
 }
 
 impl Running {
-    pub(super) fn start(command: &mut Command) -> io::Result<Self> {
+    pub(crate) fn start(command: &mut Command) -> io::Result<Self> {
         reap();
         let slot = Slot::reserve()?;
         let mut child = command.spawn()?;

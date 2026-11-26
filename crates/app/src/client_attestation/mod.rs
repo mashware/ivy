@@ -46,5 +46,9 @@ impl Programs {
     }
 }
 
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use programs::CHILD_TEST_SERIAL;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use programs::{Running, native_codex};
 #[cfg(target_os = "linux")]
 pub(crate) use programs::{pending_children, reap_children};

@@ -6,8 +6,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-static SERIAL: Mutex<()> = Mutex::new(());
-
 struct Fixture {
     directory: PanelDir,
 }

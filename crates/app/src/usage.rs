@@ -8,6 +8,7 @@ use std::{
 };
 use usage_core::{DateRange, Granularity, Provider, Service, Snapshot, Status};
 
+mod allowances;
 mod codex_controls;
 mod paint;
 use paint::paint_summary;
@@ -29,6 +30,7 @@ pub(crate) struct View {
     focus: Option<egui::Id>,
     service: Option<Service>,
     snapshot: Option<Snapshot>,
+    allowances: allowances::AllowanceView,
     roots: Vec<PathBuf>,
     new_root: String,
     codex: codex_controls::Controls,
@@ -94,6 +96,18 @@ fn snapshot_has_partial_codex(snapshot: Option<&Snapshot>) -> bool {
     snapshot.is_some_and(|snapshot| snapshot.codex_enabled && snapshot.status == Status::Partial)
 }
 
+fn request_comparison(view: &mut View) {
+    if let (Some(service), Some(range)) = (&view.service, view.period.range()) {
+        view.requested_range = Some(range);
+        service.request_comparison(
+            range,
+            view.provider,
+            view.applied_model.clone(),
+            view.granularity,
+        );
+    }
+}
+
 impl View {
     #[cfg(test)]
     pub(crate) fn open_for_test(&mut self) {
@@ -106,6 +120,7 @@ impl View {
 
     fn close(&mut self, ctx: &egui::Context) {
         self.open = false;
+        self.allowances.close();
         self.confirm_clear = false;
         #[cfg(target_os = "linux")]
         self.quota.close();
@@ -116,18 +131,6 @@ impl View {
             }
         });
         ctx.request_repaint();
-    }
-
-    fn request(&mut self) {
-        if let (Some(service), Some(range)) = (&self.service, self.period.range()) {
-            self.requested_range = Some(range);
-            service.request_comparison(
-                range,
-                self.provider,
-                self.applied_model.clone(),
-                self.granularity,
-            );
-        }
     }
 
     fn snapshot_matches_range(&self, snapshot: &Snapshot) -> bool {
@@ -358,7 +361,7 @@ impl View {
             || model_changed
         {
             self.hide_result = true;
-            self.request();
+            request_comparison(self);
             return;
         }
         if !self.hide_result
@@ -394,6 +397,7 @@ fn status_label(status: Status) -> &'static str {
 enum Measurement {
     Open,
     Closed,
+    Allowances,
 }
 
 pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, measuring: bool) {
@@ -403,6 +407,7 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     let mode = match std::env::var("MEASURE_USAGE").ok().as_deref() {
         Some("open") => Measurement::Open,
         Some("closed") => Measurement::Closed,
+        Some("allowances") => Measurement::Allowances,
         _ => return,
     };
     let Some(root) = std::env::var_os("MEASURE_USAGE_ROOT").map(PathBuf::from) else {
@@ -416,8 +421,11 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     service.enable(vec![root]);
     window.usage.service = Some(service);
     window.usage.measured = Some(mode);
-    window.usage.open = matches!(mode, Measurement::Open);
-    window.usage.request();
+    window.usage.open = matches!(mode, Measurement::Open | Measurement::Allowances);
+    if matches!(mode, Measurement::Allowances) {
+        window.usage.allowances.prepare_measurement();
+    }
+    request_comparison(&mut window.usage);
 }
 
 pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
@@ -435,7 +443,7 @@ pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
     view.quota.open(ctx);
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.pointer.any_down());
-    view.request();
+    request_comparison(view);
     window.timed_separately += view.timing.record(0, started.elapsed());
     ctx.request_repaint();
 }
@@ -456,9 +464,10 @@ fn cache_directory() -> Option<PathBuf> {
 
 pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     let view = &mut window.usage;
-    if view.service.is_some() {
+    if view.service.is_some() || view.allowances.polling() {
         let started = Instant::now();
         view.install_snapshot();
+        view.allowances.poll();
         window.timed_separately += view.timing.record(0, started.elapsed());
     }
     let ctx = ui.ctx().clone();
@@ -511,7 +520,7 @@ fn show(
         .requested_range
         .is_some_and(|range| now >= range.end_ms)
     {
-        view.request();
+        request_comparison(view);
     }
     if let Some(range) = view.requested_range
         && let Ok(remaining) = u64::try_from(range.end_ms - now)
@@ -541,6 +550,8 @@ fn show(
                     }
                     #[cfg(not(target_os = "linux"))]
                     ui.small("Claude allowance unavailable · This platform has not been verified.");
+                    ui.separator();
+                    view.allowances.show(ui);
                     ui.separator();
                     view.body(ui);
                 });
@@ -585,10 +596,16 @@ impl View {
         let mode = match self.measured {
             Some(Measurement::Open) => "open",
             Some(Measurement::Closed) => "closed",
+            Some(Measurement::Allowances) => "allowances",
             None => "none",
         };
         let tokens = self.snapshot.as_ref().map_or(0, |s| s.totals.tokens);
         writeln!(to, "usage measurement: {mode}, tokens={tokens}")?;
+        writeln!(
+            to,
+            "allowance fixture windows: {}",
+            self.allowances.measured_windows()
+        )?;
         for (index, name) in ["Usage snapshot", "Usage paint"].into_iter().enumerate() {
             let frames = self.timing.frames[index];
             let total = self.timing.totals[index];

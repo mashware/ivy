@@ -12599,7 +12599,26 @@ and can race with Claude or the person's edits. An account cache would give
 current meaning to data that does not identify an account. A single viewer
 timer would wake Ivy when the AI usage screen is closed.
 
-## D129 — Codex history joins local usage through separate consent
+## D129 — Codex allowances are account-bound observations
+
+**Decision.** AI usage offers an independent, default-off Codex allowance control. A manual refresh
+runs a fresh official Codex client with owned standard streams and closes it after the read. Ivy
+shows the verified account context and observation time. Closing the view or disabling allowance
+reads invalidates the result and cancels the request. Allowance observations are kept in memory.
+
+**Why.** The official client may retain its loaded login after another process changes accounts,
+and the rate-limit RPC can return buckets even when the response belongs to a different user.
+The admitted Linux x86_64 Codex CLI 0.167.2 path requires the same complete session, user and
+workspace identity before and after the request, the response workspace ID, and the client's
+account-and-user binding witness. The witness's boolean value is unrelated to identity. Its
+presence is the evidence. Disable plugins for this invocation and exclude reset-credit details
+to avoid observed unrelated reads. Auth and its lifecycle belong to the official client (D4).
+
+**Discarded.** No shared TUI connection, local history inference, account watching or credential-file
+access from Ivy. A single workspace ID cannot distinguish two users in that workspace. The pinned
+protocol semantics and native evidence initially cover Linux x86_64 and that release only.
+
+## D130 — Codex history joins local usage through separate consent
 
 **Decision.** AI usage can import explicitly selected Codex rollout folders.
 The existing private ledger is upgraded only when Codex is enabled and the
