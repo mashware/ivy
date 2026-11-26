@@ -2459,7 +2459,6 @@ mod tests {
                     assert!(Instant::now() < deadline, "the hang-up never arrived");
                     thread::sleep(Duration::from_millis(1));
                 }
-                thread::sleep(Duration::from_millis(100));
                 saved
                     .write_all(b"done")
                     .expect("finish saving after the hang-up");
@@ -3862,7 +3861,9 @@ mod tests {
     /// **The other half: a program still gets its grace after the hang-up.** Killing outright on
     /// close would pass the test above too, and it would take away the time a program that catches
     /// the hang-up has to save its state. So a program that ignores the hang-up must be killed, and
-    /// **not before [`HANGUP_GRACE`]**: the floor is what tells a grace apart from an immediate kill.
+    /// **not before a literal 200 ms**: taking the bound from [`HANGUP_GRACE`] let a 50 ms mutation
+    /// move both sides together and pass. Observe the actual signals: a total close can include
+    /// work after SIGKILL and disguise an early kill. The separate catching test pins state saving.
     ///
     /// `trap '' HUP` sets the disposition to ignored, and an ignored signal survives `exec`, so it is
     /// `sleep` itself that ignores it. The marker comes after the `trap` in the same `&&` chain, so it
@@ -3873,15 +3874,53 @@ mod tests {
     #[test]
     fn a_program_that_ignores_the_hang_up_is_killed_after_its_grace() {
         const MARKER: &str = "deaf";
+        const PROMISED_GRACE: Duration = Duration::from_millis(200);
+        static SIGNALS: std::sync::Mutex<Vec<(libc::pid_t, libc::c_int, Instant)>> =
+            std::sync::Mutex::new(Vec::new());
+
+        fn observe_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
+            let before = Instant::now();
+            let result = send_signal(pid, number);
+            // Exclude time inside either syscall: the promised interval must fit after HUP
+            // completed and before KILL began, regardless of scheduling around those calls.
+            let observed = if number == libc::SIGHUP {
+                Instant::now()
+            } else {
+                before
+            };
+            if result.is_ok() {
+                SIGNALS.lock().unwrap().push((pid, number, observed));
+            }
+            result
+        }
 
         let script = format!("trap '' HUP && printf {MARKER} && exec sleep 5");
-        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let pid = pty
+            .child
+            .as_ref()
+            .and_then(|child| child.process_id())
+            .and_then(|pid| libc::pid_t::try_from(pid).ok())
+            .expect("the child has a valid process ID");
+        pty.send_signal = observe_signal;
         let took = time_the_close(pty, output, MARKER);
 
+        let signals = SIGNALS.lock().unwrap();
+        let sent = |number| {
+            signals
+                .iter()
+                .find(|event| event.0 == pid && event.1 == number)
+                .map(|event| event.2)
+                .unwrap_or_else(|| panic!("the child did not receive signal {number}: {signals:?}"))
+        };
+        let grace = sent(libc::SIGKILL)
+            .checked_duration_since(sent(libc::SIGHUP))
+            .expect("the kill preceded the hang-up");
         assert!(
-            took >= HANGUP_GRACE,
-            "a program that ignores the hang-up was gone after {took:?}, before the \
-             {HANGUP_GRACE:?} of grace it is owed: it was killed outright"
+            grace >= PROMISED_GRACE,
+            "SIGKILL followed SIGHUP by {grace:?}, before the {PROMISED_GRACE:?} owed to the child; \
+             the total close took {took:?}"
         );
     }
 
@@ -3889,19 +3928,16 @@ mod tests {
         a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed,
         "unix-only: requires Unix process signaling"
     );
-    /// **A program that catches the hang-up to save its state gets to finish saving, as long as the
-    /// save fits in the library's grace.** The test above measures its floor against
-    /// [`HANGUP_GRACE`] itself, so shortening the constant moves the floor with it and nothing goes
-    /// red — measured: a 50 ms grace passed the whole suite. This one states the grace from the
-    /// program's side instead, with a save that takes a literal 100 ms: comfortably inside the
-    /// library's 200 ms, and past anything shorter than it by enough that a loaded machine is not
-    /// what decides it.
+    /// **A program that catches the hang-up gets to save its state.** This and the ignoring test
+    /// split two obligations: the independently measured 200 ms grace, and a real save caused by
+    /// the signal. Killing immediately must fail this save even if the configured grace is correct.
     ///
-    /// A native signal handler avoids shell trap deferral and launching another executable inside
-    /// the grace: the literal 100 ms must measure the save, rather than those extra fixture costs.
-    /// The destination is opened before readiness, and only written after the signal and delay.
-    /// The save goes to a file, not to the console: the reader is being stopped while it happens,
-    /// so bytes on the pseudoterminal prove nothing. Its path travels as an environment value.
+    /// An extra 100 ms sleep made success depend on the child's scheduling inside a 200 ms host
+    /// deadline. Native macOS failures did not identify which internal stage missed that window;
+    /// the duration belongs in the independent floor rather than in this fixture's workload.
+    /// The native handler and already-open destination avoid shell dispatch and subprocess startup.
+    /// The save goes to a file, since reading the console stops during close; its path travels as
+    /// an environment value, and the write only happens after the actual signal is observed.
     #[cfg(unix)]
     #[test]
     fn a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed() {
@@ -3913,17 +3949,14 @@ mod tests {
             "save-on-hangup",
             &[(FIXTURE_SAVE_PATH, Some(saved.as_os_str()))],
         );
-        // What the close cost is deliberately not asserted: the save alone needs 100 ms of a
-        // 200 ms grace, and a ceiling with less than two-fold headroom on a loaded machine would fail
-        // for reasons that are not the grace.
         time_the_close(pty, output, MARKER);
 
-        let finished = std::fs::read_to_string(&saved).is_ok_and(|body| body == "done");
+        let saved_body = std::fs::read_to_string(&saved);
         let _ = std::fs::remove_file(&saved);
         assert!(
-            finished,
-            "a program that needed 100 ms after the hang-up to save its state was killed before it \
-             finished: the grace it is owed is shorter than the library's 200 ms"
+            saved_body.as_ref().is_ok_and(|body| body == "done"),
+            "a program that caught the hang-up did not finish saving before the close returned: \
+             save result={saved_body:?}"
         );
     }
 
