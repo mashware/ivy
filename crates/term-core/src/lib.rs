@@ -1523,13 +1523,11 @@ impl Drop for Pty {
                 }
             }
         }
-        // **The reader is waited for with a deadline, and abandoned if it does not come.** Killing
-        // the child closes *the child's* end of the pseudoterminal and nothing else: anything the
-        // program launched that outlived it —a `sleep &`, a development server— inherited those same
-        // descriptors, so while it lives there is no end of file, and this thread is parked inside
-        // `read` where the stop flag above cannot reach it. It used to be joined without a deadline,
-        // and this destructor runs **inside the interface pass**, so the whole window stayed frozen
-        // with no repaint and no keyboard, for as long as that program lived.
+        // **D32 bounds a read the operating system has not ended.** On Linux, a survivor holding
+        // the slave can keep `read` parked after the direct child dies, beyond the stop flag's reach.
+        // An unbounded join froze the interface for that survivor's lifetime. Darwin can instead
+        // revoke the controlling terminal when its session leader exits; the deadline must protect
+        // a blocked reader without requiring either platform's terminal lifecycle.
         //
         // **Signalling the process group would not be enough**, which is worth writing down because
         // it is the obvious idea and because the weaker claim —that it would do nothing— is false. A
@@ -2462,7 +2460,8 @@ mod tests {
             }
             #[cfg(unix)]
             "survivor-holder" => {
-                println!("held");
+                assert_eq!(unsafe { libc::getsid(0) }, unsafe { libc::getpid() });
+                println!("holder-pid={} held", std::process::id());
                 thread::sleep(Duration::from_secs(5));
             }
             other => panic!("unknown PTY fixture mode: {other}"),
@@ -3452,8 +3451,8 @@ mod tests {
     /// `read` on a descriptor cloned from the master, and the `stop` flag the destructor raises is
     /// only ever consulted **after** a `read` returns — so it cannot reach a thread parked inside
     /// one. Killing the child closes *the child's* end of the pseudoterminal and nothing else:
-    /// anything the program launched that outlives it inherited those same descriptors, so while
-    /// that survivor lives there is no end of file, the `read` never returns and neither did the
+    /// anything the program launched that outlives it inherited those same descriptors. On Linux,
+    /// while that survivor lives there is no end of file, the `read` never returns and neither did the
     /// `join`. Measured: a `Drop` that had still not returned after eight seconds. And this
     /// destructor runs inside the interface pass, so the whole window stayed frozen — no repaint, no
     /// keyboard — for as long as that program lived.
@@ -3510,6 +3509,11 @@ mod tests {
     /// The drop itself runs on a thread of its own, answering through a channel, for the same reason
     /// `drain_until_closed` carries a deadline: on a build with the bug a direct `join` would never
     /// return and would take the suite down with it, publishing the hang as an eternal green.
+    ///
+    /// **Darwin revokes the controlling terminal when its session leader exits**, even if another
+    /// session inherited the slave: Apple's XNU session-leader exit revokes every slave descriptor.
+    /// That lifecycle must end the reading cleanly; the independent blocked-reader test below pins
+    /// the abandonment deadline on every platform without requiring Linux's terminal semantics.
     #[cfg(unix)]
     #[test]
     fn closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal() {
@@ -3535,7 +3539,18 @@ mod tests {
 
         // A marker somebody prints, never a `sleep`: what makes the bug reproduce is the state, and a
         // fixed wait would time the close against a shell that had not got there yet.
-        wait_for_marker(&mut pty, &output, HELD);
+        let announced = collect_output(&output, HELD, false, DEADLINE, |reply| pty.write(reply));
+        let announced = String::from_utf8_lossy(&announced);
+        let holder_pid: libc::pid_t = announced
+            .split_once("holder-pid=")
+            .expect("the holder announced its own identity")
+            .1
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .expect("the holder's process ID");
+        let reader_ending = Arc::clone(&pty.ending);
 
         // And then drained until the program goes quiet, so the channel is **empty** when the close
         // happens. See the doc comment: a full channel parks the reader somewhere the stop flag
@@ -3566,7 +3581,7 @@ mod tests {
             }
         };
 
-        // **And a floor, which is what makes this test about the deadline rather than about closing
+        // **On Linux a floor makes this test about the deadline rather than about closing
         // in general.** Anything under it means the close came back *without* spending the abandon
         // deadline, and in this shape there is only one way that happens: the reader was woken by
         // something — the echo left on by accident, a survivor that was never there — so the row is
@@ -3574,18 +3589,101 @@ mod tests {
         // library's 50 ms step: with the echo on it returned in 0.10 s, and with no survivor in
         // 0.05 s — and on the day of D55, with that step gone, in 1.20–1.37 ms both. The bound is the constant itself, so a future
         // delivery that makes abandoning cheaper moves it instead of going red.
+        #[cfg(not(target_os = "macos"))]
         assert!(
             took >= READER_GIVE_UP,
             "the close came back in {took:?}, under the {READER_GIVE_UP:?} it has to spend when a \
              holder survives: something woke the reader, so this is not the case this test is named \
              after"
         );
+        assert_eq!(
+            unsafe { libc::kill(holder_pid, 0) },
+            0,
+            "the detached holder ended before the close returned"
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            reader_ending.get(),
+            Some(&Ending::EndedWell),
+            "Darwin's terminal revocation did not end reading cleanly after {took:?}"
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(reader_ending.get(), None, "the held reader was not blocked");
 
         // Immediate — the close already answered. On the failing path above the thread is left
         // behind on purpose: it is inside the very wait this test is about.
         let _ = closing.join();
         // The receiver is only released here, after the close. Dropping it any earlier is the
         // disguise the doc comment describes.
+        drop(output);
+    }
+
+    #[test]
+    fn closing_abandons_a_reader_blocked_in_read_on_every_platform() {
+        struct AnnouncedRead {
+            reader: std::io::PipeReader,
+            entered: std::sync::mpsc::Sender<()>,
+        }
+        impl Read for AnnouncedRead {
+            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+                self.entered.send(()).expect("announce the blocking read");
+                self.reader.read(bytes)
+            }
+        }
+
+        let (mut pty, output) = spawn_fixture("environment", &[("TERM", None)]);
+        wait_for_marker(&mut pty, &output, "removed");
+        assert_eq!(
+            pty.reader_ended.recv_timeout(DEADLINE),
+            Err(RecvTimeoutError::Disconnected),
+            "the real console's reader did not finish before the blocking fixture was installed"
+        );
+        pty.reader.take().unwrap().join().unwrap();
+        drop(output);
+
+        // Keep a genuine OS read blocked independently of PTY revocation, process death, and echo.
+        // Retaining the pipe writer until after the close assertions also releases the fixture on
+        // panic, so restoring an unbounded join fails this test without leaking its parked thread.
+        let (reader, held_writer) = std::io::pipe().expect("create the blocking source");
+        let (entered, reading) = channel();
+        let (ended, reader_ended) = channel::<()>();
+        let (finished, reader_finished) = channel();
+        let (delivery, output) = sync_channel(1);
+        let stop = Arc::clone(&pty.stop);
+        let ending = Arc::new(OnceLock::new());
+        pty.ending = Arc::clone(&ending);
+        pty.reader_ended = reader_ended;
+        pty.reader = Some(thread::spawn(move || {
+            let _ended = ended;
+            feed_and_record(AnnouncedRead { reader, entered }, &delivery, &stop, &ending);
+            let _ = finished.send(());
+        }));
+        reading
+            .recv_timeout(DEADLINE)
+            .expect("the reader entered its read");
+
+        let (done, closed) = channel();
+        let closing = thread::spawn(move || {
+            let started = Instant::now();
+            drop(pty);
+            let _ = done.send(started.elapsed());
+        });
+        let took = closed.recv_timeout(Duration::from_secs(2)).expect(
+            "closing waited for a blocked reader instead of abandoning it within two seconds",
+        );
+        assert!(
+            took >= READER_GIVE_UP,
+            "the close returned in {took:?} without spending the {READER_GIVE_UP:?} reader deadline"
+        );
+        assert_eq!(
+            reader_finished.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        );
+        closing.join().unwrap();
+        drop(held_writer);
+        reader_finished
+            .recv_timeout(DEADLINE)
+            .expect("the released reader ended");
         drop(output);
     }
 
