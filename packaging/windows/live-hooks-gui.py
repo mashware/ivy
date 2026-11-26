@@ -21,6 +21,10 @@ import responder
 spec = importlib.util.spec_from_file_location('gui_check', HERE / 'gui-check.py')
 gui = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gui)
+if sys.platform == 'win32':
+    G = ctypes.WinDLL('gdi32', use_last_error=True)
+    G.GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+    G.GetPixel.restype = wintypes.DWORD
 
 
 def wait_for(predicate, seconds, stage, app):
@@ -63,7 +67,13 @@ def text_only(value):
         raise ctypes.WinError(ctypes.get_last_error())
 
 
+def require_foreground(hwnd):
+    if gui.U.GetForegroundWindow() != hwnd:
+        raise RuntimeError('Ivy is not the foreground window')
+
+
 def mouse_at(hwnd, x, y, transitions):
+    require_foreground(hwnd)
     point = wintypes.POINT(int(x), int(y))
     if not gui.U.ClientToScreen(hwnd, ctypes.byref(point)):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -102,6 +112,7 @@ def wheel(hwnd, x, y, lines):
 
 
 def launcher_action(hwnd, action, values):
+    require_foreground(hwnd)
     kind = action['kind']
     if kind == 'click':
         click(hwnd, *action['at'])
@@ -121,7 +132,7 @@ def screenshot(hwnd, evidence, name):
     gui.failure_screenshot(hwnd, evidence / (name + '.png'))
 
 
-def record_launcher_action(hwnd, evidence, index, action):
+def record_launcher_action(hwnd, evidence, index, action, prefix='launcher'):
     screen = wintypes.POINT()
     if not gui.U.GetCursorPos(ctypes.byref(screen)):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -131,11 +142,104 @@ def record_launcher_action(hwnd, evidence, index, action):
     record = {'index': index, 'action': action['kind'], 'target': action['target'],
               'requested_client': action.get('at'), 'cursor_client': [client.x, client.y],
               'cursor_screen': [screen.x, screen.y], 'timestamp': time.time()}
-    with (evidence / 'launcher-actions.jsonl').open('a', encoding='utf-8') as output:
+    with (evidence / f'{prefix}-actions.jsonl').open('a', encoding='utf-8') as output:
         output.write(json.dumps(record) + '\n')
-    screenshot(hwnd, evidence, f"launcher-action-{index:02d}-{action['kind']}")
+    screenshot(hwnd, evidence, f"{prefix}-action-{index:02d}-{action['kind']}")
     if capture := action.get('capture'):
         screenshot(hwnd, evidence, capture)
+
+
+def selected_pixels(hwnd, origin, columns, rows):
+    require_foreground(hwnd)
+    dc = gui.U.GetDC(0)
+    if not dc:
+        raise RuntimeError('GetDC(0) failed during selector observation')
+    matched = set()
+    try:
+        for y in rows:
+            colors = []
+            for x in columns:
+                color = G.GetPixel(dc, origin[0] + x, origin[1] + y)
+                if color == 0xFFFFFFFF:
+                    raise RuntimeError(f'GetPixel failed at client ({x}, {y})')
+                colors.append(color)
+            # COLORREF is 0x00bbggrr; run12's selected chip is RGB(26, 55, 46).
+            if all(color == 0x002E371A for color in colors):
+                matched.add(y)
+    finally:
+        if not gui.U.ReleaseDC(0, dc):
+            raise RuntimeError('ReleaseDC failed during selector observation')
+    return matched
+
+
+def claude_selector_row(hwnd, origin):
+    matched = selected_pixels(hwnd, origin, (225, 280), range(196, 504))
+    spans = []
+    first = None
+    for y in range(196, 505):
+        if y in matched:
+            if first is None:
+                first = y
+        elif first is not None:
+            if y - first >= 12:
+                spans.append((first + y - 1) // 2)
+            first = None
+    if len(spans) > 1:
+        raise RuntimeError('ambiguous selected Claude chip rows')
+    return spans[0] if spans else None
+
+
+def select_observed_opencode(hwnd, evidence):
+    require_foreground(hwnd)
+    origin = wintypes.POINT()
+    if not gui.U.ClientToScreen(hwnd, ctypes.byref(origin)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    origin = (origin.x, origin.y)
+    row = claude_selector_row(hwnd, origin)
+    for step in range(25):
+        if row is not None:
+            break
+        lines = -100 if step == 0 else 1
+        wheel(hwnd, 480, 400, lines)
+        record_launcher_action(hwnd, evidence, step,
+                               {'kind': 'scroll', 'at': [480, 400], 'lines': lines,
+                                'target': 'observe selected Claude chip'}, prefix='selector')
+        row = claude_selector_row(hwnd, origin)
+    if row is None:
+        raise RuntimeError('selected Claude chip was not visibly found within 25 wheel actions')
+    click(hwnd, 461, row)
+    record_launcher_action(hwnd, evidence, 25,
+                           {'kind': 'click', 'at': [461, row], 'target': 'OpenCode'}, prefix='selector')
+    band = range(max(196, row - 4), min(504, row + 5))
+    opencode = selected_pixels(hwnd, origin, (429, 492), band)
+    claude = selected_pixels(hwnd, origin, (225, 280), band)
+    if not opencode or claude:
+        raise RuntimeError('pixel observation did not confirm OpenCode selected and Claude unselected')
+    screenshot(hwnd, evidence, 'selector-selected')
+    (evidence / 'selector.json').write_text(json.dumps(
+        {'client_origin': origin, 'clicked_client': [461, row],
+         'opencode_selected_rows': sorted(opencode), 'claude_selected_rows': sorted(claude)}),
+        encoding='utf-8')
+
+
+def run_launcher_recipe(hwnd, recipe, values, evidence):
+    selector_verified = False
+    for index, action in enumerate(recipe['actions'], 1):
+        try:
+            if action['target'] == 'OpenCode' and action['kind'] == 'scroll':
+                select_observed_opencode(hwnd, evidence)
+                selector_verified = True
+                continue
+            if action['target'] == 'OpenCode' and action['kind'] == 'click':
+                if not selector_verified:
+                    raise RuntimeError('OpenCode selector was not observed before its recipe click')
+                continue
+            launcher_action(hwnd, action, values)
+            record_launcher_action(hwnd, evidence, index, action)
+        except Exception as error:
+            raise RuntimeError(f"launcher: {action['target']}: {error}") from error
+    if not selector_verified:
+        raise RuntimeError('launcher recipe did not verify the OpenCode selector')
 
 
 def process_tree(app_pid, opencode, evidence, name, *, require_bridge=True):
@@ -180,6 +284,9 @@ def main():
     gui.U.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
     gui.U.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
     gui.U.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    gui.U.GetDC.argtypes = [wintypes.HWND]
+    gui.U.GetDC.restype = wintypes.HDC
+    gui.U.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
     app = server = None
     hwnd = None
     stage = 'prepare'
@@ -257,10 +364,8 @@ def main():
             stage = 'connect dialog'
             click(hwnd, width - 159, 20)
             screenshot(hwnd, evidence, '02-connect')
-            for index, action in enumerate(recipe['actions'], 1):
-                stage = f"launcher: {action['target']}"
-                launcher_action(hwnd, action, {'executable': str(opencode), 'directory': str(work)})
-                record_launcher_action(hwnd, evidence, index, action)
+            stage = 'launcher recipe'
+            run_launcher_recipe(hwnd, recipe, {'executable': str(opencode), 'directory': str(work)}, evidence)
             stage = 'open fresh console'
             time.sleep(12)
             launched_pid = process_tree(app.pid, opencode, evidence, 'processes-launched', require_bridge=False)

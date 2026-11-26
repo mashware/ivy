@@ -80,7 +80,7 @@ class WindowsInstalledLauncherTests(unittest.TestCase):
                     packets.append(flags)
                     return count
 
-                api = SimpleNamespace(ClientToScreen=to_screen, GetSystemMetrics=desktop.__getitem__,
+                api = SimpleNamespace(GetForegroundWindow=lambda: 1, ClientToScreen=to_screen, GetSystemMetrics=desktop.__getitem__,
                                       SendInput=send)
                 with patch.object(LAUNCHER.gui, 'U', api, create=True), \
                         patch.object(LAUNCHER.time, 'sleep') as delay:
@@ -113,7 +113,7 @@ class WindowsInstalledLauncherTests(unittest.TestCase):
             packets.append(flags)
             return count
 
-        api = SimpleNamespace(ClientToScreen=lambda *_: 1, SendInput=send,
+        api = SimpleNamespace(GetForegroundWindow=lambda: 1, ClientToScreen=lambda *_: 1, SendInput=send,
                               GetSystemMetrics={76: 0, 77: 0, 78: 1920, 79: 1080}.__getitem__)
         with patch.object(LAUNCHER.gui, 'U', api, create=True), \
                 patch.object(LAUNCHER.time, 'sleep'):
@@ -136,14 +136,14 @@ class WindowsInstalledLauncherTests(unittest.TestCase):
             with self.subTest(width=width, height=height, point=point):
                 def send(*_args):
                     self.fail('invalid desktop geometry must not insert any input')
-                api = SimpleNamespace(ClientToScreen=lambda *_: 1, SendInput=send,
+                api = SimpleNamespace(GetForegroundWindow=lambda: 1, ClientToScreen=lambda *_: 1, SendInput=send,
                                       GetSystemMetrics={76: 0, 77: 0, 78: width, 79: height}.__getitem__)
                 with patch.object(LAUNCHER.gui, 'U', api, create=True), \
                         self.assertRaisesRegex((RuntimeError, ValueError), reason):
                     LAUNCHER.click(1, *point)
 
     def test_partial_mouse_packet_is_rejected_before_the_action_delay(self):
-        api = SimpleNamespace(ClientToScreen=lambda *_: 1, SendInput=lambda count, *_: count - 1,
+        api = SimpleNamespace(GetForegroundWindow=lambda: 1, ClientToScreen=lambda *_: 1, SendInput=lambda count, *_: count - 1,
                               GetSystemMetrics={76: 0, 77: 0, 78: 1920, 79: 1080}.__getitem__)
         for action in [lambda: LAUNCHER.click(1, 303, 441), lambda: LAUNCHER.wheel(1, 480, 400, -100)]:
             with patch.object(LAUNCHER.gui, 'U', api, create=True), \
@@ -214,7 +214,7 @@ class WindowsInstalledLauncherTests(unittest.TestCase):
                     field.extend(int(keyboard.scan).to_bytes(2, 'little'))
             return count
 
-        with patch.object(LAUNCHER.gui, 'U', SimpleNamespace(SendInput=send), create=True), \
+        with patch.object(LAUNCHER.gui, 'U', SimpleNamespace(GetForegroundWindow=lambda: 1, SendInput=send), create=True), \
                 patch.object(LAUNCHER.time, 'sleep'):
             LAUNCHER.launcher_action(1, {'kind': 'text', 'value': 'executable'},
                                      {'executable': value})
@@ -254,6 +254,127 @@ class WindowsInstalledLauncherTests(unittest.TestCase):
             self.witness([record.copy() for record in records])
         records.append({'ProcessId': 3, 'ParentProcessId': 2, 'ExecutablePath': 'panel-mcp.exe'})
         self.assertEqual(self.witness(records), 2)
+
+
+class WindowsObservedSelectorTests(unittest.TestCase):
+    def setUp(self):
+        self.origin = (17, 29)
+        self.foreground = 1
+        self.dc = 9
+        self.released = []
+        self.release_ok = 1
+        self.selected = 'Claude'
+        # Native run12 action04 PNG: Claude's paired interior columns have this
+        # exact fill from y358 through y391; the dialog background is RGB(32,36,39).
+        self.rows = set(range(358, 392))
+        self.fill = 0x002E371A
+        self.invalid = False
+        self.maps = 0
+
+        def to_screen(_hwnd, pointer):
+            self.maps += 1
+            point = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.wintypes.POINT)).contents
+            point.x += self.origin[0]
+            point.y += self.origin[1]
+            return 1
+
+        def pixel(_dc, x, y):
+            if self.invalid:
+                return 0xFFFFFFFF
+            x, y = x - self.origin[0], y - self.origin[1]
+            columns = (225, 280) if self.selected == 'Claude' else (429, 492)
+            return self.fill if y in self.rows and x in columns else 0x00272420
+
+        def release(_hwnd, dc):
+            self.released.append(dc)
+            return self.release_ok
+
+        api = SimpleNamespace(GetForegroundWindow=lambda: self.foreground,
+                              ClientToScreen=to_screen, GetDC=lambda _: self.dc, ReleaseDC=release)
+        for owner, name, value in [(LAUNCHER.gui, 'U', api),
+                                   (LAUNCHER, 'G', SimpleNamespace(GetPixel=pixel))]:
+            mock = patch.object(owner, name, value, create=True)
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def test_actual_image_fill_selects_observed_row_and_verifies_moved_selection(self):
+        def click(_hwnd, x, y):
+            self.assertEqual((x, y), (461, 374), 'selection must use the observed native chip row')
+            self.selected = 'OpenCode'
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(LAUNCHER, 'click', click), \
+                patch.object(LAUNCHER, 'wheel') as wheel, \
+                patch.object(LAUNCHER, 'record_launcher_action'), \
+                patch.object(LAUNCHER, 'screenshot') as capture:
+            evidence = Path(temporary)
+            LAUNCHER.select_observed_opencode(1, evidence)
+            result = json.loads((evidence / 'selector.json').read_text())
+            self.assertEqual(result['clicked_client'], [461, 374])
+            self.assertTrue(result['opencode_selected_rows'])
+            self.assertEqual(result['claude_selected_rows'], [])
+            self.assertEqual(self.maps, 1)
+            wheel.assert_not_called()
+            capture.assert_called_once_with(1, evidence, 'selector-selected')
+
+    def test_failed_selection_cannot_continue_to_path_entry(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(LAUNCHER, 'click'), \
+                patch.object(LAUNCHER, 'record_launcher_action'), \
+                patch.object(LAUNCHER, 'screenshot') as capture:
+            evidence = Path(temporary)
+            with self.assertRaisesRegex(RuntimeError, 'did not confirm OpenCode selected'):
+                LAUNCHER.select_observed_opencode(1, evidence)
+            self.assertFalse((evidence / 'selector.json').exists())
+            capture.assert_not_called()
+
+    def test_search_is_bounded_and_cannot_click_without_a_visible_chip(self):
+        self.rows = set()
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(LAUNCHER, 'wheel') as wheel, \
+                patch.object(LAUNCHER, 'click') as click, \
+                patch.object(LAUNCHER, 'record_launcher_action'):
+            with self.assertRaisesRegex(RuntimeError, 'within 25 wheel actions'):
+                LAUNCHER.select_observed_opencode(1, Path(temporary))
+            self.assertEqual(wheel.call_args_list[0].args, (1, 480, 400, -100))
+            self.assertEqual(len(wheel.call_args_list), 25)
+            self.assertTrue(all(call.args == (1, 480, 400, 1)
+                                for call in wheel.call_args_list[1:]))
+            click.assert_not_called()
+
+    def test_scanner_requires_safe_unique_fill_and_releases_failed_reads(self):
+        self.assertEqual(LAUNCHER.claude_selector_row(1, self.origin), 374)
+        self.rows = set(range(190, 200))
+        self.assertIsNone(LAUNCHER.claude_selector_row(1, self.origin),
+                          'a tiny clipped chip must not supply a click row')
+        self.rows = set(range(190, 216))
+        self.assertEqual(LAUNCHER.claude_selector_row(1, self.origin), 205)
+        self.fill = 0x001A372E
+        self.assertIsNone(LAUNCHER.claude_selector_row(1, self.origin),
+                          'RGB byte order must not be accepted as COLORREF')
+        self.fill = 0x002E371A
+        self.rows = set(range(250, 270)) | set(range(358, 392))
+        with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
+            LAUNCHER.claude_selector_row(1, self.origin)
+        self.foreground = 99
+        releases = len(self.released)
+        with self.assertRaisesRegex(RuntimeError, 'foreground'):
+            LAUNCHER.claude_selector_row(1, self.origin)
+        self.assertEqual(len(self.released), releases)
+        self.foreground = 1
+        self.invalid = True
+        with self.assertRaisesRegex(RuntimeError, 'GetPixel failed'):
+            LAUNCHER.claude_selector_row(1, self.origin)
+        self.assertEqual(len(self.released), releases + 1)
+        self.dc = 0
+        with self.assertRaisesRegex(RuntimeError, 'GetDC'):
+            LAUNCHER.claude_selector_row(1, self.origin)
+        self.assertEqual(len(self.released), releases + 1)
+        self.dc = 9
+        self.invalid = False
+        self.release_ok = 0
+        with self.assertRaisesRegex(RuntimeError, 'ReleaseDC failed'):
+            LAUNCHER.claude_selector_row(1, self.origin)
 
 
 @unittest.skipUnless(shutil.which('rustc'), 'Rust compiler unavailable for real libtest fixture')
