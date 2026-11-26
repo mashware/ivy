@@ -57,7 +57,7 @@
 
 mod common;
 
-use common::{fold, list_against_disk, markdown_below, rust_sources};
+use common::{fold, list_against_disk, markdown_below, rust_sources, slash_path};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -75,6 +75,46 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
+    (
+        "src/board/milestones/columns.rs",
+        include_str!("../src/board/milestones/columns.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/compact.rs",
+        include_str!("../src/board/milestones/compact.rs"),
+        1,
+    ),
+    (
+        "src/board/milestones/details.rs",
+        include_str!("../src/board/milestones/details.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/projection.rs",
+        include_str!("../src/board/milestones/projection.rs"),
+        1,
+    ),
+    (
+        "src/board/milestones/sections.rs",
+        include_str!("../src/board/milestones/sections.rs"),
+        1,
+    ),
+    (
+        "src/board/milestones/state.rs",
+        include_str!("../src/board/milestones/state.rs"),
+        1,
+    ),
+    (
+        "src/board/milestones/strip.rs",
+        include_str!("../src/board/milestones/strip.rs"),
+        0,
+    ),
+    (
+        "src/board/milestones/tests.rs",
+        include_str!("../src/board/milestones/tests.rs"),
+        0,
+    ),
     (
         "src/launch/tests.rs",
         include_str!("../src/launch/tests.rs"),
@@ -162,6 +202,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         "src/panel/provenance_route.rs",
         include_str!("../src/panel/provenance_route.rs"),
         0,
+    ),
+    (
+        "src/panel/provenance_route/windows_tests.rs",
+        include_str!("../src/panel/provenance_route/windows_tests.rs"),
+        2,
     ),
     (
         "src/panel/provenance.rs",
@@ -321,6 +366,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/tests/windows_fixture.rs",
+        include_str!("../src/tests/windows_fixture.rs"),
+        7,
+    ),
+    (
         "src/git_process.rs",
         include_str!("../src/git_process.rs"),
         0,
@@ -397,6 +447,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/image/paste.rs",
+        include_str!("../src/viewer/image/paste.rs"),
+        0,
+    ),
+    (
         "src/viewer/image/flatten.rs",
         include_str!("../src/viewer/image/flatten.rs"),
         0,
@@ -433,6 +488,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/viewer.rs", include_str!("../src/viewer.rs"), 0),
     (
+        "src/viewer/focus.rs",
+        include_str!("../src/viewer/focus.rs"),
+        0,
+    ),
+    (
         "src/viewer/load.rs",
         include_str!("../src/viewer/load.rs"),
         0,
@@ -463,6 +523,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/code/tests/navigation.rs",
+        include_str!("../src/viewer/code/tests/navigation.rs"),
+        0,
+    ),
+    (
         "src/viewer/code/rows.rs",
         include_str!("../src/viewer/code/rows.rs"),
         0,
@@ -486,6 +551,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         "src/diagnostics_log.rs",
         include_str!("../src/diagnostics_log.rs"),
         0,
+    ),
+    (
+        "src/diagnostics_log/graphics.rs",
+        include_str!("../src/diagnostics_log/graphics.rs"),
+        4,
     ),
     (
         "src/diagnostics_log/sink.rs",
@@ -924,11 +994,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 133),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
-    ("src/control.rs", include_str!("../src/control.rs"), 354),
+    ("src/control.rs", include_str!("../src/control.rs"), 349),
     (
         "src/control/retiring.rs",
         include_str!("../src/control/retiring.rs"),
         1,
+    ),
+    (
+        "src/control/handles.rs",
+        include_str!("../src/control/handles.rs"),
+        13,
     ),
     (
         "src/panel/driving.rs",
@@ -1071,6 +1146,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/mouse.rs", include_str!("../src/mouse.rs"), 201),
     ("src/opening.rs", include_str!("../src/opening.rs"), 148),
     (
+        "src/opening/pane.rs",
+        include_str!("../src/opening/pane.rs"),
+        3,
+    ),
+    (
         "src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
         0,
@@ -1133,6 +1213,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         "examples/hinting.rs",
         include_str!("../examples/hinting.rs"),
         4,
+    ),
+    (
+        "examples/windows_altgr.rs",
+        include_str!("../examples/windows_altgr.rs"),
+        2,
     ),
     ("examples/leak.rs", include_str!("../examples/leak.rs"), 59),
     (
@@ -2021,6 +2106,10 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 /// the same delivery and nothing was left watching them either.
 const DOCUMENTS: &[(&str, &str)] = &[
     (
+        "docs/windows-codex-route-checks.md",
+        include_str!("../../../docs/windows-codex-route-checks.md"),
+    ),
+    (
         "docs/console-glyph-hinting.md",
         include_str!("../../../docs/console-glyph-hinting.md"),
     ),
@@ -2556,7 +2645,7 @@ fn prototypes_on_disk(root: &Path, dir: &Path) -> BTreeSet<String> {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         {
             let relative = path.strip_prefix(root).expect("below prototypes/");
-            found.insert(format!("prototypes/{}", relative.to_string_lossy()));
+            found.insert(format!("prototypes/{}", slash_path(relative)));
         }
     }
     found
@@ -2597,6 +2686,36 @@ fn no_line_of_the_prototypes_reads_as_spanish() {
         reported.len(),
         reported.join("\n")
     );
+}
+
+#[test]
+fn nested_prototype_names_match_the_census_on_every_platform() {
+    let root = std::env::temp_dir().join(format!("ivy-prototype-census-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("nested")).expect("fixture directory");
+    for name in [
+        root.join("nested").join("source"),
+        root.join("runner"),
+        root.join("NOTES.MD"),
+    ] {
+        std::fs::write(name, "").expect("fixture source");
+    }
+    let declared = ["prototypes/nested/source", "prototypes/runner"];
+    let mut on_disk = prototypes_on_disk(&root, &root);
+    // On Unix this is a third file, not another spelling of the nested source.
+    let extra = if cfg!(windows) {
+        "undeclared"
+    } else {
+        r"nested\source"
+    };
+    std::fs::write(root.join(extra), "").expect("undeclared fixture source");
+    let with_extra = prototypes_on_disk(&root, &root);
+    std::fs::remove_dir_all(&root).expect("remove fixture directory");
+    assert!(list_against_disk("PROTOTYPES", &declared, &on_disk).is_ok());
+    assert!(on_disk.remove("prototypes/nested/source"));
+    assert!(list_against_disk("PROTOTYPES", &declared, &on_disk).is_err());
+    assert_eq!(with_extra.len(), 3);
+    assert!(list_against_disk("PROTOTYPES", &declared, &with_extra).is_err());
 }
 
 // ── The stored knowledge, which is the last thing this milestone translated ──────────────────────

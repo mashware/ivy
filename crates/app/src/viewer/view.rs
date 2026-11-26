@@ -3,6 +3,24 @@ use super::{Kind, State};
 use eframe::egui::{self, FontId};
 use std::path::Path;
 
+/// What the drawer's body shows: the document state's, or the focused console — by name — and its
+/// image slot, which may hold no image.
+pub(super) enum Body<'a> {
+    Document,
+    Image(
+        Option<usize>,
+        Option<(&'a mut super::image::Viewer, &'a mut super::image::Slot)>,
+    ),
+}
+
+/// What the image tab says on a console with no image: the person's two ways in — the paste chord is
+/// the platform's, Cmd on macOS — and its agent's (D121).
+pub(super) const NO_IMAGE: &str = if cfg!(target_os = "macos") {
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Cmd+V here. Its agent can open one too."
+} else {
+    "No image in this console. Ctrl+click a PNG or JPEG path printed in it, or copy a screenshot and press Paste screenshot or Ctrl+V here. Its agent can open one too."
+};
+
 /// The radius of the body's bottom corners, inside the drawer's one-point frame.
 pub(super) const BODY_CORNER: u8 = crate::theme::metrics::RADIUS_CARD - 1;
 
@@ -13,11 +31,7 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    (tabs, title, image): (
-        &super::drawer::Tabs,
-        &super::drawer::Title,
-        Option<&mut super::image::Viewer>,
-    ),
+    (tabs, title, mut image): (&super::drawer::Tabs, &super::drawer::Title, Body),
 ) {
     let namespace = if state.kind.is_document() {
         "markdown-viewer"
@@ -119,9 +133,29 @@ pub(super) fn show(
                     },
                     roles.base,
                 );
+                if let Body::Image(_, Some((image, _))) = &mut image {
+                    super::image::paste::take_chord(image, &mut body_ui, state.keys);
+                }
                 match image {
-                    Some(image) => image.show(&mut body_ui, theme, state.space),
-                    None => body_content(state, &mut body_ui, theme, unavailable),
+                    Body::Image(_, Some((image, slot))) if slot.shown() => {
+                        image.show(slot, &mut body_ui, theme, state.space);
+                    }
+                    Body::Image(pane, slot) => {
+                        let word = slot.and_then(|(image, slot)| {
+                            super::image::paste::shown(&image.paste, pane, slot.word())
+                        });
+                        egui::Frame::new()
+                            .inner_margin(14)
+                            .show(&mut body_ui, |ui| {
+                                ui.label(NO_IMAGE);
+                                if let Some(word) = word {
+                                    let refused =
+                                        theme.panel_color(Some(panel_contract::Mark::Block), None);
+                                    ui.colored_label(refused, word);
+                                }
+                            });
+                    }
+                    Body::Document => body_content(state, &mut body_ui, theme, unavailable),
                 }
             });
         });
@@ -316,7 +350,12 @@ mod tests {
         super::super::drawer::Tabs {
             changes: Some(Some(3)),
             document: Some("PLAN.md".into()),
-            markdown,
+            image: None,
+            active: Some(if markdown {
+                crate::sidebar::Tool::Document
+            } else {
+                crate::sidebar::Tool::Git
+            }),
             side_by_side: false,
         }
     }
@@ -453,7 +492,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
-                        (&tabs(true), &title(), None),
+                        (&tabs(true), &title(), super::Body::Document),
                     )
                 },
             );
@@ -517,7 +556,7 @@ mod tests {
                             theme,
                             true,
                             false,
-                            (&tabs(false), &title(), None),
+                            (&tabs(false), &title(), super::Body::Document),
                         )
                     },
                 );
@@ -583,7 +622,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         true,
                         false,
-                        (&tabs(false), &gone, None),
+                        (&tabs(false), &gone, super::Body::Document),
                     )
                 },
             )

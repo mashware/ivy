@@ -328,7 +328,10 @@ fn declares(comment: &str) -> bool {
 
 /// A comment line without its slashes, bold markers and surrounding spaces.
 fn comment_text(comment: &str) -> &str {
-    comment.trim_matches(['/', '*', ' '])
+    comment
+        .strip_suffix('\r')
+        .unwrap_or(comment)
+        .trim_matches(['/', '*', ' '])
 }
 
 /// What one source says about its waits: those with no declaration, and how many are declared.
@@ -597,6 +600,26 @@ fn either_marker_with_a_reason_declares_the_wait() {
         judgement.undeclared
     );
     assert_eq!(judgement.declared, 3);
+}
+
+#[test]
+fn crlf_comment_paragraphs_keep_declarations_and_empty_reasons_distinct() {
+    for ending in ["\n", "\r\n"] {
+        let src = [
+            "// Context for the next paragraph.",
+            "//",
+            "// **Bounded:** dropping the sender ends the receive.",
+            "rx.recv();",
+            "// **Bounded:**",
+            "rx.recv();",
+            "// Not Bounded: no sender is dropped.",
+            "rx.recv();",
+        ]
+        .join(ending);
+        let judgement = judge(&src);
+        assert_eq!(judgement.declared, 1, "ending {ending:?}");
+        assert_eq!(judgement.undeclared, vec![(6, "recv"), (8, "recv")]);
+    }
 }
 
 #[test]

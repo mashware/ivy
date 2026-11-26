@@ -210,14 +210,20 @@ pub struct Rasterizing {
     /// installed font carries in color **is paid in full** and returns nothing. With a single number, a
     /// machine with an emoji font and one without would publish indistinguishable reports.
     failed: usize,
+    /// How many of the rasterized ones were drawn from colour outlines (`COLR`) rather than a
+    /// bitmap. **The two paths cost differently and a batch is about one of them**: without the
+    /// split, a batch run on a machine whose emoji font is the other kind publishes the other
+    /// path's cost under its own name (#176).
+    outlines: usize,
 }
 
 impl Rasterizing {
     /// Records what the color path cost **in a pane's painting**.
-    pub fn record(&mut self, how_long: Duration, rasterized: usize, failed: usize) {
-        self.rasterizing.record(how_long);
-        self.rasterized += rasterized;
-        self.failed += failed;
+    pub fn record(&mut self, cost: &crate::fonts::ColorCost) {
+        self.rasterizing.record(cost.spent);
+        self.rasterized += cost.rasterized;
+        self.failed += cost.failed;
+        self.outlines += cost.outlines;
     }
 
     pub fn publish(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
@@ -226,13 +232,13 @@ impl Rasterizing {
         }
         writeln!(
             a,
-            "\nrasterizing a color glyph — the window's   ({} frames with work · {} glyphs rasterized | {} without a color face)",
-            self.rasterizing.total, self.rasterized, self.failed
+            "\nrasterizing a color glyph — the window's   ({} frames with work · {} glyphs rasterized, {} of them from colour outlines | {} without a color face)",
+            self.rasterizing.total, self.rasterized, self.outlines, self.failed
         )?;
         writeln!(a, "  {}", self.rasterizing)?;
         writeln!(
             a,
-            "  does NOT happen every frame: only the first time an emoji is asked at a given\n                   height and width, so this mean does not describe an ordinary frame. It covers searching the\n                   system's emoji families for the one that carries it in color, decoding its bitmap\n                   —in Noto Color Emoji an indexed 136x128 PNG—, scaling it down to the cell and\n                   uploading the texture. A character NO font paints in color is paid all the same\n                   and returns nothing: that is why the two counters are separate"
+            "  does NOT happen every frame: only the first time an emoji is asked at a given\n                   height and width, so this mean does not describe an ordinary frame. It covers searching the\n                   system's emoji families for the one that carries it in color, decoding its bitmap\n                   —in Noto Color Emoji an indexed 136x128 PNG— and scaling it down to the cell, or\n                   drawing its colour outlines (COLR, Segoe UI Emoji's kind) at the cell's size, and\n                   uploading the texture. The two paths cost differently: the count above says which ran. A character NO font paints in color is paid all the same\n                   and returns nothing: that is why the two counters are separate"
         )?;
         writeln!(
             a,

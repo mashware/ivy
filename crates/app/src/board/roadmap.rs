@@ -12,6 +12,8 @@ pub(super) struct Resolved {
     pub(super) plan: Option<Arc<Plan>>,
     pub(super) source: String,
     pub(super) error: Option<String>,
+    pub(super) published_at: Option<SystemTime>,
+    pub(super) path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,6 +45,21 @@ pub(super) fn placement(panel: Option<&Panel>, plan: &Plan) -> Placement {
             .position(|i| i.id.as_ref() == Some(id))
             .map_or(Placement::Milestone(m), |i| Placement::Item(m, i)),
     }
+}
+
+fn source_path(section: &Section, plan: &Plan) -> Option<std::path::PathBuf> {
+    let source = std::path::Path::new(plan.source.as_deref()?);
+    if source.is_absolute() {
+        return Some(source.into());
+    }
+    if plan.source.as_deref()?.contains("://") {
+        return None;
+    }
+    let crate::project::Key::Repository(common) = section.key.as_ref()? else {
+        return None;
+    };
+    (common.file_name().is_some_and(|name| name == ".git"))
+        .then(|| common.parent().unwrap_or(common).join(source))
 }
 
 pub(super) fn published_source(published: &super::plans::Published, now: SystemTime) -> String {
@@ -112,6 +129,8 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
             Some(Resolved {
                 plan: Some(Arc::new(published.plan.clone())),
                 source: published_source(&published, now),
+                published_at: Some(published.published_at),
+                path: source_path(section, &published.plan),
                 error: None,
             })
         } else {
@@ -128,7 +147,12 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
                 })
                 .map(|file| Resolved {
                     plan: file.plan.clone(),
-                    source: format!("from {}", file.path.display()),
+                    source: match file.plan.as_ref().and_then(|plan| plan.source.as_deref()) {
+                        Some(source) => format!("from {} | {source}", file.path.display()),
+                        None => format!("from {}", file.path.display()),
+                    },
+                    published_at: None,
+                    path: Some(file.path.clone()),
                     error: file.error.clone(),
                 })
         };
@@ -170,6 +194,164 @@ mod tests {
             r#"{"milestone":"missing","lines":[]}"#,
         ] {
             assert_eq!(placement(Some(&p(text)), &plan), Placement::Off);
+        }
+    }
+
+    #[test]
+    fn json_file_and_published_plan_have_the_same_content_and_placement() {
+        use crate::project::{Identity, Key};
+        use panel_control::{Answer, What};
+        use std::{collections::BTreeMap, fs, sync::mpsc, time::Instant};
+
+        struct Temp(std::path::PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let mut bytes = [0; 8];
+        getrandom::fill(&mut bytes).unwrap();
+        let dir = Temp(
+            std::env::temp_dir().join(format!("ivy-json-roadmap-{:x}", u64::from_ne_bytes(bytes))),
+        );
+        fs::create_dir(&dir.0).unwrap();
+        let path = dir.0.join("roadmap.json");
+        let document = r#"{
+          "title":"Roadmap", "source":"Tracker",
+          "milestones":[
+            {"id":"H1","title":"First","items":[{"id":"A","text":"Done","mark":"done","ref":"R-1","link":"https://example.com/1"}]},
+            {"id":"H2","title":"Second","items":[{"id":"B","text":"Current","mark":"current"}]},
+            {"id":"H3","title":"Third","done_when":"everything works","depends_on":["H1","H2"],"items":[
+              {"id":"C","text":"Pending","mark":"pending"},
+              {"id":"D","text":"Waiting","mark":"wait"},
+              {"id":"E","text":"Blocked","mark":"block"},
+              {"id":"MT-16700","text":"Deliver","mark":"current","ref":"MT-16700","link":"https://example.com/issue"},
+              "Plain item"]}
+          ], "outside":["Review",{"id":"O","text":"Contract","mark":"done"},{"text":"Retained outside","mark":"future"}]
+        }"#;
+        fs::write(&path, document).unwrap();
+        let ctx = eframe::egui::Context::default();
+        let mut reader = crate::board::files::Reader::new(
+            BTreeMap::from([("Sample".into(), path.clone())]),
+            ctx.clone(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let snapshot = loop {
+            let snapshots = reader.snapshots();
+            if let Some(snapshot) = snapshots
+                .into_iter()
+                .find(|snapshot| snapshot.plan.is_some())
+            {
+                break snapshot;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "file reader did not load JSON within five seconds"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let file_plan = snapshot.plan.unwrap();
+        let diagnostic = snapshot.error.expect("dropped mark is a file diagnostic");
+        assert!(diagnostic.contains("future"));
+        let identity = Identity {
+            key: Key::Repository(dir.0.clone()),
+            path: dir.0.clone(),
+            name: "Sample".into(),
+        };
+        let (parsed, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        let mut store = crate::board::plans::Store::at(None, false, ctx.clone());
+        let (tx, rx) = mpsc::sync_channel(1);
+        store.request(
+            Ok(identity.clone()),
+            What::PlanSet {
+                document: document.into(),
+                plan: parsed,
+                dropped,
+            },
+            tx,
+            &ctx,
+            #[cfg(windows)]
+            None,
+        );
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Answer::Text(_)
+        ));
+        let published = store.published(&identity.key).unwrap();
+        assert_eq!(*file_plan, published.plan);
+        for (milestone, deliverable, expected) in [
+            ("H1", "A", Placement::Item(0, 0)),
+            ("H2", "B", Placement::Item(1, 0)),
+            ("H3", "MT-16700", Placement::Item(2, 3)),
+        ] {
+            let panel = panel_contract::parse_document(
+                &serde_json::json!({"milestone":milestone,"deliverable":deliverable,"lines":[]})
+                    .to_string(),
+            )
+            .unwrap();
+            assert_eq!(placement(Some(&panel), &file_plan), expected);
+        }
+        assert_eq!(
+            crate::board::milestones::after(&file_plan.milestones[2], &file_plan).as_deref(),
+            Some("after H1 · First, H2 · Second")
+        );
+        assert_eq!(
+            file_plan.milestones[2].done_when.as_deref(),
+            Some("everything works")
+        );
+        let section = crate::board::model::Section {
+            key: None,
+            kind: crate::board::model::Kind::Repository {
+                name: "Sample".into(),
+            },
+            entries: vec![],
+            roadmap: Some(Resolved {
+                plan: Some(file_plan.clone()),
+                source: format!("from {}", path.display()),
+                error: Some(diagnostic.clone()),
+                published_at: None,
+                path: Some(path.clone()),
+            }),
+            ink: None,
+        };
+        crate::fonts::install_bundled(&ctx);
+        let roles = crate::theme::Roles::of(&crate::theme::Theme::default());
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            ui.set_width(1800.0);
+            crate::board::milestones::project_header(
+                ui,
+                &section,
+                Default::default(),
+                true,
+                &roles,
+            );
+            crate::board::milestones::paint_plan(
+                ui,
+                &section,
+                &file_plan,
+                &roles,
+                &mut |_, _, _, _, _| {},
+            );
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                eframe::egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        output.drop_without_applying_deltas();
+        for expected in [
+            format!("roadmap: {diagnostic}"),
+            "Done when: everything works".into(),
+            "after H1 · First, H2 · Second".into(),
+            "Review".into(),
+        ] {
+            assert!(
+                texts.contains(&expected),
+                "missing {expected:?} in {texts:?}"
+            );
         }
     }
 }

@@ -288,6 +288,11 @@ pub(crate) fn pointer(
                     ui.ctx().request_repaint();
                     false
                 }
+                super::integrated::Target::Paste => {
+                    crate::viewer::image::paste::ask(window, name);
+                    ui.ctx().request_repaint();
+                    false
+                }
                 super::integrated::Target::Panel => {
                     if let Some(pane) = window.pane_called(name)
                         && pane.panel_state.is_visible(SystemTime::now())

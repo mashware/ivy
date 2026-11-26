@@ -20,6 +20,9 @@ use egui::accesskit;
 use egui::{Pos2, Rect, Theme, Vec2, ViewportBuilder, ViewportCommand, ViewportId, ViewportInfo};
 pub use winit;
 
+#[cfg(target_os = "windows")]
+mod altgr;
+
 pub mod clipboard;
 mod dropped_file;
 mod safe_area;
@@ -968,6 +971,19 @@ impl State {
     }
 
     fn on_keyboard_input(&mut self, event: &winit::event::KeyEvent) {
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::modifier_supplement::KeyEventExtModifierSupplement as _;
+            if altgr::consume(
+                event.state == winit::event::ElementState::Pressed,
+                self.modifiers,
+                event.text_with_all_modifiers(),
+                &mut self.egui_input.events,
+            ) {
+                return;
+            }
+        }
+
         let winit::event::KeyEvent {
             // Represents the position of a key independent of the currently active layout.
             //

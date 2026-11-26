@@ -20,7 +20,7 @@ pub(crate) fn open_with_authority(
     reads: ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
     authority: Option<Arc<crate::panel::overlay::Authority>>,
-    inspector: panel_control::PublicationInspector,
+    inspector: crate::panel::provenance_route::Inspector,
     wake: impl Fn() + Send + Sync + 'static,
     hwnd: Option<isize>,
 ) -> Option<PaneControl> {
@@ -43,7 +43,7 @@ fn open_services(
     reads: ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
     authorization: Option<(&PanelState, Arc<crate::panel::overlay::Authority>)>,
-    inspector: Option<panel_control::PublicationInspector>,
+    inspector: Option<crate::panel::provenance_route::Inspector>,
     wake: impl Fn() + Send + Sync + 'static,
     hwnd: Option<isize>,
 ) -> Option<PaneControl> {
@@ -67,7 +67,7 @@ fn open_services(
     });
     #[cfg(windows)]
     let (opened, windows_publishers) = {
-        let _ = (reader, sessions, authorization, inspector);
+        let _ = (reader, sessions, authorization);
         let opened = hwnd
             .ok_or_else(|| {
                 std::io::Error::new(
@@ -78,8 +78,13 @@ fn open_services(
             .and_then(panel_control::WindowsServices::new)
             .and_then(|(services, document, plan)| {
                 let releases = services.release_registry();
-                Channel::open_windows(dir.path(), dir.id(), sender, services)
-                    .map(|channel| (channel, document, plan, releases))
+                Channel::open_windows(
+                    dir.path(),
+                    dir.id(),
+                    sender,
+                    services.with_publication_scope(inspector.flatten()),
+                )
+                .map(|channel| (channel, document, plan, releases))
             });
         match opened {
             Ok((channel, document, plan, releases)) => {

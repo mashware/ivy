@@ -1,3 +1,394 @@
+mod native_shell_entry {
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let mut random = [0; 8];
+            getrandom::fill(&mut random).unwrap();
+            let root = std::env::temp_dir()
+                .join(format!("ivy-native-entry-{:x}", u64::from_ne_bytes(random)));
+            std::fs::create_dir(&root).unwrap();
+            let code = r#"fn main() {
+                use std::io::Write;
+                let args: Vec<_> = std::env::args().skip(1).collect();
+                std::fs::write(std::env::var_os("IVY_NATIVE_RECORD").unwrap(), format!("{args:?}")).unwrap();
+                if let Some(path) = std::env::var_os("IVY_NATIVE_CALLS") {
+                    let mut calls = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+                    writeln!(calls, "{args:?}").unwrap();
+                }
+                if let Some(path) = std::env::var_os("IVY_NATIVE_IDENTITY") {
+                    std::fs::write(path, std::env::current_exe().unwrap().to_str().unwrap()).unwrap();
+                }
+                std::process::exit(std::env::var("IVY_NATIVE_STATUS").unwrap().parse().unwrap());
+            }"#;
+            std::fs::write(root.join("client.rs"), code).unwrap();
+            assert!(
+                Command::new("rustc")
+                    .arg("--crate-name=ivy_native_fixture")
+                    .arg(root.join("client.rs"))
+                    .arg("-o")
+                    .arg(root.join("codex.exe"))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            std::fs::copy(env!("CARGO_BIN_EXE_ivy-codex"), root.join("ivy-codex.exe")).unwrap();
+            std::fs::copy(
+                env!("CARGO_BIN_EXE_ivy-codex"),
+                root.join("ivy-codex-shell.exe"),
+            )
+            .unwrap();
+            Self(root)
+        }
+        fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+            let mut command = Command::new(program);
+            command
+                .env("IVY_NATIVE_RECORD", self.0.join("record"))
+                .env("IVY_NATIVE_CALLS", self.0.join("calls"))
+                .env("IVY_NATIVE_STATUS", "37")
+                .env("PATH", &self.0)
+                .env("IVY_CODEX_HELPER", self.0.join("ivy-codex.exe"))
+                .env("IVY_TEST_ROOT", &self.0)
+                .env("XDG_CACHE_HOME", &self.0)
+                .env("XDG_CONFIG_HOME", &self.0)
+                .env("XDG_DATA_HOME", &self.0)
+                .env("TERM", "dumb");
+            command
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn powershell_programs() -> Vec<(PathBuf, u32)> {
+        #[cfg(windows)]
+        {
+            let legacy = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+            assert!(
+                legacy.is_file(),
+                "Windows PowerShell is required: {legacy:?}"
+            );
+            let pwsh = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|dir| dir.join("pwsh.exe"))
+                .find(|path| path.is_file())
+                .expect("PowerShell 7 is required on Windows; install pwsh and add it to PATH");
+            vec![(legacy, 5), (pwsh, 7)]
+        }
+        #[cfg(not(windows))]
+        {
+            std::env::var_os("IVY_TEST_PWSH")
+                .map(|path| (PathBuf::from(path), 7))
+                .into_iter()
+                .collect()
+        }
+    }
+
+    fn output(mut command: Command, root: &Path) -> String {
+        let out = root.join("stdout");
+        let err = root.join("stderr");
+        command
+            .stdout(std::fs::File::create(&out).unwrap())
+            .stderr(std::fs::File::create(&err).unwrap())
+            .stdin(Stdio::null());
+        let mut child = command.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("native invocation timed out");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let text = std::fs::read_to_string(out).unwrap();
+        assert!(
+            status.success(),
+            "{text}\n{}",
+            std::fs::read_to_string(err).unwrap()
+        );
+        text
+    }
+
+    #[test]
+    fn native_shell_entry_resolves_current_path_and_keeps_explicit_mode() {
+        let fixture = Fixture::new();
+        let shell = fixture.0.join("ivy-codex-shell.exe");
+        let args = ["-V", "-i", "image one", "", "--long", "quote\"here"];
+        let result = fixture.command(&shell).args(args).status().unwrap();
+        assert_eq!(result.code(), Some(37));
+        let expected = format!("{:?}", args);
+        assert_eq!(
+            std::fs::read_to_string(fixture.0.join("record")).unwrap(),
+            expected
+        );
+        let other = fixture.0.join("new path");
+        std::fs::create_dir(&other).unwrap();
+        std::fs::rename(fixture.0.join("codex.exe"), other.join("codex.exe")).unwrap();
+        // A batch candidate in the earlier directory must lose to an exe in the later one.
+        std::fs::write(fixture.0.join("codex.cmd"), "not the executable").unwrap();
+        let path = std::env::join_paths([&fixture.0, &other]).unwrap();
+        let result = fixture
+            .command(&shell)
+            .env("PATH", path)
+            .env("IVY_NATIVE_STATUS", "0")
+            .args(args)
+            .status()
+            .unwrap();
+        assert_eq!(result.code(), Some(0));
+        let result = fixture
+            .command(fixture.0.join("ivy-codex.exe"))
+            .arg(other.join("codex.exe"))
+            .args(args)
+            .status()
+            .unwrap();
+        assert_eq!(result.code(), Some(37));
+        let result = fixture
+            .command(&shell)
+            .env("PATH", "relative-only")
+            .current_dir(&other)
+            .args(args)
+            .status()
+            .unwrap();
+        assert_eq!(result.code(), Some(127));
+    }
+
+    #[test]
+    fn native_shell_entry_preserves_native_powershell_status_and_arguments() {
+        for (program, major) in powershell_programs() {
+            for batch in if cfg!(windows) {
+                vec![false, true]
+            } else {
+                vec![false]
+            } {
+                let fixture = Fixture::new();
+                let target = if batch {
+                    std::fs::rename(fixture.0.join("codex.exe"), fixture.0.join("client.exe"))
+                        .unwrap();
+                    std::fs::write(
+                        fixture.0.join("codex.cmd"),
+                        "@echo off\r\n\"%~dp0client.exe\" %*\r\nexit /b %errorlevel%\r\n",
+                    )
+                    .unwrap();
+                    "client.exe"
+                } else {
+                    "codex.exe"
+                };
+                std::fs::write(fixture.0.join("codex.ps1"), "throw \"wrong launcher\"").unwrap();
+                let script = include_str!(
+                    "../../../resources/agent-integrations/codex/shell/powershell.ps1"
+                );
+                let body = r#"
+$alias = Get-Command codex
+if ($alias.CommandType -ne 'Alias' -or $alias.Definition -ne (Join-Path $env:IVY_TEST_ROOT 'ivy-codex-shell.exe')) {
+    throw 'native alias target missing'
+}
+'VERSION:' + $PSVersionTable.PSVersion.Major
+$nativeArgs = @('-V', '-i', 'image one', '', '--long', 'trailing\')
+if ($env:IVY_NATIVE_TARGET -eq 'codex.exe') {
+    $nativeArgs += 'amp&pipe|caret^percent%dollar$paren()semi;angle<>'
+}
+& (Join-Path $env:IVY_TEST_ROOT $env:IVY_NATIVE_TARGET) @nativeArgs
+'DIRECT:' + $? + ':' + $LASTEXITCODE
+$direct = [IO.File]::ReadAllText($env:IVY_NATIVE_RECORD)
+codex @nativeArgs
+'WRAPPED:' + $? + ':' + $LASTEXITCODE
+$wrapped = [IO.File]::ReadAllText($env:IVY_NATIVE_RECORD)
+if ($direct -ne $wrapped) { throw "argument mismatch: $direct / $wrapped" }
+'ARGS_EQUAL'
+$env:IVY_NATIVE_STATUS = '0'
+codex @nativeArgs
+'SUCCESS:' + $? + ':' + $LASTEXITCODE
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    Invoke-Expression 'codex @nativeArgs && Write-Output SUCCESS_CHAIN'
+    $env:IVY_NATIVE_STATUS = '37'
+    Invoke-Expression 'codex @nativeArgs && Write-Output WRONG_FAILURE_CHAIN'
+    'CHAINS_CHECKED'
+}
+exit 0
+"#;
+                let mut command = fixture.command(&program);
+                command.env("IVY_NATIVE_TARGET", target);
+                command.args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-Command",
+                    &format!("{script}\n{body}"),
+                ]);
+                let out = output(command, &fixture.0);
+                assert!(out.contains(&format!("VERSION:{major}")), "{out}");
+                assert!(out.contains("DIRECT:False:37"), "{out}");
+                assert!(out.contains("WRAPPED:False:37"), "{out}");
+                assert!(
+                    out.contains("SUCCESS:True:0") && out.contains("ARGS_EQUAL"),
+                    "{out}"
+                );
+                assert!(!out.contains("WRONG_FAILURE_CHAIN"), "{out}");
+                if major >= 7 {
+                    assert!(out.contains("CHAINS_CHECKED"), "{out}");
+                    assert!(out.contains("SUCCESS_CHAIN"), "{out}");
+                }
+                let mut expected = vec!["-V", "-i", "image one", "", "--long", "trailing\\"];
+                if major == 5 {
+                    expected.retain(|arg| !arg.is_empty());
+                }
+                if !batch {
+                    expected.push("amp&pipe|caret^percent%dollar$paren()semi;angle<>");
+                }
+                assert_eq!(
+                    std::fs::read_to_string(fixture.0.join("record")).unwrap(),
+                    format!("{expected:?}"),
+                    "{program:?}, batch={batch}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_shell_entry_resolves_path_changes_after_powershell_installs_the_alias() {
+        for (program, _) in powershell_programs() {
+            let fixture = Fixture::new();
+            for name in ["first", "second"] {
+                std::fs::create_dir(fixture.0.join(name)).unwrap();
+            }
+            std::fs::rename(
+                fixture.0.join("codex.exe"),
+                fixture.0.join("first/codex.exe"),
+            )
+            .unwrap();
+            std::fs::copy(
+                fixture.0.join("first/codex.exe"),
+                fixture.0.join("second/codex.exe"),
+            )
+            .unwrap();
+            let script =
+                include_str!("../../../resources/agent-integrations/codex/shell/powershell.ps1");
+            let body = r#"
+$alias = Get-Command codex
+if ($alias.CommandType -ne 'Alias' -or $alias.Definition -ne (Join-Path $env:IVY_TEST_ROOT 'ivy-codex-shell.exe')) {
+    throw 'native alias target missing'
+}
+foreach ($name in @('first', 'second')) {
+    $env:PATH = Join-Path $env:IVY_TEST_ROOT $name
+    $env:IVY_NATIVE_RECORD = Join-Path $env:IVY_TEST_ROOT "$name-args"
+    $env:IVY_NATIVE_IDENTITY = Join-Path $env:IVY_TEST_ROOT "$name-identity"
+    codex -V "image $name"
+    if (-not $? -or $LASTEXITCODE -ne 0) { throw "client $name failed" }
+}
+'PATH_CHANGES_CHECKED'
+exit 0
+"#;
+            let mut command = fixture.command(&program);
+            command.env("IVY_NATIVE_STATUS", "0").args([
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                &format!("{script}\n{body}"),
+            ]);
+            assert!(output(command, &fixture.0).contains("PATH_CHANGES_CHECKED"));
+            for name in ["first", "second"] {
+                let identity =
+                    std::fs::read_to_string(fixture.0.join(format!("{name}-identity"))).unwrap();
+                assert_eq!(
+                    std::fs::canonicalize(identity).unwrap(),
+                    std::fs::canonicalize(fixture.0.join(name).join("codex.exe")).unwrap()
+                );
+                assert_eq!(
+                    std::fs::read_to_string(fixture.0.join(format!("{name}-args"))).unwrap(),
+                    format!("{:?}", ["-V", &format!("image {name}")])
+                );
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unsupported_windows_relay_explains_why_and_preserves_the_client_invocation() {
+        let fixture = Fixture::new();
+        let args = ["prompt with \"quotes\"", "--", "", "trailing\\", "a&b"];
+        let result = fixture
+            .command(fixture.0.join("ivy-codex.exe"))
+            .arg(fixture.0.join("codex.exe"))
+            .args(args)
+            .env("CODEX_HOME", &fixture.0)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(37));
+        assert_eq!(
+            std::fs::read_to_string(fixture.0.join("record")).unwrap(),
+            format!("{args:?}")
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.0.join("calls")).unwrap(),
+            format!("{args:?}\n"),
+            "the unsupported path must invoke only the original client, without capability or daemon probes"
+        );
+        assert_eq!(
+            String::from_utf8(result.stderr)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "ivy-codex: shared panel routing is not supported on Windows: Ivy cannot yet verify the owning console for a shared conversation; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
+            ]
+        );
+        assert!(!fixture.0.join("ivy-panel-routes").exists());
+
+        for args in [
+            vec!["--no-daemon", "hello"],
+            vec!["--help"],
+            vec!["app-server", "daemon", "status"],
+        ] {
+            std::fs::remove_file(fixture.0.join("calls")).unwrap();
+            let result = fixture
+                .command(fixture.0.join("ivy-codex.exe"))
+                .arg(fixture.0.join("codex.exe"))
+                .args(&args)
+                .output()
+                .unwrap();
+            assert_eq!(result.status.code(), Some(37));
+            assert!(
+                result.stderr.is_empty(),
+                "bypass invocation gained a routing warning"
+            );
+            assert_eq!(
+                std::fs::read_to_string(fixture.0.join("calls")).unwrap(),
+                format!("{args:?}\n")
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_shell_entry_refuses_unsafe_batch_arguments_visibly() {
+        let fixture = Fixture::new();
+        std::fs::rename(fixture.0.join("codex.exe"), fixture.0.join("client.exe")).unwrap();
+        std::fs::write(
+            fixture.0.join("codex.cmd"),
+            "@echo off\r\n\"%~dp0client.exe\" %*\r\nexit /b %errorlevel%\r\n",
+        )
+        .unwrap();
+        for argument in ["line\nbreak", "line\rbreak"] {
+            let result = fixture
+                .command(fixture.0.join("ivy-codex-shell.exe"))
+                .args(["-V", argument])
+                .output()
+                .unwrap();
+            assert!(!result.status.success(), "unsafe batch argument accepted");
+            assert!(!result.stderr.is_empty(), "batch failure was silent");
+            assert!(!fixture.0.join("record").exists(), "client was started");
+        }
+    }
+}
+
 #[cfg(unix)]
 mod tests {
     use std::fs;
@@ -37,6 +428,9 @@ fi
 if [ "$1 $2 $3" = 'app-server daemon start' ]; then
     echo daemon >> "$CALLS"
     printf '%s\0' "${PANEL_ID-unset}" "${PANEL_DIR-unset}" > "$DAEMON_ENV"
+    if [ -n "${IVY_NATIVE_RESPONSIBILITY_RECORD-}" ]; then
+        /usr/bin/python3 -c 'import ctypes,json,os,sys; query=ctypes.CDLL(None).responsibility_get_pid_responsible_for_pid; query.argtypes=[ctypes.c_int]; query.restype=ctypes.c_int; json.dump({"daemon_pid":os.getppid(),"responsible":query(os.getpid())},open(sys.argv[1],"w"))' "$IVY_NATIVE_RESPONSIBILITY_RECORD" || exit 92
+    fi
     printf '%s' "$DAEMON_JSON"
     exit 0
 fi
@@ -109,6 +503,43 @@ exit 37
     }
     fn diagnostic(output: &Output) -> String {
         String::from_utf8_lossy(&output.stderr).into_owned()
+    }
+
+    // macOS responsibility is kernel state; the Python supplied with Xcode queries it
+    // in the actual daemon-start fixture, so bypassing the launch correction fails this test.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ordinary_daemon_start_separates_native_responsibility_but_explicit_admin_keeps_it() {
+        let client = Client::new();
+        let record = client.dir.join("native-responsibility.json");
+        for (args, separate) in [
+            (&["app-server", "daemon", "start"][..], false),
+            (&[][..], true),
+        ] {
+            let output = client
+                .command(args, REMOTE_HELP)
+                .env("IVY_NATIVE_RESPONSIBILITY_RECORD", &record)
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(if separate { 37 } else { 0 }),
+                "{}",
+                diagnostic(&output)
+            );
+            let captured: serde_json::Value =
+                serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+            if separate {
+                assert_eq!(captured["responsible"], captured["daemon_pid"]);
+            } else {
+                assert_ne!(
+                    captured["responsible"], captured["daemon_pid"],
+                    "control already disclaimed; native regression oracle is unavailable"
+                );
+            }
+        }
+        assert_eq!(client.fields("daemon-env"), ["unset", "unset"]);
+        assert_eq!(client.calls(), "daemon\nhelp\ndaemon\n");
     }
 
     #[test]

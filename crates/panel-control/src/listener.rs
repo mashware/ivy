@@ -38,6 +38,8 @@ struct Services {
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
     inspector: Option<PublicationInspector>,
     #[cfg(windows)]
+    publication_scope: Option<Arc<term_core::ForegroundScope>>,
+    #[cfg(windows)]
     connection_workers: Option<Arc<std::sync::Mutex<Vec<JoinHandle<()>>>>>,
     #[cfg(windows)]
     releases: Option<crate::windows_services::ReleaseRegistry>,
@@ -107,6 +109,8 @@ thread_local! {
 #[derive(Default)]
 #[allow(dead_code)] // Test-only fault injection is absent from production call sites.
 struct TestHooks {
+    #[cfg(test)]
+    inspector: Option<PublicationInspector>,
     panic_acceptor: AtomicBool,
     panic_worker: AtomicBool,
     fail_worker_spawn: AtomicBool,
@@ -233,6 +237,8 @@ pub enum What {
     Read { pane: String, scrollback: bool },
     /// Close a pane this connection opened.
     Close { pane: String },
+    /// Show an image in the drawer of the caller's own console (D121); the endpoint decided which.
+    ImageOpen { path: std::path::PathBuf },
     /// The connection is over. Whatever it held is no longer held.
     ///
     /// **It carries no answer anybody waits for**: the thread that sends it is on its way out, and a
@@ -373,6 +379,8 @@ impl Channel {
             plan_reader: Arc::default(),
             inspector,
             #[cfg(windows)]
+            publication_scope: None,
+            #[cfg(windows)]
             connection_workers: None,
             #[cfg(windows)]
             releases: None,
@@ -483,7 +491,19 @@ impl Channel {
             reader: None,
             session: None,
             publisher: None,
-            inspector: None,
+            inspector: {
+                #[cfg(test)]
+                {
+                    test_hooks
+                        .as_ref()
+                        .and_then(|hooks| hooks.inspector.clone())
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            publication_scope: windows.publication_scope.clone(),
             connection_workers: Some(Arc::clone(&workers)),
             releases: Some(windows.release_registry()),
             document_snapshot: Some(document),
@@ -723,6 +743,7 @@ fn serve(
         return;
     }
 
+    #[cfg(not(windows))]
     let peer = (services.session.is_some() || services.publisher.is_some())
         .then_some(())
         .map(|_| Peer::capture(&stream).map_err(|_| "verified socket peer unavailable".to_owned()));
@@ -770,15 +791,37 @@ fn serve(
                             panic!("injected worker panic");
                         }
                     }
-                    // Capture and classify before this worker parses any request bytes.
-                    let origin =
-                        services
-                            .inspector
-                            .as_ref()
-                            .map_or(PublicationOrigin::Unknown, |inspect| {
-                                DiagnosticPeer::capture(&stream)
-                                    .map_or(PublicationOrigin::Unknown, |peer| inspect(&peer))
-                            });
+                    // Upgrade only inside this counted worker; the acceptor stays available.
+                    #[cfg(windows)]
+                    let stream = match stream.negotiate_peer() {
+                        Ok(stream) => stream,
+                        Err(_) => return,
+                    };
+                    #[cfg(windows)]
+                    let peer = (services.session.is_some() || services.publisher.is_some())
+                        .then_some(())
+                        .map(|_| {
+                            Peer::capture(&stream)
+                                .map_err(|_| "verified socket peer unavailable".to_owned())
+                        });
+                    #[cfg(windows)]
+                    if stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    // Capture and classify before interpreting any control operation.
+                    let origin = DiagnosticPeer::capture(&stream).map_or(
+                        PublicationOrigin::Unknown,
+                        |peer| {
+                            #[cfg(windows)]
+                            if let Some(scope) = &services.publication_scope {
+                                return crate::windows_services::publication_origin(scope, &peer);
+                            }
+                            services
+                                .inspector
+                                .as_ref()
+                                .map_or(PublicationOrigin::Unknown, |inspect| inspect(&peer))
+                        },
+                    );
                     converse(
                         stream,
                         connection,
@@ -1266,6 +1309,17 @@ fn answer(
             ),
             false,
         ),
+        Incoming::Request(Request::ImageOpen { path }) => (
+            ask_the_window(
+                Wants::Text,
+                What::ImageOpen { path },
+                connection,
+                origin,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
         // **The read never enters the window queue.** A minimised or occluded window may run no
         // interface pass, and recovering this document is most useful precisely then. The callback
         // owns the pane-lifetime boundary and returns one complete committed version.
@@ -1621,11 +1675,6 @@ mod tests {
         assert!(matches!(closed.what, What::Closed));
     }
 
-    crate::windows_unix_omission!(
-        diagnostic_peer_is_the_connected_process,
-        "unix-only: requires Unix socket peer credentials"
-    );
-
     #[cfg(unix)]
     #[test]
 
@@ -1636,11 +1685,6 @@ mod tests {
         assert_eq!(peer.pid(), std::process::id());
         assert!(peer.is_alive());
     }
-
-    crate::windows_unix_omission!(
-        inspector_runs_once_and_its_observation_reaches_each_delivery,
-        "unix-only: requires Unix socket peer credentials"
-    );
 
     #[cfg(unix)]
     #[test]
@@ -2645,6 +2689,11 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+#[path = "listener/windows_peer_tests.rs"]
+mod windows_peer_tests;
 
 #[cfg(test)]
 #[cfg(windows)]

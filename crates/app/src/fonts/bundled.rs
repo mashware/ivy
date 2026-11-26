@@ -66,8 +66,15 @@ pub(crate) fn base_definitions() -> FontDefinitions {
             .cloned()
             .expect("egui's default font definitions carry this family")
     };
-    let proportional = behind(FontFamily::Proportional);
+    let mut proportional = behind(FontFamily::Proportional);
     let monospace = behind(FontFamily::Monospace);
+    // Hack covers title symbols such as ◐ that none of the proportional faces carry.
+    // Keep it behind every existing proportional fallback so their supported glyphs still win.
+    for face in &monospace {
+        if !proportional.contains(face) {
+            proportional.push(face.clone());
+        }
+    }
     let chain = |front: &str, rest: &[String]| -> Vec<String> {
         std::iter::once(front.to_owned())
             .chain(rest.iter().cloned())
@@ -221,6 +228,119 @@ mod tests {
     fn pass(ctx: &egui::Context) {
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn pane_titles_paint_claudes_circle_with_the_bundled_fallback() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        for rebuilt in [false, true] {
+            if rebuilt {
+                super::super::selection::queue_definitions(None, &[], None, &ctx);
+            }
+            for weight in [400, 500, 600] {
+                for size in [8.0, 14.0, 24.0] {
+                    let text = "◐ Siguientes pasos del roadmap";
+                    let output = ctx.run_ui(Default::default(), |ui| {
+                        crate::header::title_text::paint(
+                            ui.painter(),
+                            egui::pos2(10.0, 30.0),
+                            egui::Align2::LEFT_CENTER,
+                            text,
+                            egui::FontId::new(size, ui_family(weight)),
+                            egui::Color32::WHITE,
+                        );
+                    });
+                    let title = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::epaint::Shape::Text(text) => Some(text.galley.clone()),
+                            _ => None,
+                        })
+                        .expect("the title must be painted");
+                    output.drop_without_applying_deltas();
+                    assert_eq!(title.job.text, text);
+                    let actual = title.rows[0].glyphs[0].uv_rect;
+                    let glyph = |c: char, family: FontFamily| {
+                        ctx.fonts_mut(|fonts| {
+                            fonts
+                                .layout_no_wrap(
+                                    c.to_string(),
+                                    egui::FontId::new(size, family),
+                                    egui::Color32::WHITE,
+                                )
+                                .rows[0]
+                                .glyphs[0]
+                                .uv_rect
+                        })
+                    };
+                    assert_ne!(
+                        actual,
+                        glyph('\u{0378}', ui_family(weight)),
+                        "replacement box at weight {weight}, size {size}, rebuilt {rebuilt}"
+                    );
+                    assert_eq!(
+                        actual,
+                        glyph('◐', FontFamily::Monospace),
+                        "the title must reach the bundled face that covers the circle"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_extra_ui_fallback_preserves_supported_glyphs_and_metrics() {
+        let original = FontDefinitions::default().families[&FontFamily::Proportional].clone();
+        let mut before = base_definitions();
+        for weight in [400, 500, 600] {
+            before
+                .families
+                .get_mut(&ui_family(weight))
+                .unwrap()
+                .retain(|face| {
+                    FACES.iter().any(|(name, _)| *name == face) || original.contains(face)
+                });
+        }
+        let old = egui::Context::default();
+        install(&old);
+        old.set_fonts(before);
+        pass(&old);
+        let new = egui::Context::default();
+        install(&new);
+        pass(&new);
+        let raster = |ctx: &egui::Context, c: char, family: FontFamily, size: f32| {
+            ctx.fonts_mut(|fonts| {
+                let galley = fonts.layout_no_wrap(
+                    c.to_string(),
+                    egui::FontId::new(size, family),
+                    egui::Color32::WHITE,
+                );
+                let uv = galley.rows[0].glyphs[0].uv_rect;
+                let image = fonts.image();
+                let mut pixels = Vec::new();
+                for y in uv.min[1]..uv.max[1] {
+                    for x in uv.min[0]..uv.max[0] {
+                        pixels.push(image[(usize::from(x), usize::from(y))]);
+                    }
+                }
+                (galley.size(), uv.offset, uv.size, pixels)
+            })
+        };
+        for weight in [400, 500, 600] {
+            for size in [8.0, 14.0, 24.0] {
+                for c in "abcABC012éñ◑".chars() {
+                    let previous = raster(&old, c, ui_family(weight), size);
+                    assert_ne!(previous, raster(&old, '\u{0378}', ui_family(weight), size));
+                    assert_eq!(
+                        previous,
+                        raster(&new, c, ui_family(weight), size),
+                        "existing glyph {c} changed at weight {weight}, size {size}"
+                    );
+                }
+            }
+        }
     }
 
     /// The raster bounds of `c` laid out at 14 points in `family`: what the eye sees of the face.

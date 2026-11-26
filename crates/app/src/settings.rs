@@ -2045,7 +2045,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            23,
+            24,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()
@@ -2482,11 +2482,44 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 57] = [
+        const SOURCES: [(&str, &str); 67] = [
+            (
+                "diagnostics_log/graphics.rs",
+                include_str!("diagnostics_log/graphics.rs"),
+            ),
             ("board/plans.rs", include_str!("board/plans.rs")),
             ("board/plans/disk.rs", include_str!("board/plans/disk.rs")),
             ("board/roadmap.rs", include_str!("board/roadmap.rs")),
             ("board/cards.rs", include_str!("board/cards.rs")),
+            (
+                "board/milestones/columns.rs",
+                include_str!("board/milestones/columns.rs"),
+            ),
+            (
+                "board/milestones/compact.rs",
+                include_str!("board/milestones/compact.rs"),
+            ),
+            (
+                "board/milestones/details.rs",
+                include_str!("board/milestones/details.rs"),
+            ),
+            (
+                "board/milestones/projection.rs",
+                include_str!("board/milestones/projection.rs"),
+            ),
+            (
+                "board/milestones/sections.rs",
+                include_str!("board/milestones/sections.rs"),
+            ),
+            (
+                "board/milestones/state.rs",
+                include_str!("board/milestones/state.rs"),
+            ),
+            (
+                "board/milestones/strip.rs",
+                include_str!("board/milestones/strip.rs"),
+            ),
+            ("board/milestones.rs", include_str!("board/milestones.rs")),
             ("board/style.rs", include_str!("board/style.rs")),
             ("board/view.rs", include_str!("board/view.rs")),
             ("roadmap_file.rs", include_str!("roadmap_file.rs")),
@@ -2557,6 +2590,7 @@ mod tests {
             ("session.rs", include_str!("session.rs")),
             ("session/ownership.rs", include_str!("session/ownership.rs")),
             ("startup.rs", include_str!("startup.rs")),
+            ("opening/pane.rs", include_str!("opening/pane.rs")),
             ("shell_integration.rs", include_str!("shell_integration.rs")),
             ("restoration.rs", include_str!("restoration.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
@@ -2658,9 +2692,12 @@ mod tests {
         // One and not more: `tab_bar.rs` carries a single sentence, so any higher number would be a
         // table rather than a floor — the same reason its sibling gives.
         for (name, _) in SOURCES {
-            if name == "session/ownership.rs" {
-                // This lock/IO module returns errors to its caller and has no user-facing
-                // sentences. If that changes, require it to join the per-file census.
+            if matches!(
+                name,
+                "session/ownership.rs" | "board/milestones/state.rs" | "opening/pane.rs"
+            ) {
+                // These ownership/disclosure modules have no user-facing sentences. If that
+                // changes, require them to join the per-file census.
                 assert!(
                     !sentences.iter().any(|(from, _)| from == &name),
                     "{name} now has a sentence: include it in the per-file census"
@@ -2709,9 +2746,9 @@ mod tests {
             assert!(
                 message.chars().all(|c| c.is_ascii()
                     || c == DRAWN_RULE
-                    || matches!(c, '·' | '✓' | '▸' | '▾' | '○' | '⎇')),
+                    || matches!(c, '·' | '✓' | '▸' | '▾' | '▴' | '↗' | '○' | '⎇')),
                 "«{message}» ({where_from}) carries a character that is neither ASCII nor the \
-                 report's rule: the angle quotes, the dashes and the accents are how this \
+                 report's rule or Board UI symbols: the angle quotes, the dashes and the accents are how this \
                  repository writes Spanish"
             );
             assert_eq!(
@@ -2820,17 +2857,19 @@ mod tests {
     fn the_file_is_looked_for_where_the_document_says() {
         // **`path_from` was pulled out explicitly «to be able to test it without touching the environment», and it was not
         // tested**: pointing it at the layout file left the suite green. A review caught it.
-        let path = path_from(Some(std::ffi::OsStr::new("/home/config")), None)
+        let home = std::env::temp_dir().join("home");
+        let config = home.join("config");
+        let path = path_from(Some(config.as_os_str()), None)
             .expect("an absolute path has to give a location");
         assert_eq!(
             path,
-            PathBuf::from("/home/config/ivy/config"),
+            config.join("ivy").join("config"),
             "the file is not looked for where the document says"
         );
 
         assert_eq!(
-            path_from(None, Some(std::ffi::OsStr::new("/home"))),
-            Some(PathBuf::from("/home/.config/ivy/config")),
+            path_from(None, Some(home.as_os_str())),
+            Some(home.join(".config").join("ivy").join("config")),
             "without the dedicated variable it does not fall back to the home's «.config»"
         );
         assert_eq!(

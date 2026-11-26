@@ -43,6 +43,7 @@ struct ClientFixture {
     pty: Pty,
     output: Receiver<Vec<u8>>,
     buffered: Vec<u8>,
+    discarded: Vec<u8>,
     directory: PanelDir,
     executable: PathBuf,
     authority: Arc<Authority>,
@@ -108,6 +109,7 @@ impl ClientFixture {
             pty,
             output,
             buffered: Vec::new(),
+            discarded: Vec::new(),
             directory,
             executable,
             authority,
@@ -115,7 +117,7 @@ impl ClientFixture {
             inbox,
             channel,
         };
-        assert!(fixture.read()["ready"].is_u64());
+        assert!(fixture.read("startup")["ready"].is_u64());
         fixture
     }
 
@@ -123,11 +125,17 @@ impl ClientFixture {
         let mut bytes = serde_json::to_vec(&value).unwrap();
         bytes.push(b'\n');
         self.pty.write(&bytes).unwrap();
-        self.read()
+        self.read("command")
     }
 
-    fn read(&mut self) -> Value {
-        read(&self.output, &mut self.buffered)
+    fn read(&mut self, stage: &str) -> Value {
+        read(
+            &self.pty,
+            &self.output,
+            &mut self.buffered,
+            &mut self.discarded,
+            stage,
+        )
     }
 
     fn hold(&mut self, source: &str) -> Connection {
@@ -153,7 +161,7 @@ impl ClientFixture {
             self.authority.capture(&self.state, connection, &peer);
         }
         delivery.answer.send(Answer::Taken).unwrap();
-        assert_eq!(self.read()["reply"]["ok"], true);
+        assert_eq!(self.read("hold")["reply"]["ok"], true);
         connection
     }
 
@@ -181,7 +189,13 @@ impl Drop for ClientFixture {
     }
 }
 
-fn read(output: &Receiver<Vec<u8>>, buffered: &mut Vec<u8>) -> Value {
+fn read(
+    pty: &Pty,
+    output: &Receiver<Vec<u8>>,
+    buffered: &mut Vec<u8>,
+    discarded: &mut Vec<u8>,
+    stage: &str,
+) -> Value {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(end) = buffered.iter().position(|byte| *byte == b'\n') {
@@ -189,11 +203,63 @@ fn read(output: &Receiver<Vec<u8>>, buffered: &mut Vec<u8>) -> Value {
             if let Ok(value) = serde_json::from_slice(&line) {
                 return value;
             }
+            discarded.extend_from_slice(&line);
         } else {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            assert!(!remaining.is_zero(), "fixture client response timed out");
-            buffered.extend(output.recv_timeout(remaining).expect("fixture output"));
+            assert!(
+                !remaining.is_zero(),
+                "fixture client response timed out during {stage}; ending: {:?}; discarded output: {:?}; buffered output: {:?}",
+                pty.ending(),
+                String::from_utf8_lossy(discarded),
+                String::from_utf8_lossy(buffered)
+            );
+            let bytes = output.recv_timeout(remaining).unwrap_or_else(|error| {
+                panic!(
+                    "fixture output during {stage}: {error:?}; ending: {:?}; discarded output: {:?}; buffered output: {:?}",
+                    pty.ending(),
+                    String::from_utf8_lossy(discarded),
+                    String::from_utf8_lossy(buffered)
+                )
+            });
+            buffered.extend(bytes);
         }
+    }
+}
+
+#[test]
+fn fixture_read_failure_preserves_child_traceback_and_stage() {
+    let (pty, output) = Pty::spawn(
+        "/usr/bin/python3",
+        &[
+            "-c",
+            // Python 3.13+ colours a traceback written to a terminal, which splits the witness
+            // with escapes; the text, not its colour, is what this test is about.
+            "import json, os; os.environ['PYTHON_COLORS'] = '0'; print(json.dumps({'ready':1}), flush=True); raise RuntimeError('fixture diagnostic witness')",
+        ],
+        Size::default(),
+    )
+    .unwrap();
+    let mut buffered = Vec::new();
+    let mut discarded = Vec::new();
+    assert_eq!(
+        read(&pty, &output, &mut buffered, &mut discarded, "startup")["ready"],
+        1
+    );
+    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read(&pty, &output, &mut buffered, &mut discarded, "command")
+    }))
+    .expect_err("disconnected child output must fail the fixture");
+    let message = failure.downcast_ref::<String>().expect("formatted panic");
+    for evidence in [
+        "during command: Disconnected",
+        "ending: Some(EndedWell)",
+        "Traceback (most recent call last):",
+        "RuntimeError: fixture diagnostic witness",
+    ] {
+        assert!(
+            message.contains(evidence),
+            "missing {evidence:?} in {message}"
+        );
     }
 }
 

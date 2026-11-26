@@ -123,7 +123,8 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                         &super::drawer::Tabs {
                             changes: None,
                             document: Some("document.md".into()),
-                            markdown: true,
+                            image: None,
+                            active: Some(crate::sidebar::Tool::Document),
                             side_by_side: false,
                         },
                         &super::drawer::Title {
@@ -131,7 +132,7 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                             folder: "docs".into(),
                             unavailable: false,
                         },
-                        None,
+                        crate::viewer::view::Body::Document,
                     ),
                 );
             },
@@ -472,7 +473,8 @@ fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_s
     let tabs = drawer::Tabs {
         changes: Some(Some(3)),
         document: Some("plan.md".into()),
-        markdown: false,
+        image: None,
+        active: Some(crate::sidebar::Tool::Git),
         side_by_side: false,
     };
     let has = |strip: &drawer::Strip, action| strip.places.iter().any(|(a, _)| *a == action);
@@ -502,7 +504,8 @@ fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_s
         "a strip that leaves controls out must say so"
     );
     let reading = drawer::Tabs {
-        markdown: true,
+        image: None,
+        active: Some(crate::sidebar::Tool::Document),
         ..tabs
     };
     let hidden_source = drawer::Strip::framed(
@@ -549,7 +552,8 @@ fn the_file_tab_paints_a_code_document() {
                         &super::drawer::Tabs {
                             changes: None,
                             document: Some("a.rs".into()),
-                            markdown: true,
+                            image: None,
+                            active: Some(crate::sidebar::Tool::Document),
                             side_by_side: false,
                         },
                         &super::drawer::Title {
@@ -557,7 +561,7 @@ fn the_file_tab_paints_a_code_document() {
                             folder: "r".into(),
                             unavailable: false,
                         },
-                        None,
+                        crate::viewer::view::Body::Document,
                     ),
                 );
             },
@@ -587,17 +591,16 @@ fn the_file_tab_keeps_a_code_file_across_tabs() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
     let pane = window.all_panes().next().unwrap().name;
-    let code = std::path::PathBuf::from("/r/src/lib.rs");
+    let root = std::env::temp_dir().join("viewer-file-tab");
+    let code = root.join("src").join("lib.rs");
+    let markdown = root.join("README.md");
     assert!(open_document_target(
         &mut window,
         pane,
-        "/r/README.md".into(),
+        markdown.clone(),
         None
     ));
-    assert!(!shows_as_code(
-        &window,
-        std::path::Path::new("/r/README.md")
-    ));
+    assert!(!shows_as_code(&window, &markdown));
     assert!(open_document_target(&mut window, pane, code.clone(), None));
     assert!(shows_as_code(&window, &code));
     activate(&mut window, false);

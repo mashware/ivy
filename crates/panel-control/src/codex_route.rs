@@ -1,7 +1,9 @@
 //! Private, conversation-scoped routes for Codex's panel bridge.
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -39,16 +41,17 @@ fn check(meta: &fs::Metadata, dir: bool) -> io::Result<()> {
     }
     Ok(())
 }
-#[cfg(not(unix))]
-fn check(meta: &fs::Metadata, dir: bool) -> io::Result<()> {
-    if if dir { !meta.is_dir() } else { !meta.is_file() } {
-        return Err(invalid("invalid route storage"));
-    }
-    Ok(())
-}
 fn validate_dir(path: &Path) -> io::Result<()> {
-    check(&fs::symlink_metadata(path)?, true)
+    #[cfg(windows)]
+    {
+        panel_contract::windows_directory::validate(path)
+    }
+    #[cfg(not(windows))]
+    {
+        check(&fs::symlink_metadata(path)?, true)
+    }
 }
+#[cfg(unix)]
 fn options(create: bool) -> OpenOptions {
     let mut o = OpenOptions::new();
     o.read(true).write(true);
@@ -64,16 +67,30 @@ fn options(create: bool) -> OpenOptions {
     o
 }
 fn open_file(path: &Path, create: bool) -> io::Result<File> {
-    let file = options(create).open(path)?;
-    check(&file.metadata()?, false)?;
-    Ok(file)
+    #[cfg(windows)]
+    {
+        if create {
+            panel_contract::windows_private_file::create_new(path)
+        } else {
+            panel_contract::windows_private_file::open(path)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let file = options(create).open(path)?;
+        check(&file.metadata()?, false)?;
+        Ok(file)
+    }
+}
+fn lock_contended(error: &io::Error) -> bool {
+    error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 fn lock(file: &File) -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match file.try_lock_exclusive() {
             Ok(()) => return Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+            Err(e) if lock_contended(&e) && Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10))
             }
             Err(e) => return Err(e),
@@ -82,28 +99,23 @@ fn lock(file: &File) -> io::Result<()> {
 }
 // The lock inode is stable; data is replaced atomically and never truncated in place.
 fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        let _ = (path, data);
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Codex routes require atomic replacement support",
-        ))
-    }
-    #[cfg(not(windows))]
-    {
-        let parent = path.parent().ok_or_else(|| invalid("missing parent"))?;
-        let temp = parent.join(format!("write-{}", random()?));
-        let mut f = open_file(&temp, true)?;
-        let result = (|| {
-            f.write_all(data)?;
-            f.sync_data()?;
-            fs::rename(&temp, path)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temp);
-        }
-        result
+    let parent = path.parent().ok_or_else(|| invalid("missing parent"))?;
+    let temp = parent.join(format!("write-{}", random()?));
+    let mut f = open_file(&temp, true)?;
+    let result = (|| {
+        f.write_all(data)?;
+        f.sync_data()?;
+        drop(f);
+        fs::rename(&temp, path)
+    })();
+    match result {
+        Err(error) => match fs::remove_file(&temp) {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(io::Error::other(format!(
+                "write failed ({error}) and removing temporary file failed ({cleanup})"
+            ))),
+        },
+        Ok(()) => Ok(()),
     }
 }
 fn route_lock_path(path: &Path) -> PathBuf {
@@ -238,9 +250,9 @@ impl Registry {
                 Err(e) => return Err(e),
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            match fs::create_dir(&root) {
+            match panel_contract::windows_directory::create(&root) {
                 Ok(()) => (),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => (),
                 Err(e) => return Err(e),
@@ -407,6 +419,7 @@ impl Registry {
                     .as_encoded_bytes(),
             )?;
             f.sync_data()?;
+            drop(f);
             for (other, _) in &mut displaced {
                 other.identity.active = false;
                 other.write()?;
@@ -419,9 +432,9 @@ impl Registry {
             Ok(())
         })();
         if let Err(error) = result {
-            let _ = fs::remove_file(&temp);
+            let cleanup_error = fs::remove_file(&temp).err();
             guard.identity = previous;
-            let mut restore_error = None;
+            let mut restore_error = cleanup_error;
             let route_restore = if route_changed {
                 guard.write().err()
             } else {
@@ -456,10 +469,7 @@ impl Registry {
     }
 }
 
-// Unix only: every route write goes through `atomic_write`, which refuses on Windows. Restoring
-// Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
 #[cfg(test)]
-#[cfg(unix)]
 mod tests {
     use super::*;
     fn registry() -> (PathBuf, Registry) {
@@ -474,10 +484,10 @@ mod tests {
         let route = r.pending().unwrap();
         assert!(!lock_route(&route).unwrap().identity.active);
         let thread = "01234567-89ab-cdef-0123-456789abcdef";
-        r.bind(thread, &route, "one", Path::new("/tmp/one"), "old")
+        r.bind(thread, &route, "one", &home.join("one"), "old")
             .unwrap();
         assert_eq!(r.route_for(thread).unwrap(), Some(route.clone()));
-        r.bind(thread, &route, "two", Path::new("/tmp/two"), "new")
+        r.bind(thread, &route, "two", &home.join("two"), "new")
             .unwrap();
         r.revoke(&route, "old").unwrap();
         let guard = lock_route(&route).unwrap();
@@ -494,12 +504,12 @@ mod tests {
         let (home, r) = registry();
         let route = r.pending().unwrap();
         let thread = "01234567-89ab-cdef-0123-456789abcdef";
-        r.bind(thread, &route, "old", Path::new("/tmp/old"), "old")
+        r.bind(thread, &route, "old", &home.join("old"), "old")
             .unwrap();
         let other_thread = "11234567-89ab-cdef-0123-456789abcdef";
         fs::create_dir(r.root.join(format!("thread-{other_thread}"))).unwrap();
         assert!(
-            r.bind(other_thread, &route, "new", Path::new("/tmp/new"), "new")
+            r.bind(other_thread, &route, "new", &home.join("new"), "new")
                 .is_err()
         );
         let guard = lock_route(&route).unwrap();
@@ -528,7 +538,7 @@ mod tests {
             "01234567-89ab-cdef-0123-456789abcdef",
             &route,
             "different",
-            Path::new("/tmp/different"),
+            &home.join("different"),
             "new",
         )
         .unwrap();
@@ -541,7 +551,7 @@ mod tests {
         let route = registry.pending().unwrap();
         let thread = "01234567-89ab-cdef-0123-456789abcdef";
         registry
-            .bind(thread, &route, "one", Path::new("/tmp/one"), "old")
+            .bind(thread, &route, "one", &home.join("one"), "old")
             .unwrap();
         let inflight = lock_route(&route).unwrap();
         let proof = inflight.identity.proof.clone();
@@ -557,11 +567,11 @@ mod tests {
         assert_eq!(registry.route_for(thread).unwrap(), Some(route.clone()));
         assert!(
             registry
-                .bind(thread, &route, "one", Path::new("/tmp/one"), "old")
+                .bind(thread, &route, "one", &home.join("one"), "old")
                 .is_err()
         );
         registry
-            .bind(thread, &route, "one", Path::new("/tmp/one"), "new")
+            .bind(thread, &route, "one", &home.join("one"), "new")
             .unwrap();
         assert!(lock_route(&route).unwrap().identity.active);
         registry.cancel_epoch("old").unwrap();
@@ -578,11 +588,11 @@ mod tests {
         let route = r.pending().unwrap();
         let proof = lock_route(&route).unwrap().identity.proof;
         let thread = "01234567-89ab-cdef-0123-456789abcdef";
-        r.bind(thread, &route, "one", Path::new("/tmp/one"), "first")
+        r.bind(thread, &route, "one", &home.join("one"), "first")
             .unwrap();
         assert_eq!(lock_route(&route).unwrap().identity.proof, proof);
         r.revoke(&route, "first").unwrap();
-        r.bind(thread, &route, "two", Path::new("/tmp/two"), "second")
+        r.bind(thread, &route, "two", &home.join("two"), "second")
             .unwrap();
         assert_eq!(lock_route(&route).unwrap().identity.proof, proof);
         fs::remove_dir_all(home).unwrap();
@@ -599,7 +609,7 @@ mod tests {
         {
             let mut guard = lock_route(&orphan).unwrap();
             guard.identity.pane_id = "pane-a".into();
-            guard.identity.pane_dir = PathBuf::from("/tmp/pane-a");
+            guard.identity.pane_dir = home.join("pane-a");
             guard.identity.epoch = "orphan".into();
             guard.identity.active = true;
             guard.write().unwrap();
@@ -608,7 +618,7 @@ mod tests {
             "21234567-89ab-cdef-0123-456789abcdef",
             &unrelated,
             "pane-b",
-            Path::new("/tmp/pane-b"),
+            &home.join("pane-b"),
             "other",
         )
         .unwrap();
@@ -619,7 +629,7 @@ mod tests {
             "11234567-89ab-cdef-0123-456789abcdef",
             &new,
             "pane-a",
-            Path::new("/tmp/pane-a"),
+            &home.join("pane-a"),
             "new",
         )
         .unwrap();
@@ -640,11 +650,11 @@ mod tests {
         let a = "01234567-89ab-cdef-0123-456789abcdef";
         let b = "11234567-89ab-cdef-0123-456789abcdef";
         let c = "21234567-89ab-cdef-0123-456789abcdef";
-        r.bind(a, &old, "pane-a", Path::new("/tmp/pane-a"), "old")
+        r.bind(a, &old, "pane-a", &home.join("pane-a"), "old")
             .unwrap();
-        r.bind(c, &other, "pane-b", Path::new("/tmp/pane-b"), "other")
+        r.bind(c, &other, "pane-b", &home.join("pane-b"), "other")
             .unwrap();
-        r.bind(b, &new, "pane-a", Path::new("/tmp/pane-a"), "new")
+        r.bind(b, &new, "pane-a", &home.join("pane-a"), "new")
             .unwrap();
         assert!(!lock_route(&old).unwrap().identity.active);
         assert!(lock_route(&new).unwrap().identity.active);
@@ -660,13 +670,9 @@ mod tests {
         let new = r.pending().unwrap();
         let a = "01234567-89ab-cdef-0123-456789abcdef";
         let b = "11234567-89ab-cdef-0123-456789abcdef";
-        r.bind(a, &old, "pane", Path::new("/tmp/pane"), "old")
-            .unwrap();
+        r.bind(a, &old, "pane", &home.join("pane"), "old").unwrap();
         fs::create_dir(r.root.join(format!("thread-{b}"))).unwrap();
-        assert!(
-            r.bind(b, &new, "pane", Path::new("/tmp/pane"), "new")
-                .is_err()
-        );
+        assert!(r.bind(b, &new, "pane", &home.join("pane"), "new").is_err());
         assert!(lock_route(&old).unwrap().identity.active);
         assert!(!lock_route(&new).unwrap().identity.active);
         assert_eq!(r.route_for(a).unwrap(), Some(old));
@@ -679,20 +685,20 @@ mod tests {
         let route = r.pending().unwrap();
         let guard = lock_route(&route).unwrap();
         let other_file = open_file(&route_lock_path(&route), false).unwrap();
-        assert_eq!(
-            other_file.try_lock_exclusive().unwrap_err().kind(),
-            io::ErrorKind::WouldBlock
-        );
+        assert!(lock_contended(
+            &other_file.try_lock_exclusive().unwrap_err()
+        ));
         let (started_tx, started_rx) = sync_channel(0);
         let (done_tx, done_rx) = sync_channel(0);
         let other_route = route.clone();
+        let worker_home = home.clone();
         let worker = std::thread::spawn(move || {
             started_tx.send(()).unwrap();
             let result = r.bind(
                 "01234567-89ab-cdef-0123-456789abcdef",
                 &other_route,
                 "new",
-                Path::new("/tmp/new"),
+                &worker_home.join("new"),
                 "new",
             );
             done_tx.send(result).unwrap();
@@ -705,6 +711,71 @@ mod tests {
         assert_eq!(lock_route(&route).unwrap().identity.epoch, "new");
         fs::remove_dir_all(home).unwrap();
     }
+    #[test]
+    fn held_reader_observes_old_record_and_mapping_after_replacement() {
+        let (home, r) = registry();
+        let old = r.pending().unwrap();
+        let new = r.pending().unwrap();
+        let thread = "01234567-89ab-cdef-0123-456789abcdef";
+        r.bind(thread, &old, "pane", &home.join("pane"), "old")
+            .unwrap();
+        let mut record_reader = open_file(&old, false).unwrap();
+        let mut mapping_reader =
+            open_file(&r.root.join(format!("thread-{thread}")), false).unwrap();
+        r.bind(thread, &new, "pane", &home.join("pane"), "new")
+            .unwrap();
+        let mut record = String::new();
+        record_reader.read_to_string(&mut record).unwrap();
+        let previous: Identity = serde_json::from_str(&record).unwrap();
+        assert!(previous.active);
+        assert!(!lock_route(&old).unwrap().identity.active);
+        let mut mapping = String::new();
+        mapping_reader.read_to_string(&mut mapping).unwrap();
+        assert_eq!(r.root.join(mapping), old);
+        assert_eq!(r.route_for(thread).unwrap(), Some(new));
+        drop(record_reader);
+        drop(mapping_reader);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn subprocess_lock_witness() {
+        const CHILD: &str = "IVY_ROUTE_LOCK_TEST_PATH";
+        if let Some(path) = std::env::var_os(CHILD) {
+            let file = open_file(Path::new(&path), false).unwrap();
+            assert!(lock_contended(&file.try_lock_exclusive().unwrap_err()));
+            return;
+        }
+        let (home, r) = registry();
+        let route = r.pending().unwrap();
+        let guard = lock_route(&route).unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "codex_route::tests::subprocess_lock_witness"])
+            .env(CHILD, route_lock_path(&route))
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("lock witness timed out");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(guard);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(windows)]
+    crate::windows_unix_omission!(
+        symlink_and_missing_routes_are_rejected,
+        "unix-only: requires Unix symlink semantics"
+    );
     #[cfg(unix)]
     #[test]
     fn symlink_and_missing_routes_are_rejected() {
@@ -718,50 +789,4 @@ mod tests {
         assert!(lock_route(&route).is_err());
         fs::remove_dir_all(home).unwrap();
     }
-}
-
-// The same tests, declared on Windows as omitted so the Windows test report can account for them.
-#[cfg(test)]
-#[cfg(windows)]
-mod tests {
-    crate::windows_unix_omission!(
-        binding_and_old_revocation,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        failed_mapping_commit_restores_the_previous_record_and_removes_temporary_file,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        interrupted_unrelated_record_does_not_poison_a_new_binding,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        cancellation_does_not_wait_for_inflight_guard_and_fresh_epoch_reuses_route,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        public_proof_is_immutable_across_bind_and_revoke,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        orphan_active_after_interruption_is_found_without_a_thread_mapping,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        binding_another_conversation_revokes_only_the_same_pane,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        failed_replacement_restores_the_displaced_pane,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        binding_waits_until_inflight_route_guard_is_released,
-        "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-    );
-    crate::windows_unix_omission!(
-        symlink_and_missing_routes_are_rejected,
-        "unix-only: requires Unix symlink semantics"
-    );
 }

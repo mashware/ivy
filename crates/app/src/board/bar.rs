@@ -23,6 +23,7 @@ pub(super) enum Action {
     EditQuery,
     ClearQuery,
     Close,
+    ShowAll(bool),
 }
 
 /// What the bar says about the whole Board, counted before any narrowing.
@@ -44,6 +45,7 @@ pub(super) fn apply(arrangement: &mut Arrangement, filter: &mut Filter, action: 
             filter.editing = false;
         }
         Action::Close => return true,
+        Action::ShowAll(_) => {}
     }
     false
 }
@@ -121,6 +123,7 @@ pub(super) fn paint(
     totals: Totals,
     arrangement: Arrangement,
     filter: &Filter,
+    show_all: Option<bool>,
     roles: &Roles,
     hits: &mut Vec<(Rect, Command)>,
 ) -> Rect {
@@ -174,7 +177,12 @@ pub(super) fn paint(
         FIELD_MIN,
     ];
     let lead = 16.0 + title_w + 10.0 + summary_w + 16.0;
-    let one_row = lead + controls.iter().map(|w| w + GAP).sum::<f32>() + close_w + 16.0 <= width;
+    let one_row = lead
+        + controls.iter().map(|w| w + GAP).sum::<f32>()
+        + close_w
+        + 16.0
+        + if show_all.is_some() { 110.0 } else { 0.0 }
+        <= width;
     // Where each control goes: (row, left). On one row they follow the summary; otherwise they flow
     // from the left edge onto rows under the title, wrapping before they would cross the edge.
     let mut placed = [(0usize, 0.0f32); 3];
@@ -201,6 +209,10 @@ pub(super) fn paint(
         HEIGHT
     } else {
         8.0 + ROW * rows as f32
+    } + if show_all.is_some() && !one_row {
+        32.0
+    } else {
+        0.0
     };
     let (bar, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
     let painter = ui.painter().clone();
@@ -211,7 +223,7 @@ pub(super) fn paint(
     );
     let center = |row: usize| {
         if one_row {
-            bar.center().y
+            bar.top() + HEIGHT / 2.0
         } else {
             bar.top() + 4.0 + ROW * (row as f32 + 0.5)
         }
@@ -267,7 +279,7 @@ pub(super) fn paint(
     segmented(ui, bar.left() + x, center(row), &narrowing, roles, hits);
     let (row, x) = placed[2];
     let right = if row == 0 {
-        close.left() - GAP
+        close.left() - GAP - if show_all.is_some() { 110.0 } else { 0.0 }
     } else {
         bar.right() - 16.0
     };
@@ -282,6 +294,25 @@ pub(super) fn paint(
         roles,
         hits,
     );
+    if let Some(all) = show_all {
+        let rect = Rect::from_min_size(
+            if one_row {
+                pos2(close.left() - 110.0, y - 13.0)
+            } else {
+                pos2(bar.right() - 110.0, bar.bottom() - 30.0)
+            },
+            vec2(94.0, 26.0),
+        );
+        painter.rect_filled(rect, 6, if all { roles.sel } else { roles.raised });
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            if all { "● Show all" } else { "○ Show all" },
+            FontId::proportional(12.0),
+            roles.tx2,
+        );
+        hits.push((rect, Command::Bar(Action::ShowAll(!all))));
+    }
     bar
 }
 
@@ -392,6 +423,7 @@ mod tests {
                 },
                 arrangement,
                 filter,
+                None,
                 &roles,
                 &mut hits,
             );
@@ -530,5 +562,33 @@ mod tests {
         let (_, _, wide) = painted_at(1200.0, &filter, Arrangement::ByState);
         let (_, _, narrow) = painted_at(520.0, &filter, Arrangement::ByState);
         assert!(narrow.height() > wide.height(), "a narrow bar grows rows");
+    }
+    #[test]
+    fn show_all_has_its_own_hit_target_inside_wide_and_narrow_bars() {
+        for width in [1440.0, 520.0, 360.0] {
+            let ctx = egui::Context::default();
+            crate::fonts::install_bundled(&ctx);
+            let mut hits = Vec::new();
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let rect = paint(
+                    ui,
+                    width,
+                    Totals::default(),
+                    Arrangement::ByMilestone,
+                    &Filter::default(),
+                    Some(false),
+                    &Roles::of(&crate::theme::Theme::default()),
+                    &mut hits,
+                );
+                let all = hit(&hits, Action::ShowAll(true));
+                assert!(rect.contains_rect(all));
+                for (other, command) in &hits {
+                    if !matches!(command, Command::Bar(Action::ShowAll(_))) {
+                        assert!(!all.intersects(*other));
+                    }
+                }
+            })
+            .drop_without_applying_deltas();
+        }
     }
 }

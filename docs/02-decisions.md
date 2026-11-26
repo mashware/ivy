@@ -3207,16 +3207,80 @@ it from the first emoji.
 
 ### What is left out, said with its reason
 
-**The color outlines —`COLR`— are not painted.** Doing it requires rasterizing outlines by hand,
-which is the rasterizer of our own that this milestone discarded **on purpose** because it
-invalidates the whole measurement history. On Linux it does not show, because the system's emoji
-fonts are bitmap ones; **on Windows it does**, because `Segoe UI Emoji` is `COLR`. It is declared as
-what **F2.7** is missing, not as something that works here.
+**The color outlines —`COLR`— were left out here, and #176 brought them in** (next section). The
+reason given was that painting them required a rasterizer of our own, which this milestone discarded
+because it invalidates the whole measurement history.
 
 **The skin-tone modifiers do not either.** They are **wide** characters, so the terminal engine
 gives them a cell of their own instead of attaching them to the base emoji's, and the presentation
 rule cannot look at the next cell: it does not have it in its signature. The base comes out in color
 and the modifier comes out on its own.
+
+### Colour outlines, painted by a library (#176)
+
+**`Segoe UI Emoji`, the font Windows asks for emoji, is `COLR`**: layers of outlines with a palette,
+no bitmap. Discovery already reached it — fontique names it as the emoji family on Windows — and the
+bitmap-only rasterizer answered nothing, so on Windows every emoji came out monochrome or blank. Two
+of the colour tests failed there and were listed as known failures (#188); the others skipped
+themselves for want of a colour font, and now run.
+
+**Decision.** A face that has no colour bitmap for the glyph but has a `COLR` record for it is drawn
+with `vello_cpu` and its `text` feature, whose glyph painter (`glifo`) understands `COLR` versions 0
+and 1 — gradients, composites, clip boxes. The image goes into the same atlas, under the same key,
+timed by the same span, and the report says how many of its glyphs came from outlines, so a batch
+cannot publish one path's cost under the other's name. **The bitmap is asked first**: a face that
+has one for the glyph never reaches the outlines, and the emoji fonts Linux and macOS ship —
+`Noto Color Emoji`, `Apple Color Emoji` — are bitmap ones. A machine whose emoji font is drawn in
+outlines does change: its emoji go from monochrome to colour.
+
+**What turning `text` on reaches beyond that branch**: Cargo builds one `vello_cpu` for both crates,
+so epaint's letters are drawn by a `vello_cpu` that carries the glyph painter's cache and its hooks
+too, idle for them. That is why the control `C` is taken again with this build, not borrowed from an
+earlier one.
+
+**It is not the rasterizer this decision refused.** What was refused was code of our own drawing
+outlines, which would have taken over the letters and so every published frame. This draws only
+colour glyphs, on an atlas miss, with a library — the same `vello_cpu` epaint already rasterizes its
+letters with, unhinted, which a colour glyph never is. Not the same *path*: epaint builds `vello_cpu` without `text`, so turning it on adds
+`glifo` to the build. Saying «epaint already does this» would be false.
+
+**The rules it draws by.** A glyph with no `COLR` record is not drawn here even though the library
+would draw its outline — that would be a white silhouette winning over the next face, the defect
+**D24** fixed. A graph the library cannot walk is not drawn either: it drops the error and hands back
+a blank, which remembered as a success would stand where the emoji is for the whole session. The
+glyph is placed on its advance, never on its ink, so every emoji of a face shares one scale and one
+baseline. It is drawn directly at the size it will occupy instead of drawn large and shrunk.
+Vertically, the box runs between the face's line (ascent to descent) and its `OS/2` Windows extent,
+whichever reaches further, because a face promises to keep its ink inside that extent. **The line
+alone cut `Segoe UI Emoji`.** Its line is flatter than its emoji (its advance is 1.43 times its
+line), so Windows CI drew 😀 touching the top or the bottom of its box. In `Noto Color Emoji`'s
+`COLR` form the line and the extent are both 950 up and 250 down, so its box is the same either
+way. The figures below were measured before this change and still hold for that reason. A layer drawn «in the text colour» is drawn white: the
+atlas is not keyed by colour, and the Windows suite checks four of `Segoe UI Emoji`'s emoji — a
+face, a hand, a cloud and a keycap — for a layer drawn that way.
+
+**Discarded.** Walking the paint graph with `skrifa` onto `tiny-skia`: our own painter, and
+`tiny-skia` has no sweep gradient, which `COLR` version 1 needs. DirectWrite's
+`TranslateColorGlyphRun`: Windows-only code for a problem a cross-platform library solves (**D1**),
+and a `COLR` font on Linux or macOS would still be blank. Shipping a bitmap emoji font for Windows:
+about ten megabytes, another emoji set than the system's, and every `COLR` face still blank.
+
+**Measured** with batch `colr`, which points the machine's emoji family at a pinned
+`Noto Color Emoji` in its `COLR` version 1 form; its control is `C`. The figures are that font's —
+heavy in gradients — not `Segoe UI Emoji`'s, which no script here can run. Both measured on
+21 November 2026 on the same machine, one tab of two consoles, 43×38 each.
+
+- **Drawing the outlines is paid once, and it is a millisecond.** In both `colr` runs one frame drew
+  **14 glyphs, all 14 from colour outlines**, in **1.273 ms and 1.282 ms**: about 91 µs a glyph at the
+  cell's size. Bitmap emoji are not comparable from these runs, because batch `Q` was not run with them.
+- **A screen with no emoji pays nothing measurable.** Batch `C` was run five times on this branch and
+  five times on its base, alternating. The rest of the frame came out at **230–404 µs** here and
+  **186–429 µs** on the base. Enqueueing the left console's paint came out at **212–336 µs** here and
+  **189–338 µs** on the base. The ranges overlap, so the honest reading is no measurable change.
+  **The medians are not equal, though**: 275 µs here against 215 µs on the base for the rest of
+  the frame. No code that runs without an emoji was changed. The only candidate is the build itself,
+  because the `text` feature is now compiled into the `vello_cpu` that epaint uses for its letters.
+  That candidate was not isolated. A later batch that finds the same gap should start there.
 
 ### The status panel, by another route to the same glyphs (#178)
 
@@ -5585,6 +5649,14 @@ published crate. It is the **first patched dependency in this repository's histo
 `docs/05-roadmap.md` carries the amendment to the policy that said versions come from published
 releases.
 
+**Checkout representation, November 2026** ([#190](https://github.com/mashware/ivy/issues/190)).
+The source drift lock compares CRLF checkout pairs as LF before checking its recorded lengths and
+hashes, including the source left after the authorized patch regions are removed. Git's ordinary
+Windows checkout otherwise changes the manifest from 10,316 to 10,729 bytes without a source edit.
+The recorded snapshot remains unchanged. Every other byte, a lone carriage return and the presence
+of the final newline remain significant; trimming whitespace, regenerating hashes for Windows or
+omitting the guard there would hide changes the lock is meant to catch.
+
 **What was broken, said in product terms.** Pressing `Ctrl+V` with a **screenshot** on the clipboard
 did nothing at all. Not the paste — correctly, that is `Ctrl+Shift+V`'s job — but not the control
 byte either, and not even the keypress. In a terminal built to host agents that is the gesture for
@@ -6261,10 +6333,18 @@ publishes for input.
   dependency; a skeptic refuted it by reading that the bridge *moves* the receiver into its own
   thread, which parks in a receive and cannot let go until the reader's sender closes; and a second
   reviewer refuted the refutation by finding **the bridge's other exit**. It breaks out of its
-  pick-up loop when its own stop flag is up — the flag its destructor sets — and that path is
-  reachable **only while the queue is at its ceiling**, which is precisely the jam that also parks
-  the reader inside a delivery. A test in that module already demonstrates the receiver being
-  dropped with the console alive.
+  pick-up loop when its own stop flag is up — the flag its destructor sets. At the time this was
+  recorded that path was reachable **only while the queue was at its ceiling**, precisely the jam
+  that also parks the reader inside a delivery. A test in that module demonstrated the receiver
+  being dropped with the console alive.
+
+  **Amended by native Windows testing in November 2026 (#187).** A dropped bridge now checks that
+  same flag before enqueuing every chunk, not only while waiting for capacity. Otherwise it keeps
+  the receiver until a full megabyte accumulates: a streaming Unix writer hides this, while
+  ConPTY renders changes in its buffer and need not deliver the child's original byte volume.
+  The regression keeps the queue below its ceiling, drops the bridge and supplies one more byte;
+  the thread must release its receiver and captured wake callback. It still needs that next chunk
+  to leave a blocking channel receive; no polling thread or new silence guarantee was added.
 
   So: a pane declares its console **before** the bridge, and Rust drops fields in declaration order,
   which is the only reason an ordinary close raises the flag first. **Reverse those two lines and
@@ -6280,6 +6360,21 @@ publishes for input.
   pane closed mid-dump is in.
 
 ---
+
+### Windows test witnesses — November 2026
+
+A raw consumer of a Windows console's output must answer the initial cursor-position request
+before expecting the child to write. The test consumer uses the same incremental `Screen` reply
+path as the application, with one parser retained across reads. A nonempty screen proves no child
+execution: ConPTY can draw before the program starts. A listener-loss witness therefore establishes
+child-produced output before disconnecting its receiver, leaves the child producing output, and
+requires `NobodyListening` exactly. Waiting longer, killing the child or accepting any abnormal
+ending would test a different event. D111's drain can continue after that ending is recorded.
+
+The error kind belongs to the platform too: raw error 5 is not `Uncategorized` on Windows. The
+synthetic failure witness must preserve both the original raw number and its platform's kind;
+a Unix mapping is not a portable oracle.
+
 
 ## D39 — A notice takes at most half its console, and it may not be drawn at all rather than drawn unreadable
 
@@ -7665,6 +7760,8 @@ so F2.7 names the observer it uses on each of them.
   | `Shift+Insert` | text on the clipboard | the text, pasted |
   | `Shift+Insert` | an image on the clipboard | nothing at all |
   | `AltGr+2`, `AltGr+´` | Spanish layout, a shell prompt | `@`, `{` |
+  | left `Ctrl+Alt+2` | Spanish layout, a shell prompt | `@` once; native verification pending for #206 |
+  | `Ctrl+Alt+A` | US layout, a shell prompt | no text; native verification pending for #206 |
   | `AltGr+Q`, `AltGr+7` | German layout, a shell prompt | `@`, `{` |
   | `Ctrl+Insert`, then `Shift+Delete` | text selected in a Settings field | copied; then cut |
   | `Ctrl+Insert` | lines selected in the drawer's code viewer | copied |
@@ -8850,6 +8947,14 @@ emitting `ResetTitle`; this change does not infer a reset from an unrelated even
 - Stripping client prefixes or guessing process lifecycle: a terminal title is the literal value the
   producer chose; transforming it would introduce client-specific semantics that the terminal lacks.
 
+**Amended for [#227](https://github.com/mashware/ivy/issues/227), 23 November 2026.**
+The header's folder/program fallback hid an AI-published title whenever the separate activity
+integration had no declaration, while Rename still showed that title. A usable published title
+therefore takes precedence over the folder/program fallback without requiring an activity signal.
+This includes shell-published titles: the terminal has no authenticated producer identity for OSC
+0/2. Requiring activity signals was discarded because naming and activity are independent;
+guessing the producer from title text or executable names would violate D6. Manual names still win.
+
 Title events are coalesced into one latest-update slot and consumed within the existing parser
 span. Name resolution belongs inside the existing chrome and Overview spans. There is no new pump,
 watcher or lower budget for hidden panes, and no new performance claim without valid measurement.
@@ -8992,8 +9097,8 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026 and for
-#178 on 20 November 2026.**
+**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026, for
+#178 on 20 November 2026 and for #198 on 22 November 2026.**
 Markdown and Git changes open in a transient surface beside the consoles, together with Files and
 the global Board; since #93 that surface is Files on the left and a drawer below (see the last
 section). The
@@ -9015,6 +9120,15 @@ It is not persisted. The view owns its gestures and keyboard input until focus r
 its dismissal consumes the input that closed it. Tool state remains retained while another tool is
 shown. Viewer, Board and sidebar host frame work are separately named and discounted once from the
 framework remainder; the host span excludes viewer and Board spans.
+
+**One-click return — 22 November 2026, #214.** A bare primary press on a visible console's body
+returns the keyboard from the drawer and focuses that console in the same input pass, before any
+typing is dispatched. This also releases a note or review field's editor focus. A gesture begun
+inside the drawer stays there until it ends; headers, panels, links, dividers and modal surfaces
+keep their own input rules. Discarded: requiring a second click, which makes returning from a note
+or review unlike switching consoles; relying on the console's later egui click response, which
+cannot choose the destination of text already dispatched earlier in that pass. No new frame span
+is introduced: the handoff stays in the existing viewer input span.
 
 Until #93 the sidebar reserved a 36 point navigation rail, a 6 point divider and a preferred 480
 point body of at least 320 points. The rail is gone and the geometry is the one the last section
@@ -9176,6 +9290,14 @@ keep no loose floating window, and to put Markdown in the drawer as a tab.
   uses. Review rows show the file's name first, its folder dimmed and its counts on the same row;
   diff rows touch, with dim line numbers and the change's mark in its colour. Side by side divides
   its two columns where the person drags the handle between Before and After.
+- **The active drawer tab has priority in a narrow strip** (#215). After the source label,
+  Git controls and diff toggle have given way, inactive tabs give way before the selected one.
+  Retained tabs keep their Changes / Document / Image order; a tab and its close target are
+  retained or omitted together. If the selected tab alone cannot keep its usual width, its label
+  is shortened inside the remaining tab space. Maximize and drawer close keep their places.
+  This replaces dropping the last tab by position, which could hide the view being read and
+  leave only its close button. Reordering the active tab first was discarded: selecting a tab
+  should not shuffle the strip when the retained tabs fit in their original order.
 - **Not modal.** Neither the drawer, Files nor a press on the title bar dims the consoles: only a
   modal surface does (a console's rename or menu, the title bar's menu, a dialog). Dimming on the
   drawer shaded the window beside it, and dimming on a title-bar press painted every console at half
@@ -9215,7 +9337,8 @@ relative path is joined onto that console's directory, as its review is, and ref
 only when the console has none. Files says «Only Markdown, PNG and JPEG files open in the drawer.»
 for anything else.
 
-- **One document tab, as before.** The image and a Markdown file replace each other there: opening
+- **One document tab, as before.** *(Superseded by «The image leaves the document tab», #198.)*
+  The image and a Markdown file replace each other there: opening
   one forgets the other, and closing the tab forgets both, through one replacement every entry
   uses. The image is pinned to the console it was printed in, not to the focused one, and the strip
   shows that console's project or folder.
@@ -9223,7 +9346,8 @@ for anything else.
   never again: switching to Changes and back, or closing and reopening the drawer, shows the same
   picture, and a program that overwrites the same screenshot name does not change what is on
   screen. Markdown's one-second refresh does not apply.
-- **One read at a time.** A read stuck on an unresponsive filesystem cannot be cancelled, so
+- **One read at a time.** *(Superseded in part by «The image leaves the document tab», #198: the
+  bound is per open console, and a closed console's stuck read is let go.)* A read stuck on an unresponsive filesystem cannot be cancelled, so
   replacing or closing an image whose decode has not finished keeps its handle, and another open
   while it runs is refused with «Still reading <path>…» in the drawer. Repeated opens cannot pile
   up readers, the rule the Markdown state already keeps. Errors name the path they are about.
@@ -9293,7 +9417,7 @@ for anything else.
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
 - **Marked and sent (21 November 2026).** A plain left drag draws on the image, and Send hands a
   copy with the marks to the console the image came from: **D113**. Marks not yet sent keep the
-  image in the document tab, as unsent review comments keep their review.
+  image in its console's slot, as unsent review comments keep their review.
 
 Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
 forces the Markdown kind and a kind change clears that state, which would erase the image on the
@@ -9308,6 +9432,33 @@ pointer meant laying blank space before and after the image, and that broke it f
 trailing blank left stale when the drawer grew, scroll-bar drags remapped against content that
 shrank every frame so the thumb ran ahead and jumped, guessing where egui puts its bars to keep a
 pan off them, and its own drag-to-scroll joining the pan after a touch.
+
+### The image leaves the document tab — 22 November 2026, #198
+
+Images get a drawer tab of their own, **Image**; the document tab is Markdown or code only again,
+single and shared, and opening one no longer forgets the other. Each console holds one image with
+its zoom, its marks and its notes, kept on the console and dropped with it, unsent marks included,
+with no dialog. The Image tab shows the focused console's image and follows focus: clicking another
+console shows that console's image, and coming back shows the first one as it was left. On a
+console with none the tab stays selected and says so, since closing or switching the drawer on a
+focus click would resize every console. A Ctrl+click on an image path, or Files activating one,
+fills the clicked console's slot and moves the focus to that console. Unsent marks refuse a new
+image in their own console only; they no longer refuse opening Markdown. Decoding stays lazy and
+once per opening; one live and one abandoned read are bounded per open console, so a stuck read
+never refuses another console's image. A closed console's stuck read is let go with its slot,
+unlike a replaced one, which its slot keeps: its thread finishes unwatched and nothing waits on it,
+so a hung mount costs one reader per console opened and closed on it. A pan latched on one console's image is forgotten when the drawer paints another's. Send
+addresses the slot of the console it was clicked for, never the focused one: its line, its «Sent
+to» and a cancelled worker's last word all go there, and what it has to say about a console that
+closed meanwhile, whose slot went with it, goes to standard error only. No title-bar button opens
+the Image tab: the File door opens the drawer, and the tab is in its strip while the focused
+console holds an image or the tab is the one shown.
+
+Discarded: keeping the image in the document tab with a per-console «front» flag (the tab flipped
+between an image and a Markdown file not that console's); per-console Markdown (nobody asked); a
+map of images on the window (a prune on every way a console leaves; the field needs none); showing
+a closed console's last word in the focused console's slot, which would put one console's news
+under another's image.
 
 ## D73 — Connection help is global and reports observed publication
 
@@ -9371,6 +9522,9 @@ evidence that it is necessary). Automatic client configuration remains outside t
 
 Ordinary supported shells install a console-local `codex` function after user startup and delegate to the bundled `ivy-codex` launcher. The launcher checks client capability before adding `--no-daemon` to local interactive launches. Existing aliases and functions retain precedence; explicit bypasses remain available. MCP identity forwarding is still required. This avoids changing global shell or Codex configuration and leaves existing recovery intact.
 
+
+
+**Code-document navigation — 25 November 2026, #245.** A text selection held beyond the top or bottom advances the viewport until the person returns inside, releases, or reaches the document boundary. The anchor stays in document coordinates. Overflowing code documents use opaque scrollbars with their own space; wrapped text reserves the vertical bar and disables horizontal overflow. Discarded: enabling scrollbar visibility without changing the floating style, whose dormant opacity still hides the position indicator, and relying on ScrollArea to infer autoscroll from a custom selection widget. The code-file menu restores comfortable item padding and an outlined Wrap lines checkbox locally because the generic menu style removes both; the shared menu system stays unchanged. Toolbar alignment remains an observed report to verify visually: centered headless fixtures are not evidence that the native symptom is fixed.
 
 ---
 
@@ -9679,6 +9833,15 @@ exec, even with CLOEXEC. The application has one main window per process, and te
 processes for that ownership boundary. Secondary windows are intentionally transient in this
 delivery, approved explicitly before implementation. This replaces D16's last-writer-wins
 limitation without adding a workspace registry or selector.
+
+**Lease inspection amendment (#225).** On Unix, existing leases are opened read-only and probed
+with a nonblocking POSIX read lock. Every live owner still retains an exclusive write lock, so the
+probe preserves active leases while allowing a readable obsolete file owned by another user to be
+removed from the user's writable lease directory. Requiring write access to inspect an old file
+disabled both restoration and saving after a root-owned `0644` lease was left behind on macOS.
+No owner or permission is changed: unreadable leases and failed cleanup still refuse ownership.
+Discarded: deleting files after a permission error, which cannot establish whether a lease is live,
+and changing permissions automatically, which requires authority Ivy should not need.
 
 Directory recovery uses D78's local sources and precedence, reusing the ordinary-frame project
 observations instead of introducing a polling timer. A final observation before clean exit covers
@@ -10163,9 +10326,90 @@ process scans or per-frame inspection (unbounded or frame-blocking work without 
 
 ## D92 — Codex mobile and panel tools share one conversation owner
 
+**Amended 25 November 2026 — #173.** Private Codex route storage is supported on Windows
+independently of the shared-conversation relay. Route directories and each opened/created file
+use a current-user-owned protected user/SYSTEM DACL, checked through the handle used for data;
+capability files and the directory reject reparse points. Persistent lock files are separate
+from synced, atomically replaced records and thread mappings. Existing storage with an unsafe
+ACL is refused rather than silently repaired. Runtime capability files deliberately do not
+support cloud/filter-backed reparse storage; this does not change the document viewer's policy.
+The pathname namespace and other processes of this user retain the existing per-user trust boundary.
+
+Windows shared-panel routing remains unsupported, with that reason printed at ordinary interactive
+launch. Official Codex documents a Windows AF_UNIX daemon endpoint and a proxy that accepts it;
+upstream transport support alone does not identify the intended Ivy pane. A route does not carry
+the expected app PID required by Windows producer authentication, and the shared daemon cannot
+supply it from its inherited environment. Native relay console lifetime and daemon/proxy attachment
+also remain unverified. The launcher preserves the original command and status, never adding
+`--no-daemon`. This delivery keeps route v1 unchanged and does not port session recovery.
+
+**Discarded:** enabling the relay after storage alone (omits per-route authenticated app identity
+and native lifetime proof); declaring the upstream Windows transport unsupported (the official
+client documents AF_UNIX); inheritance-only file privacy (does not validate an existing file);
+truncating snapshots in place or deleting before replacement (exposes incomplete state to readers);
+copying a second ACL implementation (would diverge from private pane-directory policy);
+automatically fixing existing ACLs (changes ownership/access without the caller choosing it).
+
+
+**Amended 25 November 2026 — #251.** The official-server connection accepts an
+individual WebSocket frame up to the existing 64 MiB message ceiling. The official
+Codex 0.172.0 proxy emitted the plugin catalog as one 48,300,053-byte frame; the
+relay's default 16 MiB frame limit rejected its header even though the complete
+message was within the supported envelope. Frame and aggregate-message limits are
+independent, so setting only a message ceiling does not make that response usable.
+
+The upstream limit remains finite and independent of Codex version numbers. The
+local client's incoming-request limit, authentication, routing proof, shared owner
+and byte-progress health checks keep their existing boundaries. A large response
+must still pass through normal routing to the official client; accepting its header
+alone does not establish that it was delivered.
+
+**Discarded for the catalog amendment:** disabling remote plugins or editing user
+settings to shrink the catalog (removes available functionality); an unbounded
+frame/message size (removes the transport's memory envelope); extending health
+timeouts (does not affect header-length rejection); a version allowlist (catalog
+size can change without a CLI update).
+
+**Amended 23 November 2026 — #224.** On macOS, the bounded official
+`app-server daemon start` launch disclaims Ivy's native process responsibility at exec.
+The reporter closed Ivy and confirmed that its main process had exited, while two
+official Codex daemon processes still reported Ivy's executable as their responsible
+path. The surviving MCP bridges instead reported ChatGPT. A daemon's responsible PID
+being itself after its original parent exits does not remove the cached application
+attribution, so PPID 1 or `setsid` does not establish an independent application lifetime.
+
+Only this persistent-service launch uses the native adapter. Argument/environment storage,
+absolute PATH candidates and spawn attributes are prepared before fork; the final hook replaces
+the already-prepared child with `posix_spawn(POSIX_SPAWN_SETEXEC)`, retaining its PID,
+stdio, directory, signal setup and the existing timeout/reaping path. The dynamically
+resolved `responsibility_spawnattrs_setdisclaim` SPI follows LLVM's spawn-time interface;
+an unavailable capability or failed setup refuses the launch rather than silently
+claiming separation. Ordinary shells, remote TUIs, proxies and explicit admin commands
+retain their launch behavior. New permission requests belong to the resulting service's
+native identity; no permission is granted or authentication setting changed by Ivy.
+
+The official shared server remains the conversation owner. Attaching to an existing
+server does not repair its old attribution, restart it or stop other clients. A server
+already attributed to Ivy can retain the Dock entry until it is explicitly restarted.
+Native tests must observe effective responsibility through the actual launch path;
+cross-compilation does not prove the packaged Dock outcome or mobile interoperability.
+Those acceptance checks remain required on macOS.
+
+**Discarded:** killing all Codex daemons or bundled MCP helpers on exit (disrupts shared
+and external clients); adding `--no-daemon` (loses live mobile ownership); merely
+detaching the Unix session (does not clear native attribution); relocating the MCP
+bridge (the observed bridges belonged to ChatGPT); installing a new persistent launch
+service (introduces lifecycle and installation behavior beyond this fix).
+
+**Amended 23 November 2026 — #223.** Relay health counts inbound byte progress, including an incomplete WebSocket frame that yields through read timeouts. Counting only complete messages falsely closed a valid slowly delivered MCP inventory response after the five-second probe deadline: a Pong cannot interrupt the bytes of an already-started frame. Idle connections still receive the five-second Ping probe, and an unanswered probe with no inbound progress still closes after five further seconds. A per-connection failure emits its fixed, payload-free reason before closing; conversation contents, protocol payloads and authentication tokens are absent.
+
+The unchanged relay reproduced the cutoff at 10.045 seconds with 100-byte writes every 500 ms; the same response sent immediately and a healthy twelve-second wait succeeded. Separately, actual Codex 0.171.0 reproduced both reported unavailable/read-only messages after an induced disconnect on a fresh main conversation: its server rejected reattachment because no rollout existed before the first turn. This establishes the portable failure paths, not native macOS incident identity. Byte-progress regression tests use a real decoder and virtual time; silence and route-proof semantics remain unchanged.
+
+**Discarded for the health amendment:** increasing or removing the deadline (hides a dead proxy); requiring a completed Pong while a frame is still arriving (the Pong cannot be decoded yet); automatic independent fallback (loses shared mobile control); changing Codex history or writer ownership in Ivy (those remain upstream).
+
 **Amended 19 November 2026 — #140.** Ordinary supported Codex starts on macOS now select the same authenticated shared relay as Linux. A fresh-window report showed the second console reading the first console's panel even with shell integration present: excluding macOS from the relay while executing Codex unchanged allowed the shared daemon's inherited identity to select the panel. Missing capabilities, failed shared setup and unverified route proofs retain the existing refusal path; Ivy never automatically adds `--no-daemon`. Explicit bypass invocations and ordinary direct panel producers retain their meaning. Shared-launch and refusal fixtures now run on macOS as well as Linux, with native arm64 and Intel panel-control tests required by the PR workflow. Native two-console and phone history/input interoperability remain separate acceptance checks; Linux fixtures and a native package build do not establish them.
 
-**Discarded for the macOS amendment:** retaining unverified ordinary-launch passthrough (reproduces cross-console publication); automatically selecting independent mode (loses live mobile input); treating all detached producers as unauthorized (changes D91's deliberate diagnostic-only boundary). Windows remains outside this relay's supported platforms because atomic route replacement is not implemented there.
+**Discarded for the macOS amendment:** retaining unverified ordinary-launch passthrough (reproduces cross-console publication); automatically selecting independent mode (loses live mobile input); treating all detached producers as unauthorized (changes D91's deliberate diagnostic-only boundary). Windows remains outside this relay's supported platforms; the #173 amendment separates private storage from the unverified relay identity and lifecycle.
 
 **Amended 18 November 2026 — #130.** Updating the official CLI to 0.170.0 exposed the exact-version guard as a product regression: the installed launcher silently selected independent mode and mobile could only read saved messages. Shared eligibility now uses bounded CLI capability checks and the actual daemon/proxy protocol, retaining the immutable MCP proof before route binding. Neither CLI nor managed-server version numbers control eligibility. Ivy never adds `--no-daemon` automatically; an explicit user argument retains its meaning. Missing capabilities or failed shared setup stop the launch with a diagnostic. Other platforms and unsupported invocation shapes preserve the original command and diagnose unverified local panel routing. This removes version-based rejection, not the possibility that a future incompatible protocol fails. Native and phone interoperability observations remain version-specific evidence below.
 
@@ -10181,7 +10425,7 @@ process scans or per-frame inspection (unbounded or frame-blocking work without 
 
 The relay discovers MCP configuration for each requested project, using the explicit launch directory or the saved thread's directory. It merges only its environment leaf; normalized config readback is never reinserted as input. Before binding, a normal read-only MCP call returns an immutable public proof nonce from the actual running bridge. The relay compares it with the pending capability's proof, so a loaded-thread race cannot turn an ignored config override into a false successful binding. The nonce is independent of the bearer path and grants no panel authority. Missing or mismatched proof refuses the attachment without choosing another pane.
 
-Route data is atomically replaced while a separate persistent lock inode serializes complete calls and cutover. Each attachment scans validated atomic route snapshots under the registry lock and releases every prior active route for that exact pane, including an orphan left before its thread mapping committed. Only matching routes are locked; unreadable unrelated records cannot poison another pane. This costs one scan per attachment, outside frame and MCP-call work. The MCP process also releases an obsolete Producer while otherwise idle. Missing or corrupt unrelated records cannot prevent another pane from binding. The original delivery retained an independent safeguard on macOS and Windows pending native verification; the amendments above supersede that launcher policy. Windows atomic route replacement is not claimed.
+Route data is atomically replaced while a separate persistent lock inode serializes complete calls and cutover. Each attachment scans validated atomic route snapshots under the registry lock and releases every prior active route for that exact pane, including an orphan left before its thread mapping committed. Only matching routes are locked; unreadable unrelated records cannot poison another pane. This costs one scan per attachment, outside frame and MCP-call work. The MCP process also releases an obsolete Producer while otherwise idle. Missing or corrupt unrelated records cannot prevent another pane from binding. The original delivery retained an independent safeguard on macOS and Windows pending native verification; the amendments above supersede that launcher policy. Windows private atomic route storage is covered by the #173 amendment; Windows relay support is not claimed.
 
 On launcher exit, an immutable private cancellation marker closes its exact attachment epoch before any route lock or relay join is attempted. A tool operation already in flight can finish, but subsequent operations see that epoch as inactive even if a slow operation delayed ordinary record cleanup. Cancellation takes no route or registry lock, so it remains effective under contention and cannot revoke a newer epoch. The stable public proof remains readable while inactive, permitting a later verified resume. Process reapers are detached and explicitly declared; relay and reader joins have a grace deadline. Cleanup failure is diagnosed rather than presented as successful revocation.
 
@@ -10311,6 +10555,71 @@ preference, not the window's shape, and could not be written by hand); inferring
 (D6); painting the declared `attention` on the card while the columns follow the effective state
 (a card read «waiting» in the Working column).
 
+**Large-roadmap correction, 24 November 2026 — #235.** The supplied Board milestone specification
+and screenshot show why wrapping every milestone and every item stops locating live work, and why
+unbounded child cards can cross a neighbouring column. This replaces only the By milestone reader
+presentation above. By state and the saved arrangement preference remain.
+
+Every project plan has one equal-width, non-wrapping, non-scrolling milestone strip, a legend, then
+In progress, Ready to start, Off the plan and Opened by you groups. Completion is the literal done
+count equalling the item count, including 0/0. Otherwise a declared current item or an exact
+milestone/item console attachment activates it; an attached effective claim uses Wait > Block >
+Done. Partial progress alone is not activity. All dependencies done makes an inactive milestone
+ready; unknown dependency IDs and cycles are unmet and diagnosed once. No title, translation,
+branch or panel body establishes a console attachment or claim.
+
+Active columns show relevant items plus at most two following pending items; ready columns show
+one pending item. Headers and remaining-item summaries expose all items and the closing criterion.
+The strip reveals/expands existing columns, or explicitly opens done/later ones; a second click
+restores their default or removes an explicitly opened column. Show all displays the roadmap order
+and Off the plan last. It overrides the claiming-column restriction while enabled. Reader disclosure
+is per project for the app session; class changes clear temporary full expansion and retain explicit
+opens. An all-done message does not hide outside tasks or unmatched consoles.
+
+Expanded columns keep 240 points, collapsed ones 190, with a 20-point gap within a group and
+24 points between groups. Expanded columns share surplus width, with card-bearing columns weighted
+1.2. When minima do not fit, only the column row scrolls horizontally. Both painted content and hits
+are clipped to their column and viewport. Item cards are indented 20 points; milestone-only cards
+remain above items, and Off the plan cards precede outside tasks. Plan-less projects use a responsive
+card grid capped at four columns. Text filtering affects cards only, after classification; Claiming
+you restricts columns while leaving the strip intact.
+
+The owner explicitly resolved three specification gaps: Tab traverses strip, columns/items and
+cards without adding the nonexistent next-claim shortcut; fourteen milestones at 1440 points is
+the overview witness, while physically insufficient widths/counts truncate labels with full hover
+text; compact cards show the title and at most three literal non-title producer lines, prioritizing
+explicit wait/block marks, rather than inventing universal Decision/Now/Next fields from arbitrary
+content. Those marks choose excerpt presentation only. Cards retain effective attention, freshness,
+branch, phase and warnings. Escape closes By milestone immediately, including while editing its
+filter; By state's existing two-step filter escape remains. A declared resolvable local roadmap
+source opens in the existing read-only document viewer; unknown sources report unavailability on
+hover. Old publication age is highlighted after 24 hours.
+
+Discarded: fuzzy matching translated task titles (ambiguous identity under D6); changing the public
+panel schema to force three labels (unnecessary for a reader arrangement); another strip scrollbar
+or wrapped strip (loses the overview); drawing the whole producer body in each milestone card
+(reintroduces the supplied crowding); a preliminary layout PR followed by a replacement (an extra
+serial delivery with no durable independent part). No native desktop or performance claim follows
+from synthetic geometry tests; existing Board spans account for the new work once.
+
+**Reader controls correction, 25 November 2026 — #250.** The owner's annotated screenshot asks
+for consistent header padding, removes roadmap preview rows because the header already exposes
+them, and makes caption groups adjustable. Milestone headers inset title, badge, count and progress
+by eight points. Default bodies retain every attached console card and its literal producer excerpt;
+only explicitly expanded headers (or Show all) expose roadmap item rows and closing criteria.
+The preview counts below cards are removed. Discarded: retaining two pending previews (the reported
+duplication) or removing access to roadmap details (the header is the requested access).
+
+In progress, Ready to start, Off the plan and Opened by you are reader-owned groups. Adjacent
+separators transfer width between their two neighbors, bounded by existing column minima. Hidden
+groups have named restore controls outside the horizontal scroller. Maximization is an override
+that leaves normal widths and visibility untouched; restoring recovers that state. These choices
+have Reader's session lifetime, independently per project. Show all retains its flat roadmap order
+and temporarily bypasses these group preferences. Discarded: per-milestone controls (the screenshot
+marks group boundaries), a second saved layout snapshot (duplicates normal state), and a new disk
+format (not requested). New input/layout/paint stays inside the existing Board timing spans;
+no performance or native validation claim follows from this decision.
+
 ## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
 
 **New signal, 15 November 2026 — #93.** The owner commissioned a redesign in Claude Design and asked
@@ -10379,6 +10688,16 @@ named family because egui has no weight axis, and egui's own faces stay behind t
 the definitions — start-up, a configured family, fallback discovery, a Settings preview, clearing the
 font — starts from that base, so none of them can drop it. A configured `font` still goes first.
 Embedding needs no enumeration of the machine, so D24 stands.
+
+**Header symbol fallback, 24 November 2026 — #240.** Claude's published `◐` (U+25D0)
+rendered as the replacement box: neither Geist nor egui's proportional fallback faces cover it,
+although the already-bundled monospaced Hack does. Append egui's monospaced fallback faces after
+the existing proportional fallback chain, including the medium and semibold UI families. A face
+already in that chain is not duplicated. The existing faces still win every character they cover;
+the added fallback only supplies missing characters and survives every definition rebuild.
+Discarded: requiring a system font (machine-dependent coverage and discovery), adding another
+font asset (coverage already ships), and drawing or replacing the published symbol ourselves
+(the text font already contains it). This changes neither terminal font selection nor title text.
 
 **D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell within
 a hundredth of a point. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
@@ -11499,33 +11818,60 @@ before choosing to send, the D42 precedent.
 window's input pass, before the copy is started — the image replaced, the console gone, no
 `PANEL_DIR`, a paste waiting for an answer, a writer that gave up, a line longer than the console
 keeps in one paste, a first free copy name that is no longer the one the line showed (taken since,
-or an earlier one freed) — and a refused Send writes no file. **From the click to the Enter the
-marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
+or an earlier one freed) — and a refused Send writes no file. **From the click to the typed line
+the marks and notes are frozen**: the copy is drawn from them a frame after the click, and a delivered
 Send clears them, so an edit made meanwhile would be wiped unsent; a Ctrl+Z in the very pass of the
 click is refused too, and so is a second Send. **Until the line is typed, a Cancel beside «Sending…»
 takes the Send back** (#197): the marks and notes stay and unfreeze, nothing is typed, and a worker
 already writing is parked — a write cannot be interrupted — and polled from the window's input pass
 until it ends, when its copy is removed, and with it the folder of a console that closed meanwhile.
-While a worker is parked, Send is greyed out and reads «Still finishing the previous copy…» — on the
-button, because any other notice can replace Cancel's — and a Send asked anyway is refused with it
-before any other check, so two workers never race for one name; the decoder's abandoned read is the
-same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
-goes to standard error as well, and waits for the next drawer that lays the notes out, because the
-image it was for may be closed by then; there it joins the notice shown rather than replacing it,
+While a worker is parked, Send is greyed out and reads «Still finishing the copy for <console>…» —
+on the button, because any other notice can replace Cancel's — and a Send asked anyway is refused
+with «Still finishing the previous copy» before any other check, so two workers never race for one
+name; the decoder's abandoned read is the same pattern. What a parked worker leaves to say — a failure, a copy or folder it could not remove —
+goes to standard error as well, and waits in its own console's slot until the drawer lays that
+console's image out, or its Image tab with no image, because the image it was for may be closed by
+then; there it joins the notice shown rather than replacing it,
 which may be a refusal nobody has read yet. Once it ends cleanly the drawer says its copy is gone,
 and that Send is ready only with marks to send and a folder to write into. **While the copy is
 written, the line painted is the Send's own**: the worker's file takes the name the line showed, so
 recomputing the first free name would paint `annotated-<n+1>.png` over a Send that types
 `annotated-<n>.png`. When the copy is written the line goes to the image's own console in that
-frame, whichever tab is shown and whether the drawer is open, **if that image is still the one
-shown**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open another
-image while a Send is busy; the Send still carries which opening of an image it belongs to, as a
-guard should that refusal ever give. Each refusal says why and keeps the marks; a delivered Send
+frame, whichever tab is shown and whether the drawer is open, **if that opening is still in its
+console's slot**, or the copy is removed and nothing is typed anywhere. The drawer refuses to open
+another image in that console while its Send is busy, and other consoles' slots are not affected
+(#198); the Send still carries which opening of an image it belongs to, as a guard should that
+refusal ever give. Each refusal for a console still open says why under its image and keeps the
+marks; a delivered Send
 clears them. A failure says everything it knows: a write that fails after its console closed names
-both, and a half-written copy that could not be removed is named with why.
+both, the close said once whether the console closed before or after Cancel, and a half-written
+copy that could not be removed is named with why. Since #198 a console
+that closes takes its image, marks and notice with it, so what a Send for it still has to say — a
+refusal, a failed write, a cancelled worker's last word — goes to standard error only, never under
+another console's image.
+
+**One Send runs at a time for the whole window, and a greyed Send says whose (#198).** While
+another console's Send is between its click and its Enter, this console's button reads «Waiting for
+the Send to <console>…»: the label and whether the button answers are read from one value, so no
+button greyed by a Send reads «Send to … and press Enter»; one greyed for want of a folder keeps
+that label and says why in the line under it. The Send's own image, once its line is typed and the
+Enter is owed, reads «Sending…» with no Cancel beside it: nothing is left that Cancel could take
+back, and it does not wait for itself. **A console that closes with its Send in flight
+takes that Send back as Cancel would**, on the next input pass and whichever way it closed — the
+console, its tab, a split or a retirement: its Cancel went with its image, and otherwise every
+console's Send stayed greyed, with no Cancel anywhere, until the worker ended. Its worker is parked
+as Cancel parks one, so the other consoles' Send reads «Still finishing the copy for <console>…»
+until it ends: the rule of one parked worker is kept. Every line a Send tells standard error names
+its console — «Send to <console>: …» — because that stream is shared by every console, and so do
+«Waiting for…» and «Still finishing…»: by its label, followed by «(Console <n>)», the number the
+app gives every console, unless the label already is that number, because two consoles routinely
+share a title such as the agent they run. Discarded:
+cancelling in each place a console is closed, which the next way of closing one would miss; and
+letting the other consoles' Send start while a closed console's worker is still parked, which needs
+more than one parked worker and is a decision of its own.
 
 **The copies are the app's to remove.** A console records the copies delivered to it in a field
-declared before its `PanelDir`, so when its `Pane` is dropped — the console, its tab or the window
+declared before its `PanelDir` (since #198 the console's image, `image: viewer::image::Console`), so when its `Pane` is dropped — the console, its tab or the window
 closed — they are removed first, by the paths recorded and with `remove_file`; then `PanelDir`
 finds its directory empty and removes it as it always has. A process that is killed drops nothing
 and leaves both. A file the console's program left there is not touched and keeps the directory. A
@@ -11557,6 +11903,9 @@ and which would not cover an undo or a Clear; carrying the serial on from one im
 which protects nothing the opening in the id does not; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.
+
+**Amended by D120 (#199):** the copies field also holds screenshots pasted from the clipboard, and
+they are removed with the console the same way.
 
 ## D114 — The window keeps its own standard error in a log file, and records a panic there itself
 
@@ -11701,3 +12050,492 @@ named there as unverified.
 | Producing the key and its request inside the vendored layer | A fourth change to somebody else's code, out of reach of every test (D53); the input hook is this project's own and the suite drives the same function the console uses to drop the request |
 | The ticket's rule «on Windows, Ctrl+Alt with text means the text wins» | Not needed for the AltGr key (above), and wrong for left Ctrl + left Alt on a layout without AltGr: `winit` fills the text with the key without Ctrl, so `Ctrl+Alt+A` on a US layout would type `a`. Ctrl+Alt as an AltGr substitute is left out, recorded |
 | The same chords as copy and paste on Linux and macOS | Changes two platforms nobody asked about, and widens D53's hand check to them |
+
+## D116 — The Windows file viewer inspects directories through the handle it opened
+
+**Decided.** On Windows, the viewer's bounded file loader opens with
+`FILE_FLAG_BACKUP_SEMANTICS`, then uses the opened handle's metadata to reject a directory with
+`This is a folder, not a file`. Regular-file rejection and the read ceilings remain on that same
+handle. Unix keeps its nonblocking open, so a FIFO cannot hold the loader waiting for a writer.
+
+**Why.** Windows refuses an ordinary file open of a directory before the existing metadata check
+can identify it. The code and image viewers therefore showed an access error where their common
+loader promises the folder explanation (#186). Allowing a directory handle makes the existing
+check reachable; it does not allow reading the directory as a document.
+
+**Discarded.** Inspecting the pathname before opening it, or inspecting it after an open failure,
+would diagnose a separate pathname observation rather than the object the loader opened. Replacing
+native paths with slash-normalized strings would not solve this open failure and would change
+valid Unix filenames. A new path abstraction duplicates the platform path and canonicalization
+boundaries already in place (D107, D110).
+
+**Verification.** The code/image folder cases must run on Windows; a Linux pass does not exercise
+this open flag. Native desktop interaction remains separate from those loader tests.
+
+## D117 — Windows peer identity is verified on a fresh connection after its process is pinned
+
+The first named-pipe connection is a bootstrap, not a process witness. Looking up its kernel PID
+with `OpenProcess` can acquire a later process if the original connector has already exited and
+its PID was reused. Reading creation time from that later handle, or comparing the PID twice,
+does not bind it to the original connection.
+
+**Decision.** An owned Windows producer opts into `peer_hello` v1. The server opens a candidate
+process with `SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION`, retaining its non-inheritable
+handle before creating a fresh one-shot pipe. Only a connector whose kernel PID matches that
+pinned, still-live process becomes a verified control stream. The new pipe has the existing
+user/SYSTEM DACL, rejects remote clients and uses `FILE_FLAG_FIRST_PIPE_INSTANCE`; its random name
+is never reused. Both streams' servers must match the independently inherited `PANEL_SERVER_PID`.
+
+**Why the order matters.** The candidate process's handle prevents its PID from being recycled.
+An earlier owner of that PID cannot have connected to a pipe that did not yet exist. Therefore a
+matching connector on the new pipe is exactly the retained process object, including when the
+bootstrap's numeric PID was already stale. The proof concerns the actual control stream, not the
+historical owner of the bootstrap. Microsoft's [PID-lifetime explanation](https://devblogs.microsoft.com/oldnewthing/20110107-00/?p=11803/)
+documents the retained-handle property.
+
+The verified stream and its clones retain the same process object. Its birth identity is the
+64-bit creation `FILETIME` from `GetProcessTimes`; liveness is a zero-timeout wait on that handle,
+never a new lookup by PID. Diagnostic attribution remains independent of session authorization
+(D91). A raw client or explicit unavailable-witness result has no verified peer, may publish with
+Unknown provenance, and cannot acquire session or attested-hook authority from payload metadata.
+
+Negotiation stays inside the existing counted connection workers, before authenticated requests
+or diagnostic inspection. It has one absolute deadline and shares the channel's stop signal;
+all pending overlapped operations are cancelled and drained before their buffers are dropped.
+Bootstrap bytes never become authenticated control bytes. Silent legacy clients retain the
+existing bounded-resource and shutdown behavior. The opt-in transport frames are specified in
+[04-panel-contract.md](04-panel-contract.md); the ordinary JSON operations remain unchanged.
+
+| Discarded | Why |
+|---|---|
+| `GetNamedPipeClientProcessId` followed by a retained handle on the same pipe | Protects identity after acquisition, but cannot establish whether it was already recycled. |
+| Repeat the PID query or compare creation time read from that same handle | Both observations can consistently describe the successor. |
+| Authenticate only the user's SID | The pipe's ACL already limits the user; a SID does not identify a console's process occurrence. |
+| Replace the channel with local RPC | Adds another transport and client bindings when an ordered connection upgrade reuses the existing implementation. |
+| Require a new preamble from every producer | Existing direct publishers must retain D91's Unknown publication behavior. |
+
+This supplies a Windows process witness. It does not by itself implement Windows process ancestry,
+native client recognition or complete recovery/hook authorization. Native Windows process/pipe
+witnesses are required; cross-compilation is not runtime evidence.
+
+## D118 — Windows graphics startup failures have a native explanation
+
+**Decided.** Returned graphics initialization errors show one native Windows message box before
+the process exits with failure. The original error still goes through D114's log. The notice says
+that OpenGL 2.0 or later is required, includes the observed context version when available, and
+says explicitly when it is unavailable. A configuration, shader or context failure is described
+as a graphics initialization failure, never automatically as an insufficient OpenGL version.
+
+**Why.** Installed-launch trials exposed machines whose system OpenGL cannot initialize the
+painter. The root window is hidden until its first frame; the Start menu does not show stderr.
+Keeping an error in a file helps support but leaves the person with no visible explanation.
+
+The current egui_glow initializer reads GL_VERSION before its low-version rejection, but erases
+it from PainterError. A Windows-only log observer accepts only that initializer's Debug version
+record, retaining at most 256 bytes of the version and no renderer/vendor. It installs before
+startup and stops retaining records when app creation begins successfully. It never replaces an
+existing logger: missing evidence yields unavailable. This is a pinned dependency diagnostic
+format, not a new provider-state contract. Measured runs install no observer.
+
+**Discarded.** stderr alone is invisible from the Start menu. A second WGL probe adds a window
+and context and can observe a different adapter. Vendoring the whole painter for one diagnostic
+adds maintenance without changing the visible result. A renderer fallback or shipping Mesa is a
+separate product decision. Native driver process termination after drawing begins is not a
+returned startup error and is not covered.
+
+**Evidence limit.** Routing and formatting tests do not establish visibility on a real Windows
+desktop; that requires launching the installed app with insufficient and supported graphics.
+## D119 — Windows process observations describe ancestry, never foreground authority
+
+**Decided for #166.** Windows gains console-bound diagnostic ancestry and separate, handle-owned
+process observations. A descendant is not called foreground: `inspect` and `inspect_descendant`
+remain unsupported there. The explicit Ivy-owned agent launch approved for #185 remains the
+separate prerequisite for Windows hook authority. No observation converts into the Unix
+foreground evidence used for hooks or recovery.
+
+**Why.** ConPTY has no Unix foreground process group. Giving every shell descendant that meaning
+would let background programs claim the same authority. The user chose process identification
+and provenance while preserving the existing authorization boundary. D91's labels remain
+diagnostic: incomplete evidence is unknown and does not refuse a publication.
+
+The Windows scope pins its original child and revokes on console close or root exit. A validated
+peer chain reaching that exact root is inside; one reaching its verified, pinned Ivy parent first
+is outside. A coherent parent-PID-zero boundary is outside too. Missing or dead history is unknown;
+PID1 is ordinary. Each retained handle supplies a creation FILETIME for identity and a native
+process sequence number for ordering. Parent sequence must be strictly earlier than child's;
+missing, zero or malformed sequence evidence is unknown, with no wall-clock fallback. UTC clock
+rollback can make a recycled parent's creation date appear earlier, so FILETIME ordering is
+insufficient even with repeated reads. Sequences and handle revalidation provide a bounded
+observation, without claiming an atomic process tree.
+
+The sequence query uses dynamically resolved `NtQueryInformationProcess` class92, an existing
+native implementation surface documented by [PHNT](https://github.com/winsiderss/phnt/blob/master/ntpsapi.h).
+Microsoft documents the process sequence in its [telemetry header](https://learn.microsoft.com/en-us/windows/win32/devnotes/process_telemetry_id_information_type);
+the strict ordering premise relies on the native implementation, not a universal public API
+guarantee. A named native witness checks the exact8-byte result against telemetry, parent/child
+order and retained-handle stability after exit. Unsupported queries conservatively yield unknown.
+
+Executable and lifetime inspection use process handles. Directory and structural argument/script
+inspection are separate, bounded, best-effort reads of mutable process parameters, initially for
+native x64 only. Unsupported layouts are explicit. They grant no authority and expose no command
+line or prompt payload. #165 must supply exact connected-peer evidence before publication labels
+can be enabled. These are design decisions, not a claim of implemented or Windows-tested support.
+
+The Windows channel receives that scope as a concrete capability, not a caller callback. The
+Windows-only `panel-control` dependency on `term-core` reuses the same bounded native ancestry
+reader; the channel brackets classification with its pinned peer and scope liveness. Reads and
+wakeups remain concrete snapshots/native messages. A generic callback on a joined worker could
+block shutdown; duplicating the ancestry reader would let its identity rules drift. Unix keeps its
+existing inspector callback. No process-parameter read or UI lock enters classification.
+
+**Discarded.** Fabricated Unix group/session fields misrepresent evidence; ancestry-as-foreground
+changes the approved authority boundary; treating a missing parent as outside invents certainty;
+UTC timestamps are not a monotonic exclusion proof; whole-tree scans and elevated helpers are
+unnecessary for one diagnostic chain; raw command-line getters expose data the consumer did not
+request. The next implementation must prove native supported-runtime argument parsing rather
+than assume one parser represents every Windows program.
+
+
+---
+
+## D120 — A screenshot on the clipboard is pasted into a console's own folder and its own image
+
+**22 November 2026 — #199.** The system's own screenshot tools already copy to the clipboard —
+Print Screen on GNOME, Cmd+Ctrl+Shift+4 on macOS, Win+Shift+S on Windows — so that is where Ivy
+takes a screenshot from, into the image a console holds since #198 (D72's amendment):
+
+- **«Paste screenshot» in every console's header** (Phosphor's image glyph, between the review and
+  the panel; a narrow header gives up the splits first, then this) reads the clipboard's image for
+  that console, focuses it and shows the Image tab, as a Ctrl+click on an image path does. Found,
+  it is written as `pasted-<n>.png` into that console's `PANEL_DIR` — the first `n` nothing there
+  takes, a dangling link included, created with `create_new` on a worker, mode 0600 on Unix — and
+  opened through the same entry as a clicked image path (D72, D113) in that console's slot. Not
+  found, that console's empty Image tab says so after how to open an image, which now names the
+  paste too: «… or copy a screenshot and press Paste screenshot or Ctrl+V here.» (Cmd+V on macOS).
+  Every refusal is said there, in that console's own slot, in place of what the tab said — after
+  it only over unsent marks, whose words, a failed Send among them, stay — so presses do not pile
+  answers up: no folder, an image too large, a read that failed or ran out of time (a decoder that
+  panics on another program's image included, which fails that read and not the worker), a
+  clipboard busy with another read or unavailable, each with its cause.
+- **The paste chord in the Image tab** does the same for the focused console, the one the tab
+  shows — **only while the drawer holds the keys and no text field has the keyboard**, so a note
+  being typed keeps its text paste, and not while a Send is on its way. A console that holds the
+  keys leaves its events in egui's input, so the drawer cannot rely on being painted after it. The
+  vendored egui-winit lets the chord through as a key when the clipboard holds no text — Ctrl+V or
+  Ctrl+Shift+V (Cmd on macOS), the Paste key, and Shift+Insert on Windows, where Win+Shift+S leaves
+  only an image — and turns every paste chord into `Event::Paste` when it does. Both are taken once
+  per hold: egui-winit turns a held chord's repeats into more text pastes with no repeat flag, but
+  lets the key's release through, and that release ends the hold — as does the window losing the
+  keys, or a frame the tab did not look in.
+- **Every answer is shown in its own console, and takes the keys**, however late it comes (decided
+  with the owner on #199's first PR): that console is focused and the Image tab shown. Late means a
+  stuck clipboard owner, at most the 10 s deadline. A paste asked over unsent marks is refused before
+  the clipboard is read; a screenshot written while marks were drawn is kept in the folder, and the
+  tab says where. A console that closed before its answer took its slot with it: standard error
+  only, never another console's tab.
+- **«A paste is already on its way» is painted, never written**: ahead of the word in the tab of
+  the console it was asked again for, while that paste is on its way — or, asked for another
+  console than the one being read, that its paste was not read and to press again once the first
+  has opened, since one read runs at a time. The slot's notice is written
+  by Send, the marks' refusal and every answer, so a status written into it and restored later went
+  stale with each of them — lost, brought back after it stopped being true, or piled up — in three
+  review rounds of #199's first PR.
+- **The file is the console's**: it joins the annotated copies the console removes when it closes
+  (D113's cleanup, the same field). A console that closes while its screenshot is written takes the
+  file when the write ends, and its folder if nothing else is in it.
+- **The same limits as an opened image** — a decode over 256 MiB, a PNG over 32 MiB — refuse it
+  **before** a file is written, with `The clipboard image is too large to open (limit: … MiB).`
+  They keep the file off the disk, not the memory: arboard has decoded the clipboard's image whole
+  by the time it is measured, and offers no size to look at first.
+- **An image read has a deadline of its own, 10 s**: arboard decodes the clipboard's PNG inside the
+  read, and a debug build decoded a 2400×1600 PNG in 1.5–4 s under load (#178), so the 2 s text
+  deadline would expire on an ordinary capture. The read stays on the clipboard's one worker, one
+  read at a time, keyed by console, so a late reply cannot land as another console's paste. A worker
+  that stops answers the read it held, unless that read was already said expired.
+
+**Amends D113**: the copies field also holds pasted screenshots.
+
+Discarded: watching the system's screenshots folder, whose path changes with the system and its
+language and which means watching a folder of the person's all the time; «Open with Ivy» and an
+`ivy open <file>` command, which need the running app to take orders from outside; a capture
+button inside Ivy, which needs each platform's capture API — the three by the owner's choice in
+#199. Opening the clipboard's pixels in memory with no file, because the ticket wants the file in
+the console's folder. **A picker beside Send to send to another console**, which #199 asked for in
+case the wrong header was pressed and its first PR built: with one image per console (#198) Send
+goes to the console that holds the image, and the image stays on the clipboard, so pressing the
+right console's button again is the remedy (the owner's choice when #198 landed). A second
+clipboard thread for images, against one outstanding read keyed by console.
+
+**Verification.** The clipboard formats on macOS and Windows are compiled but only checked by hand
+there.
+
+---
+
+## D121 — An agent opens an image in its own console's slot, and the person is not moved to it
+
+**22 November 2026 — #198.** `image_open(path)` on a console's control channel fills **that**
+console's image slot (D72), the one whose endpoint the request arrived on. A name in the message
+reaches nothing (D44). **The endpoint authenticates the user, not the console**: any process of the
+same user that can read a console's `PANEL_DIR` can be that console (D44, D7), so «scoped by the
+endpoint» is a same-user premise about which slot, never a statement about who asked.
+
+**What moves on screen.** If the console is the focused one of the tab on show, and nothing else owns
+the screen or the keys, the drawer opens on its Image tab (switching from Document or Changes) and
+**the keyboard stays where it was**, as `split_open` leaves it. «Nothing else» means: the Board, the
+Settings editor, a modal pane view, the title bar's menu, the connection guide, a maximized drawer,
+or the drawer or Files holding the keys. A window too short for the drawer is asked before anything
+is switched, so there too nothing moves. Where the drawer already shows the Image tab, which is
+that console's, and the console is still in front — the focused one of the tab on show, under no
+modal surface — the new image takes the place of the last and nothing has to move, the drawer's
+keys, Files' keys and a maximized drawer included. Anywhere else nothing moves. The console's tab
+card and its header then show an image glyph until the drawer paints that image or its refusal.
+«Loading…» is not seeing it. The reply says «shown» where the drawer shows the image, whether it
+opened on it or its Image tab was already on show, and «marked» everywhere else; both end «if the
+drawer cannot show it, it says why there» (owner, 22 November 2026), because the reply comes before
+the worker decodes the file and a truncated or corrupt PNG or JPEG passes every check made before
+it — answering «shown» alone would tell the agent the person sees a picture the drawer cannot
+paint. Reading the image's header in the bridge to refuse those too was discarded: it would be a
+second decoder to keep in step with the window's, for a reply that already says where to look.
+A window that runs
+no pass answers nothing within the listener's five seconds and still applies the open on its next
+pass, as `split_open` does.
+
+**What is refused, and where.** The path must be absolute and local. On Windows only a drive
+letter (`C:\…`, `\\?\C:\…`) or a volume GUID (`\\?\Volume{…}\…`) is local; every other prefix is
+refused on the wire — a share, a device, and any other name in the NT object namespace
+(`\\host\share\a.png`, `\\?\UNC\…`, `\\?\GLOBALROOT\Device\Mup\…`, `\\.\…`) — because the image
+worker would otherwise authenticate to a remote host over SMB on an agent's word. It is an
+allowlist because a refusal list let `\\?\GLOBALROOT\…` and a lowercase `\\?\unc\…` through. A
+share (`\\host\…`, `\\?\UNC\…`, `\\.\UNC\…`) is answered «is not on this machine»; any other
+refused prefix is answered «is not a drive path; give it as C:\…», because its text cannot say
+whether it stays here — `\\.\C:\…` and `\\?\GLOBALROOT\Device\HarddiskVolume3\…` do,
+`\\?\GLOBALROOT\Device\Mup\…` does not — and the agent can act on the form where it could not act
+on a false «elsewhere». A mapped drive letter passes: it is the user's own mapping, not a host the
+agent chose. **On Windows an agent's image never passes through a link** (owner, 22 November
+2026, review round 3): a symbolic link under `C:\` — the file, or any folder on its way — can point at
+`\\host\share`, and a cloned repository or an unpacked archive is where one comes from. So each
+entry of the path is asked, from the root down and without following it (`symlink_metadata`),
+whether it is a link, and the first one that is refuses the path with `<path> passes through a
+link, and an agent's image is not opened through one`. A link is a name-surrogate reparse point,
+which is the rule std's `is_symlink` applies: a symbolic link, a junction, or any other tag that
+names a path. A reparse point that names nothing — a cloud placeholder, deduplication,
+compression — passes, as D108 lets it pass: it holds the file's own data behind its filter, and
+refusing it could refuse images a sync client such as OneDrive keeps as placeholders.
+
+**One spelling for checking and opening** (owner, 23 November 2026: «Una sola ruta»).
+On Windows the agent's path is made absolute by text with `std::path::absolute`
+(`GetFullPathNameW`, without disk access), checked again for a drive or volume-GUID prefix, and
+rebuilt under `\\?\`. Both the root-down walk and the read use that returned spelling: Win32
+cannot rewrite the last segment of each partial path differently from the whole path. This
+replaces the name denylist from review rounds 4–5. A `..` is resolved before the walk; a trailing
+dot or space and a device name are interpreted once by Windows, and the resulting spelling is
+what is checked and read. If the resulting prefix names a device or another machine it is
+refused before disk access with `<path> is read by Windows as <whole>, which is not a file on a
+drive` or `which is not on this machine`; an error making it absolute says `<path> cannot be read
+as a Windows path: <error>`. Paths already under `\\?\` keep their literal names, with dot
+components resolved while rebuilding that one spelling. The original path remains the tool's
+address and the text in diagnostics; the window repeats the same spelling and walk before its
+own read.
+
+On Linux and macOS the path stays as given: `..`, `aux.png`, `con.png`, dots and spaces in a
+file name are no longer rejected because Windows would interpret them differently. An entry
+that is not there stops the walk and leaves the path to the open, which must pass through the
+same entry and fails; **any other error refuses** (`cannot tell whether <path> passes through a
+link: <error>`). The drawer follows the window's refusal over a link, or over an entry it could
+not ask, with «Open it from Files to see it yourself.»: the person's own open is theirs to make.
+A refusal while spelling the path is painted alone: it already tells the agent what Windows made
+of the path. The one-spelling rule was checked against Rust's path and Windows namespace
+implementation, but its Windows runtime witnesses still need a real Windows run.
+
+Where a link leads is never read. The bridge walks before
+its `stat`, and the image worker walks before it opens, **only for an agent's open**: the open
+carries who named the path to the worker, and a person's own click or Files open is not walked. A
+link swapped in between the walk and the open is not caught, the race D108 also leaves. Elsewhere
+no link is refused: a link leads to what the user made reachable, as a mapped drive letter does on
+Windows. That is accepted, not a claim that no path there names a host — macOS's `/net` and an
+autofs `-hosts` map do.
+
+The MCP bridge also `stat`s the file in its own process, which is not always the agent's, so a
+missing file, a folder, something that is not a regular file or a file over 32 MiB is refused at
+once. It then reads the file's first bytes and refuses anything that begins as
+neither a PNG (`89 50 4E 47 0D 0A 1A 0A`) nor a JPEG (`FF D8 FF`), a file too short to say
+included, with `<path> is not a PNG or JPEG image`, before the pane is reached (owner, 22 November
+2026): told «opened» for a file that is not an image at all, the agent would wait for marks that
+never come. **Those bridge checks are advisory**: the bridge and the window may see different
+files (another mount namespace, a file replaced in between), and a hand-written line skips the
+bridge. The window's interface pass never touches the file either: the image worker's thread reads
+it, its checks stay the enforcement, and their refusal is painted in the drawer. The format is
+decided by the file's bytes, never by its extension; a hand-written line that skips the bridge
+still reaches the window, which paints «This file is not a PNG or JPEG image». Unsent marks on that
+console's image refuse the call with a sentence the agent can act on; another console's marks never
+do.
+
+**What leaves the file.** The window reads the file with its own rights, which a sandboxed caller
+that reaches the socket may not have. Nothing of the file goes back over the channel. Its pixels
+leave only through the person's Send, a copy written into the console's own folder, so the person's
+Send is the only gate for the file's content.
+
+**Subagents.** The tool's description tells an agent working for another agent in the same console
+not to call it (D88). Nothing on the wire tells them apart. A subagent that ignores it is bounded to
+its own console's slot and refused over unsent marks.
+
+**No measurement batch opens an image**, so no batch paints the glyph or the Image tab and no
+published figure changes. The glyph's read sits inside the tab bar's and the header's declared spans
+(D13).
+
+| Discarded | Why |
+|---|---|
+| An `image` field in the panel document | A foreign `panel.json` (a cloned repository, a container) would make the app read local files, and the agent gets no error. |
+| Resolving a relative path against the console's directory | Unknown on Windows without OSC 7, and the synchronous file checks would need a `stat` in the interface pass, where a dead mount hangs the window. |
+| Resolving a relative path against the bridge's directory | The routed bridge runs in a daemon shared by every pane, so its directory is not the conversation's. |
+| Replacing over unsent marks, or queueing behind them | The marks are the person's unfinished work; a queue adds a mechanism and leaves the agent believing the image is shown. |
+| An extension gate on the wire | The bytes decide the format, and extension-less PNGs exist. |
+| Replacing the Board, or switching a maximized drawer | Both take away what the person is reading. |
+| Opening the drawer while the drawer or Files holds the keys | The person is typing there, and switching the drawer's tab or blurring Files would take the keys from them. |
+| Following each link and checking where it leads (review round 2) | Review round 3 found three ways around it: an error looking at an entry ended the walk as a pass, a raw NT target such as `\GLOBAL??\UNC\…` came back rootless and was read as local, and a relative target was joined to the folder the link was spelled in rather than the one it really sits in. A screenshot folder reached through a junction to another local drive is refused now; the owner took that cost over a walk that has to model Windows' resolution. |
+| Canonicalizing the path and testing the result | `canonicalize` opens the path, following each link, so it reaches the host it was meant to detect. |
+| Refusing every reparse point, `FILE_ATTRIBUTE_REPARSE_POINT` | A cloud placeholder carries it, so every agent's image a sync client such as OneDrive keeps would be refused. Which reparse tags a real OneDrive folder carries has not been looked at on Windows. |
+| A denylist of path shapes (review rounds 4–5) | It refused ordinary Linux/macOS names and still missed Windows rewrites (`CONIN$` was already missing). Three review rounds showed that checking partial paths and opening the whole path in different spellings cannot be repaired by enumerating names. One normalized verbatim spelling makes the two operations agree. |
+| Asking each folder with a trailing separator | Avoided trailing-dot and space rewrites, but did not establish the same rule for device names. |
+| Walking a person's own open too | The person chose the path; the rule is about an agent's word. |
+
+
+## D122 — Windows Ctrl+Alt system characters take precedence over shortcuts
+
+**Decided for #206.** On Windows, a pressed Ctrl+Alt gesture with nonempty printable
+`text_with_all_modifiers()` becomes exactly one text event before clipboard and key shortcuts.
+Missing text, control characters and releases retain the existing key path. Real AltGr retains
+its existing path, as do Linux and macOS. The modifier supplement is the character Windows
+actually emitted, including composition; `KeyEvent::text` can reconstruct a plain letter after
+removing Ctrl and is not evidence that a shortcut typed a character.
+
+**Why.** Left Ctrl+left Alt+2 on a Spanish layout retains Ctrl in winit, so the previous adapter
+suppressed its `@`. Simply allowing Ctrl+Alt whenever ordinary text is present would type `a`
+for Ctrl+Alt+A on a US layout. Sending a key event as well could invoke an application or
+clipboard shortcut before the character is inserted.
+
+**Discarded.** A table of keyboard layouts and key positions would duplicate Windows' input
+translation. Comparing against `key_without_modifiers()` confuses Shift, Caps Lock and dead-key
+composition with alternate-character input. Accepting ordinary nonempty `KeyEvent::text` admits
+the US shortcut fallback. Altering only the terminal's text filter cannot recover text discarded
+by the adapter and leaves other text widgets inconsistent.
+
+**Evidence boundary.** Portable regressions exercise the actual dispatcher and terminal byte
+translation. A disposable Windows witness supplies real input through winit and the production
+adapter for Spanish, German, Polish and US layouts; it records actual character messages and emitted
+bytes. It is not a hand check of the complete installed terminal and does not replace D53's
+Windows rows. Neither native execution nor those manual rows are claimed passed by this change
+before the corresponding run is observed. The existing vendor residual fingerprint is retained;
+only the new module and narrowly pinned Windows call are excluded and checked separately.
+
+## D123 — Windows GUI launch and background processes do not create a console
+
+**Decided for #171.** The installed Windows GUI uses the graphical subsystem, embeds its icon and
+version resources, and captures startup diagnostics without depending on an inherited console.
+Background capability and Git commands are started without creating console windows.
+
+**Why.** Starting a graphical application or its background helpers from Explorer must not flash an
+extra console. The executable itself must identify Ivy to Windows, while failures still need a
+persistent diagnostic destination when no standard error exists.
+
+**Discarded.** Hiding a console after startup permits a visible flash; launching Ivy with a detached
+or no-window flag in its test would hide a subsystem regression. Inspecting only the PE subsystem
+cannot establish that the installed application starts and responds, and counting windows by process
+ID cannot establish whether a process owns a console.
+
+**Evidence boundary.** The disposable Windows installer trial starts installed Ivy with ordinary
+creation flags from a detached host, checks console attachment, responsiveness and clean closure,
+and compares the installed icon resources and version strings. A console child is the positive
+control for the inspector. Named native tests and individual flag-removal mutations exercise both
+background launch paths. The existing interactive launch trial remains independent. These witnesses
+cover the inspected process and named paths, not every possible visible process; native results are
+not claimed until the Windows CI run completes.
+
+
+## D124 — PowerShell reports its directory at the prompt and calls Codex through a native alias
+
+**Decision.** Recognise shell executable stems, including `.exe`. Start PowerShell with `-NoExit -EncodedCommand` containing UTF-16LE base64 startup text. Leave profile loading and execution policy unchanged. Wrap the profile-defined prompt, calling it first so its error-status inputs survive, then emit OSC 7 before returning its text. FileSystem paths use percent-encoded segments; other providers clear the report, and UNC reports retain their remote authority. The directory report works without the Codex helper.
+
+When available, install a global PowerShell alias to the absolute sibling `ivy-codex-shell.exe`, a byte-identical installed copy of `ivy-codex.exe`. The executable name selects shell discovery: resolve native applications from the PATH at call time, searching absolute directories for `.exe` before `.cmd` and `.bat`, and pass all original arguments through the existing launch path. The explicit `ivy-codex.exe <client> [args]` contract stays unchanged. Preserve user functions and aliases with a diagnostic. Git Bash resolves `.exe` or `.cmd` instead of the extensionless npm shim. Remove inherited `IVY_CODEX_HELPER` when no helper is available.
+
+**Why.** Directory consumers already speak OSC 7; the shell knows its location without interpreting its screen or reading another process. The desktop PATH can differ from the configured shell PATH. Native invocation preserves PowerShell success/failure, exit code and conditional chaining. Absolute PATH entries exclude a launcher planted only in the current repository.
+
+**Revised after runtime evidence.** The first implementation used a shell function. In PowerShell7.7 a client exiting37 produced `LASTEXITCODE=37` but caller `$?=True`, allowing a following `&&` command to run. The user chose to redesign rather than accept that limitation. A distinct installed name separates native shell discovery from explicit helper invocation without an inherited mode variable or a per-console executable copy.
+
+**Discarded.** An advanced function consumes native options such as `-V` as common parameters. Throwing on a nonzero exit changes script control flow. A per-console executable copy adds synchronous I/O and deletion while Windows may still hold the file. A PATH shim changes every child and still loses to aliases. A `.ps1` startup file is blocked by Windows PowerShell Restricted policy; ExecutionPolicy Bypass would change the profile policy too. A native PEB directory reader belongs to native process discovery. cmd integration and shared-conversation relay remain separate work.
+
+**Limits.** Only a returned prompt reports a changed location; a framework redefining prompt afterward can replace the wrapper. Native arguments follow the PowerShell version itself (5.1 may drop empty native arguments); batch targets retain Rust command-line escaping restrictions and fail visibly where an argument is unsafe. Relative-only PATH installations are not resolved. A missing native entry leaves Codex unwrapped with a warning; removing an aliased executable later fails natively. Windows desktop badge, split, Review and link behavior requires native verification. No frame-performance claim is made.
+
+## D125 — A shell that cannot start leaves a visible failed console
+
+**Decided for #202.** After the existing startup and restoration attempts have failed to open a
+shell, Ivy keeps its window open with one failed console. The application explains which program
+was attempted and why it could not start. The notice belongs to the application, above the console,
+and is never written as terminal output or producer-owned panel content. D40's retained failure and
+D41's click dismissal apply: dismissing the explanation neither recovers the program nor makes the
+window close automatically. Existing application close controls remain the way to close it.
+
+The fixed failure headline must not disappear because a path or operating-system error is long.
+Program and reason previews fit within the notice's upper-half allowance, with explicit Unicode-safe
+elision retaining identifying context and the native error's cause. Complete diagnostics stay in
+D114's existing log, accessible from Settings. The notice points there for full details.
+
+**Why.** A person starting Ivy from the Windows Start menu cannot see standard error. Closing the
+window over a failed first shell gives them no actionable explanation. Keeping a failed console
+also lets the existing controls remain available without pretending that a program is running.
+
+**Boundary.** Recovery belongs after the existing startup attempts. Strict launch errors still
+belong to callers that retry a saved directory, fall back from a saved client, or retain the current
+console when a replacement cannot start. This decision changes neither shell selection nor those
+retry policies, and unrelated initialization errors are not reported as failed shell launches.
+
+| Discarded | Why |
+|---|---|
+| Show a native message and exit | The owner chose to keep Ivy open with the explanation on its console. |
+| Record only the log | A log preserves evidence but does not explain the disappearing window to the person opening it. |
+| Wrap the full diagnostic in the existing all-or-nothing notice | Long executable paths can make the whole notice exceed its ceiling and hide even the failure headline. |
+| Convert every launch error into a successful failed pane | Existing callers need the error to choose their directory and client fallbacks. |
+| Start a helper program to print the error | No working shell is available, and the application already has a failed-console lifecycle. |
+
+## D126 — Windows OpenCode metadata uses the bundled authenticated helper
+
+**Decided for the activity/attention slice of #174.** The explicitly installed OpenCode TUI plugin
+uses a persistent `ivy-session signals` child on Windows. It starts only Ivy's inherited absolute
+local `.exe` helper path, with fixed arguments, no shell and no PATH fallback. The helper reuses
+the existing private-directory and expected-server-PID checks on the connection that carries the
+signals. The optional Windows peer upgrade retains its existing unverified fallback and numeric
+server-PID limitation; activity metadata does not gain foreground, hook or recovery authority.
+Linux and macOS keep their direct Unix socket transport.
+
+**Why.** Node's supported named-pipe connection API alone does not supply the native directory
+owner/DACL and server-PID checks required by D115. An independent native probe followed by a
+different JavaScript connection would reopen the replacement race. The bundled helper already
+owns the required transport boundary and its absolute location is supplied at console launch.
+
+The child accepts only bounded OpenCode signal envelopes or explicit null, reconstructing a typed
+signal request instead of proxying arbitrary channel tools. An authenticated-ready frame precedes
+the first snapshot. Signal-specific reply decoding preserves `retryable`; the legacy producer
+result deliberately ignores that extension and keeps its established behavior. A transient refusal
+retries on the same connection with fresh state; a permanent refusal stops. Explicit withdrawal
+pending during a refusal is retained during disposal instead of asking a stopped producer to refresh.
+Disconnect still leaves a pending wait stale rather than declaring it answered (D80).
+
+One absolute six-second deadline covers writing and reading a whole native exchange. Applying a
+duration separately to every byte would let a trickled reply keep it alive indefinitely. Normal
+plugin disposal shares one 4.75-second deadline across its existing drain, graceful exit and forced
+child cleanup, inside OpenCode's five-second cleanup grace. The plugin never replaces a still-live
+helper. The additional process belongs to this plugin's connection, not to a background service.
+
+| Discarded | Why |
+|---|---|
+| Connect directly from Node by the Windows pipe name | Omits the established native owner, ACL and server-PID checks. |
+| Authenticate on a separate native probe, then reconnect from Node | Authenticates a different connection from the one carrying metadata. |
+| Add a new terminal escape protocol or modify OpenCode | No equivalent verified OpenCode native declaration contract exists in this integration. |
+| Move Unix clients to the child too | Adds a process where the direct transport already has the required checks and live-client evidence. |
+| Offer an arbitrary stdio channel proxy | Exposes unrelated commands when this producer needs only activity metadata. |
+| Treat Windows process ancestry as agent authority | D119 explicitly reserves that boundary for separate work; the owner deferred recovery. |
+
+**Evidence boundary.** Actual-asset fixtures and the native helper/channel witness are separate from
+installed OpenCode desktop interoperability. Neither source review nor cross-compilation proves
+Windows runtime behavior. Native CI, mutations and installed-client checks must report their own
+results. This delivery leaves #174's conversation-recovery reporters deferred.

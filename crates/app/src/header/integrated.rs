@@ -18,17 +18,16 @@ pub(crate) struct Strip {
     pub(crate) focused: bool,
 }
 
-/// What a console's header calls it: the name somebody gave it; the title an agent set; otherwise
-/// its foreground program — after its folder when no project names the place — rather than the
-/// shell's `user@host:path` title, which the owner found said nothing (17 November 2026).
+/// Manual names and published titles are independent of optional agent activity signals.
+/// Without either, the foreground program follows its folder when no project names the place.
 fn header_label(pane: &crate::Pane) -> std::borrow::Cow<'_, str> {
     let named = pane
         .label
         .as_deref()
         .is_some_and(|label| !label.trim().is_empty());
-    let agent = pane.signals.view(std::time::Instant::now()).is_some();
+    let titled = pane.screen.terminal_title().is_some();
     match &pane.program {
-        Some((folder, program)) if !named && !agent => {
+        Some((folder, program)) if !named && !titled => {
             let mut letters = program.chars();
             let program: String = letters
                 .next()
@@ -77,6 +76,7 @@ pub(crate) fn paint_strip(
                 focused: strip.focused,
                 green: crate::pane_view::focus_mix(ui.ctx(), pane.name, strip.focused),
                 project: pane.project.as_ref(),
+                unseen_image: pane.image.unseen(),
             },
         );
     } else {
@@ -126,6 +126,8 @@ pub(crate) enum Target {
     Close,
     /// Opens or closes the search on this console, focused or not, and hands it the keyboard (D61).
     Search,
+    /// Opens the clipboard's screenshot in the drawer, pinned to this console (D120).
+    Paste,
 }
 
 /// Which controls a header carries. Painting and pressing build it with this one constructor
@@ -183,12 +185,17 @@ fn layout(strip: egui::Rect, offer: Offer) -> Layout {
             separators: Vec::new(),
         };
     }
-    // The splits are the first to go when the header is narrow: they are also in the titlebar.
+    // What is not essential goes first when the header is narrow: the splits, which are also in
+    // the titlebar, then the paste (D120); the controls in `base` stay.
+    let spare = ((room / CELL) as usize).saturating_sub(base.len());
+    if spare > 0 {
+        base.insert(2, Target::Paste);
+    }
     let splits: Vec<Target> = [Target::SplitRight, Target::SplitDown]
         .into_iter()
         .zip(offer.split)
         .filter_map(|(target, offered)| offered.then_some(target))
-        .take(((room / CELL) as usize).saturating_sub(base.len()))
+        .take(spare.saturating_sub(1))
         .collect();
     let order: Vec<Target> = splits.iter().copied().chain(base).collect();
     let left = right - order.len() as f32 * CELL;
@@ -265,6 +272,8 @@ struct Appearance<'a> {
     /// How far this header has turned to the focus green, 0 to 1 (see `pane_view::focus_mix`).
     green: f32,
     project: Option<&'a crate::project_view::Badge>,
+    /// Whether this console holds an image its agent opened that nobody has seen (D121).
+    unseen_image: bool,
 }
 
 /// `ink` brought toward `toward` a tenth at a time until it reads at `contrast` on `surface`, and
@@ -338,6 +347,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         focused,
         green,
         project,
+        unseen_image,
     } = appearance;
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
@@ -464,6 +474,13 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
                 left.x = marker.right() + 6.0;
             }
         }
+        // In the label and not a control: always shown, never faded with the controls (D99), and
+        // pressing it is pressing the label.
+        if unseen_image {
+            let icon = crate::ui::icons::Icon::File(crate::ui::icons::FileKind::Image);
+            crate::ui::icons::paint(&clipped, left + egui::vec2(6.0, 0.0), icon, 12.0, text);
+            left.x += 18.0;
+        }
         if let (Some(project), Some(ink)) = (project, ink) {
             let available = (rect.right() - left.x - 8.0).max(0.0);
             let galley = painter.layout_no_wrap(project.name.clone(), name_font.clone(), ink);
@@ -510,6 +527,7 @@ fn tooltip(target: Target, folded: bool, zoomed: bool) -> &'static str {
         Target::Zoom => "Maximize console",
         Target::Close => "Close console",
         Target::Search => "Search this console",
+        Target::Paste => "Paste screenshot",
     }
 }
 
@@ -533,6 +551,7 @@ pub(crate) fn paint_icon(
         Target::Zoom => Icon::Expand,
         Target::Close => Icon::Close,
         Target::Search => Icon::Search,
+        Target::Paste => Icon::PasteImage,
         Target::Label => unreachable!(),
     };
     paint(painter, center, icon, size, color);
@@ -580,6 +599,51 @@ mod tests {
     }
 
     #[test]
+    fn published_titles_are_painted_without_agent_activity_signals() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let pane = &mut *window.active_mut().panes_mut()[0];
+        pane.program = Some(("workspace".into(), "codex".into()));
+        assert!(pane.signals.view(std::time::Instant::now()).is_none());
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        let metrics = CellMetrics::of(8.0, 16.0);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 300.0));
+        let header = egui::Rect::from_min_size(rect.min, egui::vec2(900.0, 28.0));
+        for (report, manual, expected) in [
+            ("\x1b]2;Fix console titles\x07", None, "Fix console titles"),
+            ("\x1b]0;Review changes\x07", None, "Review changes"),
+            ("", Some("My console"), "My console"),
+            ("", None, "Review changes"),
+            ("\x1b]2;\x07", None, "workspace / Codex"),
+        ] {
+            pane.screen.advance(report.as_bytes());
+            pane.label = manual.map(str::to_owned);
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                paint_strip(
+                    ui,
+                    pane,
+                    &metrics,
+                    &Theme::default(),
+                    Strip {
+                        rect,
+                        header,
+                        headers: super::super::Headers::PAINTED.integrated(true),
+                        button: super::super::Button::in_a_tab_of(&[rect; 2]),
+                        integrated: true,
+                        maximized: None,
+                        now: std::time::SystemTime::now(),
+                        focused: true,
+                    },
+                );
+            });
+            output.textures_delta.clear();
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected
+                    && shape.clip_rect.intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            )), "the visible header must contain {expected:?}");
+        }
+    }
+
+    #[test]
     fn pane_icons_are_the_set_s_glyphs_and_have_no_overflow_control() {
         let ctx = crate::ui::icons::installed_for_tests(1.0);
         let painted = [
@@ -591,6 +655,7 @@ mod tests {
             ),
             (Target::Zoom, true, egui_phosphor::regular::ARROWS_IN_SIMPLE),
             (Target::Review, false, egui_phosphor::regular::GIT_BRANCH),
+            (Target::Paste, false, egui_phosphor::regular::IMAGE),
             (Target::Panel, false, egui_phosphor::regular::SIDEBAR_SIMPLE),
             (
                 Target::Search,
@@ -632,6 +697,7 @@ mod tests {
                 Target::Label as u8,
                 Target::Search as u8,
                 Target::Review as u8,
+                Target::Paste as u8,
                 Target::Panel as u8,
                 Target::Zoom as u8,
                 Target::Close as u8
@@ -643,6 +709,12 @@ mod tests {
     #[test]
     fn the_search_control_says_it_searches_this_console() {
         assert_eq!(tooltip(Target::Search, false, false), "Search this console");
+    }
+
+    /// D120: the paste control is named by what it does.
+    #[test]
+    fn the_paste_control_says_it_pastes_a_screenshot() {
+        assert_eq!(tooltip(Target::Paste, false, false), "Paste screenshot");
     }
 
     #[test]
@@ -714,6 +786,7 @@ mod tests {
                     focused: true,
                     green: 1.0,
                     project: Some(&badge),
+                    unseen_image: false,
                 },
             );
         });
@@ -771,6 +844,7 @@ mod tests {
             focused,
             green: if focused { 1.0 } else { 0.0 },
             project,
+            unseen_image: false,
         }
     }
 
@@ -1128,7 +1202,7 @@ mod tests {
                 ));
             }
             if width >= 150.0 {
-                assert_eq!(items.len(), 4);
+                assert_eq!(items.len(), 5);
             }
             if width == 500.0 {
                 assert_eq!(
@@ -1168,6 +1242,7 @@ mod tests {
                 Target::SplitDown,
                 Target::Search,
                 Target::Review,
+                Target::Paste,
                 Target::Panel,
                 Target::Zoom,
                 Target::Close
@@ -1189,6 +1264,7 @@ mod tests {
                 Target::SplitDown,
                 Target::Search,
                 Target::Review,
+                Target::Paste,
                 Target::Panel
             ]
         );
@@ -1200,7 +1276,7 @@ mod tests {
     #[test]
     fn a_narrow_header_drops_its_splits_before_the_rest() {
         for (can_close, label_only, base, with_split) in
-            [(true, 160.0, 161.0, 186.0), (false, 110.0, 111.0, 136.0)]
+            [(true, 160.0, 161.0, 211.0), (false, 110.0, 111.0, 161.0)]
         {
             let offer = Offer {
                 can_close,
@@ -1213,6 +1289,10 @@ mod tests {
                     && base_set.contains(&Target::Review)
                     && base_set.contains(&Target::Panel)
             );
+            // The paste comes one cell later, and a split only after it (D120).
+            assert!(!base_set.contains(&Target::Paste));
+            assert!(!kinds(strip_of(base + 24.0), offer).contains(&Target::Paste));
+            assert!(kinds(strip_of(base + 25.0), offer).contains(&Target::Paste));
             assert!(!base_set.contains(&Target::SplitDown));
             assert!(!kinds(strip_of(with_split - 1.0), offer).contains(&Target::SplitDown));
             assert!(kinds(strip_of(with_split), offer).contains(&Target::SplitDown));

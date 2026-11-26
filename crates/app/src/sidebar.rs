@@ -5,7 +5,7 @@ pub(crate) mod probe;
 
 use crate::{Window, painter::CellMetrics};
 use eframe::egui;
-pub(crate) use layout::{DIVIDER, partition};
+pub(crate) use layout::{DIVIDER, drawer_has_room, partition};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +13,8 @@ pub(crate) enum Tool {
     Files,
     /// The drawer tab that shows one file: Markdown formatted, anything else as code.
     Document,
+    /// The drawer tab that shows an image a console printed, with its marks.
+    Image,
     Git,
     Board,
 }
@@ -22,6 +24,7 @@ impl Tool {
         match self {
             Self::Files => "Files",
             Self::Document => "File",
+            Self::Image => "Image",
             Self::Git => "Git",
             Self::Board => "Board",
         }
@@ -37,7 +40,7 @@ enum Edge {
 pub(crate) struct Sidebar {
     enabled: bool,
     probe: Option<probe::Probe>,
-    /// The drawer's tab (File or Git) or the Board; Files is independent of it.
+    /// The drawer's tab (File, Image or Git) or the Board; Files is independent of it.
     active: Option<Tool>,
     files_width: f32,
     height: f32,
@@ -158,8 +161,8 @@ pub(crate) fn active(window: &Window) -> Option<Tool> {
     window.sidebar.active
 }
 
-/// Show a tool. Files opens beside whatever else is open; the drawer's two tabs and the Board
-/// replace each other.
+/// Show a tool. Files opens beside whatever else is open; the drawer's tabs and the Board replace
+/// each other.
 pub(crate) fn select(window: &mut Window, tool: Tool) {
     if tool == Tool::Files {
         if !files_visible(window) {
@@ -213,6 +216,7 @@ pub(crate) fn toggle(window: &mut Window, tool: Tool, ctx: &egui::Context) {
         _ if active(window) == Some(tool) => close(window, ctx),
         Tool::Document => crate::viewer::activate(window, true),
         Tool::Git => crate::viewer::activate(window, false),
+        Tool::Image => crate::viewer::show_image(window),
         _ => select(window, tool),
     }
 }
@@ -249,9 +253,12 @@ pub(crate) fn before_keys(
     let frame = ctx.cumulative_frame_nr();
     // The drawer's own buttons change the partition, so they are resolved before final tiling,
     // against the drawer as displayed.
-    let drawer = matches!(active(window), Some(Tool::Document | Tool::Git))
-        .then_some(geometry.dock)
-        .flatten();
+    let drawer = matches!(
+        active(window),
+        Some(Tool::Document | Tool::Image | Tool::Git)
+    )
+    .then_some(geometry.dock)
+    .flatten();
     let list = crate::explorer::list_rect(window);
     let target = |window: &Window| {
         ctx.input(|i| i.pointer.interact_pos())
@@ -390,6 +397,7 @@ pub(crate) fn paint_icon(
     let icon = match tool {
         Tool::Files => Icon::Files,
         Tool::Document => Icon::Document,
+        Tool::Image => Icon::File(crate::ui::icons::FileKind::Image),
         Tool::Git => Icon::Branch,
         Tool::Board => Icon::Board,
     };

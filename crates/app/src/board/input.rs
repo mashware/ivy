@@ -61,6 +61,7 @@ pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
         window.board.awaiting_release = true;
         window.board.pointer_owned = false;
     }
+    window.board.surface.milestones.cancel_resize();
     window.board.keyboard_focus = false;
     window.board.filter.editing = false;
     window.board.surface.pressed = None;
@@ -94,6 +95,7 @@ pub(crate) fn before_keys(
         return false;
     }
     if chrome_owned {
+        window.board.surface.milestones.cancel_resize();
         window.board.surface.pressed = None;
         window.board.surface.child_pressed = None;
         return blocked(window, ui.ctx());
@@ -170,13 +172,26 @@ pub(crate) fn before_keys(
             continue;
         }
         match event {
-            // The first Escape leaves the filter field; the next one closes the Board.
+            egui::Event::WindowFocused(false) => {
+                window.board.surface.milestones.cancel_resize();
+                window.board.surface.child_pressed = None;
+                window.board.surface.pressed = None;
+                window.board.pointer_owned = false;
+            }
+            egui::Event::PointerMoved(pos) if window.board.surface.milestones.resizing() => {
+                window.board.surface.milestones.resize(*pos);
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                owns_events = true;
+            }
             egui::Event::Key {
                 key: egui::Key::Escape,
                 pressed: true,
                 repeat: false,
                 ..
-            } if window.board.keyboard_focus && window.board.filter.editing => {
+            } if window.board.keyboard_focus
+                && window.board.filter.editing
+                && window.board.arrangement == super::filter::Arrangement::ByState =>
+            {
                 window.board.filter.editing = false;
                 owns_events = true;
             }
@@ -190,8 +205,28 @@ pub(crate) fn before_keys(
                 owns_events = true;
             }
             egui::Event::Key {
-                key, pressed: true, ..
+                key,
+                modifiers,
+                pressed: true,
+                ..
             } if window.board.keyboard_focus => {
+                if window.board.arrangement == super::filter::Arrangement::ByMilestone {
+                    let (handled, activate) = window
+                        .board
+                        .surface
+                        .milestones
+                        .keyboard(*key, modifiers.shift);
+                    if let Some(pane) = activate {
+                        window.board.activate = Some(pane);
+                    }
+                    if handled {
+                        if *key == egui::Key::Tab {
+                            window.board.filter.editing = false;
+                        }
+                        owns_events = true;
+                        continue;
+                    }
+                }
                 if matches!(
                     key,
                     egui::Key::ArrowUp
@@ -261,6 +296,7 @@ pub(crate) fn before_keys(
         }
     }
     if window.board.arrangement != arrangement_before {
+        window.board.surface.milestones.cancel_resize();
         // Remembered in the configuration file. A refusal (a symlinked or unreadable file, a
         // Settings save still applying) keeps the choice on screen for this session and is said at
         // the Board's foot, where somebody who launched Ivy from the desktop can see it.
@@ -330,6 +366,11 @@ fn navigate(state: &mut State, key: egui::Key) {
 
 fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
     if pressed {
+        if state.surface.milestones.begin_resize(pos) {
+            state.surface.child_pressed = None;
+            state.surface.pressed = None;
+            return;
+        }
         // Any press elsewhere leaves the filter field; a press on the field takes it back on release.
         state.filter.editing = false;
         state.surface.child_pressed = state
@@ -356,8 +397,18 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
                 .position(|slot| slot.pane == id)
                 .unwrap_or(state.ordinal);
         }
+    } else if state.surface.milestones.resizing() {
+        state.surface.milestones.resize(pos);
+        state.surface.milestones.cancel_resize();
     } else if let Some((rect, command)) = state.surface.child_pressed.take() {
-        if let super::cards::Command::Bar(action) = command {
+        if let super::cards::Command::Bar(super::bar::Action::ShowAll(value)) = command {
+            if rect.contains(pos) {
+                state
+                    .surface
+                    .milestones
+                    .apply(&super::milestones::state::Action::ShowAll(value));
+            }
+        } else if let super::cards::Command::Bar(action) = command {
             if rect.contains(pos) {
                 state.close_requested |=
                     super::bar::apply(&mut state.arrangement, &mut state.filter, action);
@@ -385,6 +436,322 @@ mod tests {
             .map(|&(pane, row, column)| Slot { pane, row, column })
             .collect()
     }
+    #[test]
+    fn section_drag_and_controls_change_painted_geometry_without_activating_cards() {
+        use super::super::milestones::{
+            self,
+            sections::Group,
+            state::{Action, Target},
+        };
+        let plan = panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"Active","items":[{"text":"a","mark":"current"}]},{"id":"B","title":"Ready","items":[{"text":"b"}]}],"outside":["outside"]}"#).unwrap().0;
+        let section = super::super::model::Section {
+            key: None,
+            kind: super::super::model::Kind::Repository {
+                name: "Test".into(),
+            },
+            entries: Vec::new(),
+            roadmap: None,
+            ink: None,
+        };
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = crate::theme::Roles::of(&crate::theme::Theme::default());
+        let mut state = State::default();
+        let draw = |state: &mut State| {
+            state.surface.milestones.hits.clear();
+            state.surface.milestones.targets.clear();
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1500.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    milestones::paint_plan_with(
+                        ui,
+                        &section,
+                        &plan,
+                        &roles,
+                        &mut state.surface.milestones,
+                        &Default::default(),
+                        &|_| super::super::observation::Column::Idle,
+                        &mut |_, _, _, _, _| {},
+                    );
+                },
+            )
+            .drop_without_applying_deltas();
+            state.surface.child_hits = state
+                .surface
+                .milestones
+                .hits
+                .iter()
+                .map(|(rect, action)| {
+                    (
+                        *rect,
+                        super::super::cards::Command::Milestone(action.clone()),
+                    )
+                })
+                .collect();
+        };
+        draw(&mut state);
+        let headers = |s: &State| {
+            s.surface
+                .milestones
+                .targets
+                .iter()
+                .filter_map(|(t, r)| {
+                    if matches!(t, Target::Header(_)) {
+                        Some(*r)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = headers(&state);
+        let at = state.surface.milestones.dividers[0].rect.center();
+        // A covered card hit must lose to the divider on press and never fire on release.
+        state.surface.painted.push((77, egui::Rect::EVERYTHING));
+        pointer(&mut state, at, true);
+        assert!(state.surface.milestones.resizing());
+        state.surface.milestones.resize(at - egui::vec2(80.0, 0.0));
+        pointer(&mut state, at - egui::vec2(80.0, 0.0), false);
+        draw(&mut state);
+        let after = headers(&state);
+        assert!((after[0].width() - (before[0].width() - 80.0)).abs() < 0.1);
+        assert!((after[1].width() - (before[1].width() + 80.0)).abs() < 0.1);
+        assert_eq!(after[2].width(), before[2].width());
+        assert!(state.activate.is_none());
+        assert!(!state.surface.milestones.resizing());
+        let hide = state
+            .surface
+            .child_hits
+            .iter()
+            .find_map(|(rect, cmd)| match cmd {
+                super::super::cards::Command::Milestone(Action::HideGroup(_, Group::Ready)) => {
+                    Some(rect.center())
+                }
+                _ => None,
+            })
+            .unwrap();
+        pointer(&mut state, hide, true);
+        pointer(&mut state, hide, false);
+        draw(&mut state);
+        assert_eq!(headers(&state).len(), 2);
+        let restore = state
+            .surface
+            .child_hits
+            .iter()
+            .find_map(|(rect, cmd)| match cmd {
+                super::super::cards::Command::Milestone(Action::ShowGroup(_, Group::Ready)) => {
+                    Some(rect.center())
+                }
+                _ => None,
+            })
+            .unwrap();
+        pointer(&mut state, restore, true);
+        pointer(&mut state, restore, false);
+        draw(&mut state);
+        assert_eq!(headers(&state), after);
+        assert!(state.activate.is_none());
+        let at = state.surface.milestones.dividers[0].rect.center();
+        pointer(&mut state, at, true);
+        state.surface.milestones.apply(&Action::ShowAll(true));
+        assert!(!state.surface.milestones.resizing());
+    }
+
+    fn section_headers_for_cancellation(ctx: &egui::Context, state: &mut State) -> Vec<egui::Rect> {
+        use super::super::milestones::{self, state::Target};
+        let plan = panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"A","title":"Active","items":[{"text":"a","mark":"current"}]},{"id":"B","title":"Ready","items":[{"text":"b"}]}],"outside":["outside"]}"#).unwrap().0;
+        let section = super::super::model::Section {
+            key: None,
+            kind: super::super::model::Kind::Repository {
+                name: "Test".into(),
+            },
+            entries: Vec::new(),
+            roadmap: None,
+            ink: None,
+        };
+        let roles = crate::theme::Roles::of(&crate::theme::Theme::default());
+        state.surface.milestones.begin_frame();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1500.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                milestones::paint_plan_with(
+                    ui,
+                    &section,
+                    &plan,
+                    &roles,
+                    &mut state.surface.milestones,
+                    &Default::default(),
+                    &|_| super::super::observation::Column::Idle,
+                    &mut |_, _, _, _, _| {},
+                );
+            },
+        )
+        .drop_without_applying_deltas();
+        state
+            .surface
+            .milestones
+            .targets
+            .iter()
+            .filter_map(|(target, rect)| matches!(target, Target::Header(_)).then_some(*rect))
+            .collect()
+    }
+
+    fn section_cancellation_input(
+        window: &mut Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1500.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let metrics = CellMetrics::measure(ctx, egui::FontId::monospace(window.font_size));
+                before_keys(window, ui, &metrics, false);
+            },
+        )
+        .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn window_focus_loss_ends_section_resize_before_later_pointer_motion() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        toggle(&mut window, &ctx);
+        let before = section_headers_for_cancellation(&ctx, &mut window.board);
+        let at = window.board.surface.milestones.dividers[0].rect.center();
+        pointer(&mut window.board, at, true);
+        window.board.pointer_owned = true;
+        window
+            .board
+            .surface
+            .milestones
+            .resize(at - egui::vec2(60.0, 0.0));
+        let resized = section_headers_for_cancellation(&ctx, &mut window.board);
+        assert!(resized[0].width() < before[0].width());
+        section_cancellation_input(&mut window, &ctx, vec![egui::Event::WindowFocused(false)]);
+        assert!(!window.board.surface.milestones.resizing());
+        assert!(!window.board.pointer_owned);
+        section_cancellation_input(
+            &mut window,
+            &ctx,
+            vec![
+                egui::Event::WindowFocused(true),
+                egui::Event::PointerMoved(at + egui::vec2(120.0, 0.0)),
+                egui::Event::PointerButton {
+                    pos: at + egui::vec2(120.0, 0.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board),
+            resized
+        );
+        assert!(window.board.activate.is_none());
+        assert!(window.board.is_open());
+    }
+
+    #[test]
+    fn board_close_cancels_section_drag_and_reopen_preserves_hidden_maximized_and_resized_groups() {
+        use super::super::milestones::{sections::Group, state::Action};
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        toggle(&mut window, &ctx);
+        let before = section_headers_for_cancellation(&ctx, &mut window.board);
+        let divider = window.board.surface.milestones.dividers[0].clone();
+        let project = window
+            .board
+            .surface
+            .milestones
+            .hits
+            .iter()
+            .find_map(|(_, action)| match action {
+                Action::HideGroup(project, _) => Some(project.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let at = divider.rect.center();
+        pointer(&mut window.board, at, true);
+        window.board.pointer_owned = true;
+        window
+            .board
+            .surface
+            .milestones
+            .resize(at - egui::vec2(60.0, 0.0));
+        // Escape takes the actual Board dismissal route while the separator is captured.
+        section_cancellation_input(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!window.board.is_open());
+        assert!(!window.board.surface.milestones.resizing());
+        toggle(&mut window, &ctx);
+        let resized = section_headers_for_cancellation(&ctx, &mut window.board);
+        assert!((resized[0].width() - (before[0].width() - 60.0)).abs() < 0.1);
+        assert!((resized[1].width() - (before[1].width() + 60.0)).abs() < 0.1);
+        window
+            .board
+            .surface
+            .milestones
+            .apply(&Action::HideGroup(project.clone(), Group::Outside));
+        let hidden = section_headers_for_cancellation(&ctx, &mut window.board);
+        assert_eq!(hidden.len(), 2);
+        window
+            .board
+            .surface
+            .milestones
+            .apply(&Action::MaximizeGroup(project.clone(), Group::Active));
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board).len(),
+            1
+        );
+        toggle(&mut window, &ctx);
+        assert!(!window.board.is_open());
+        toggle(&mut window, &ctx);
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board).len(),
+            1
+        );
+        window
+            .board
+            .surface
+            .milestones
+            .apply(&Action::RestoreLayout(project));
+        assert_eq!(
+            section_headers_for_cancellation(&ctx, &mut window.board),
+            hidden
+        );
+        assert!(window.board.activate.is_none());
+    }
+
     #[test]
     fn release_keeps_the_pressed_identity_even_when_cards_reorder() {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
@@ -439,5 +806,96 @@ mod tests {
         state.selected = Some(9);
         navigate(&mut state, egui::Key::ArrowDown);
         assert_eq!(state.selected, Some(2), "clamped to the shorter row");
+    }
+    #[test]
+    fn a_milestone_press_keeps_its_identity_and_opens_the_painted_column() {
+        let plan = panel_contract::plan::parse_document_noting(include_str!(
+            "../../tests/fixtures/board-milestones/plan.json"
+        ))
+        .unwrap()
+        .0;
+        let section = super::super::model::Section {
+            key: None,
+            kind: super::super::model::Kind::Repository {
+                name: "TaxPlatform".into(),
+            },
+            entries: Vec::new(),
+            roadmap: None,
+            ink: None,
+        };
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = crate::theme::Roles::of(&crate::theme::Theme::default());
+        let mut state = State {
+            arrangement: super::super::filter::Arrangement::ByMilestone,
+            ..Default::default()
+        };
+        let draw = |state: &mut State| {
+            state.surface.milestones.hits.clear();
+            state.surface.milestones.targets.clear();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    super::super::milestones::paint_plan_with(
+                        ui,
+                        &section,
+                        &plan,
+                        &roles,
+                        &mut state.surface.milestones,
+                        &Default::default(),
+                        &|_| super::super::observation::Column::Idle,
+                        &mut |_, _, _, _, _| {},
+                    );
+                },
+            );
+            let texts = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            output.drop_without_applying_deltas();
+            state.surface.child_hits = state
+                .surface
+                .milestones
+                .hits
+                .iter()
+                .map(|(r, a)| (*r, super::super::cards::Command::Milestone(a.clone())))
+                .collect();
+            texts
+        };
+        let before = draw(&mut state);
+        assert!(!before.iter().any(|s| s.starts_with("H6 ·")));
+        let at = state
+            .surface
+            .child_hits
+            .iter()
+            .find_map(|(r, a)| match a {
+                super::super::cards::Command::Milestone(
+                    super::super::milestones::state::Action::ToggleColumn(k),
+                ) if k.milestone == super::super::milestones::state::Identity::from("H6") => {
+                    Some(r.center())
+                }
+                _ => None,
+            })
+            .unwrap();
+        pointer(&mut state, at, true);
+        state.surface.child_hits.clear();
+        pointer(&mut state, at, false);
+        let after = draw(&mut state);
+        assert!(after.iter().any(|s| s == "H6 · Customers"));
+        assert!(
+            after
+                .iter()
+                .any(|s| s.contains("waiting on H2 (17/18), H5 (0/14)"))
+        );
     }
 }

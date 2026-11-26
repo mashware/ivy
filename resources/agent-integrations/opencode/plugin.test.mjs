@@ -7,12 +7,12 @@ import { pathToFileURL } from 'node:url'
 import { createServer } from 'node:net'
 
 const pause = ms => new Promise(r => setTimeout(r, ms))
-test('route bootstrap, displayed request, cancellation, navigation and disposal', async () => {
+test('route bootstrap, displayed request, cancellation, navigation and disposal', {skip: process.platform === 'win32' ? 'Unix socket controller; Windows helper is covered by windows-helper and native-helper fixtures' : false}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ivy-opencode-'))
   await mkdir(join(dir, 'node_modules/solid-js'), {recursive:true})
   await writeFile(join(dir, 'node_modules/solid-js/package.json'), '{"type":"module","exports":"./index.js"}')
   await writeFile(join(dir, 'node_modules/solid-js/index.js'), `let effects=[]; export function createRoot(f){return f(()=>{effects=[]})} export function createSignal(v){return [()=>v,x=>{v=typeof x==='function'?x(v):x; for(const e of effects)queueMicrotask(e)}]} export function createEffect(f){effects.push(f);f()} export function tick(){for(const e of effects)queueMicrotask(e)}`)
-  await writeFile(join(dir, 'net.mjs'), `import {EventEmitter} from 'node:events'; export const lines=[]; export const state={connections:0,socket:null,refuse:false,retryable:false}; export function createConnection(){ const s=new EventEmitter(); state.connections++; state.socket=s; s.connecting=true; let closed=false; s.write=x=>{lines.push(JSON.parse(x));queueMicrotask(()=>{if(!closed)s.emit('data',Buffer.from(state.refuse?JSON.stringify(state.retryable ? {ok:false,retryable:true} : {ok:false})+'\\n':'{"ok":true}\\n'))})}; s.end=()=>{if(!closed){closed=true;queueMicrotask(()=>s.emit('close'))}}; s.destroy=s.end; queueMicrotask(()=>{s.connecting=false;s.emit('connect')}); return s }`)
+  await writeFile(join(dir, 'net.mjs'), `import {EventEmitter} from 'node:events'; export const lines=[]; export const state={connections:0,socket:null,refuse:false,retryable:false}; export function createConnection(){ const s=new EventEmitter(); state.connections++; state.socket=s; s.connecting=true; let closed=false; s.write=x=>{lines.push(JSON.parse(x));queueMicrotask(()=>{if(!closed)s.emit('data',Buffer.from(state.refuse?JSON.stringify(state.retryable ? {ok:false,error:'paused',retryable:true} : {ok:false,error:'disabled'})+'\\n':'{"ok":true}\\n'))})}; s.end=()=>{if(!closed){closed=true;queueMicrotask(()=>s.emit('close'))}}; s.destroy=s.end; queueMicrotask(()=>{s.connecting=false;s.emit('connect')}); return s }`)
 
   const source = await readFile(new URL('./ivy-opencode.tsx', import.meta.url), 'utf8')
   await writeFile(join(dir, 'plugin.ts'), process.env.IVY_REAL_SOCKET ? source : source.replace('from "node:net"', 'from "./net.mjs"'))
@@ -23,7 +23,7 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
   if (process.env.IVY_REAL_SOCKET) {
     lines = []
     state = {connections:0, socket:null, refuse:false, retryable:false}
-    server = createServer(socket => { state.connections++; state.socket=socket; let buffer=''; socket.on('data', chunk => { buffer += chunk; let end; while((end=buffer.indexOf('\n')) >= 0) { lines.push(JSON.parse(buffer.slice(0,end))); buffer=buffer.slice(end+1); socket.write(state.refuse ? JSON.stringify(state.retryable ? {ok:false,retryable:true} : {ok:false})+'\n' : '{"ok":true}\n') } }) })
+    server = createServer(socket => { state.connections++; state.socket=socket; let buffer=''; socket.on('data', chunk => { buffer += chunk; let end; while((end=buffer.indexOf('\n')) >= 0) { lines.push(JSON.parse(buffer.slice(0,end))); buffer=buffer.slice(end+1); socket.write(state.refuse ? JSON.stringify(state.retryable ? {ok:false,error:'paused',retryable:true} : {ok:false,error:'disabled'})+'\n' : '{"ok":true}\n') } }) })
     await new Promise((resolve, reject) => {server.once('error',reject); server.listen(join(dir,'control.sock'),resolve)})
   } else ({lines, state} = await import(pathToFileURL(join(dir, 'net.mjs'))))
   process.env.PANEL_DIR=dir; process.env.PANEL_ID='test'
@@ -139,7 +139,7 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
   } finally { if (dispose) await dispose(); if (server) await new Promise(resolve => server.close(resolve)); delete process.env.PANEL_DIR; delete process.env.PANEL_ID; await rm(dir,{recursive:true,force:true}) }
 })
 
-test('private directory check precedes every connection and disposal cancels retries', async () => {
+test('private directory check precedes every connection and disposal cancels retries', {skip: process.platform === 'win32' ? 'Unix uid/mode/symlink authentication; Windows uses authenticated native helper coverage' : false}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ivy-private-'))
   const originalDir = process.env.PANEL_DIR, originalId = process.env.PANEL_ID
   try {

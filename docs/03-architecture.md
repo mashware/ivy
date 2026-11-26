@@ -54,14 +54,26 @@ An MCP server exposing tools to the agent running in the pane:
 | `split_open` | Open a new pane | Yes, since F3's fourth PR |
 | `split_read` | Read a pane's output | Yes, since F3's fourth PR |
 | `split_close` | Close it | Yes, since F3's fourth PR |
+| `image_open` | Show an image in its own console's drawer slot | Yes, D121 |
 
-All seven are advertised because all seven are answered. The three `split_*` act on **the panes this
+Every tool in this table is advertised because it is answered. The three `split_*` act on **the panes this
 connection opened**, named by an **opaque handle** the window hands back — sixteen random bytes,
 scoped to (the pane whose channel asked, the connection) — and **the person's first byte into one of
 them takes it back**: from then on the handle answers with the reason and never with the buffer.
 **The revocation is an application boundary and not a confidentiality one** (F10): the process
 `split_open` launched keeps reading what the person types after that, and the promise an agent author
 is given is «the app stops handing you that buffer; the program you opened does not».
+
+`image_open` fills **the image slot of the console whose endpoint asked** (D121), never another's: it
+names no pane. It takes an absolute path on this machine — on Windows a drive letter or a volume
+GUID, where a mapped drive is the user's own mapping and not a host the agent chose. The bridge
+`stat`s it and reads its first bytes in its own process before the window is asked, as a courtesy
+that answers at once; in the window the image worker's thread reads the file, so the interface
+pass never touches it, and that read stays the enforcement. The drawer opens on the image only where the person is already working
+in that console and nothing else holds the screen or the keys; anywhere else the console's tab card
+and header mark a new image until the drawer paints it. Unsent marks on that console's image refuse
+the call. The endpoint authenticates the user, not the console, and nothing of the file returns over
+the channel: its content leaves only through the person's Send.
 
 **The transport is a per-pane endpoint** — a Unix socket inside the pane's `0700` directory on
 POSIX, and a user-and-SYSTEM-only named pipe on Windows. It carries newline-delimited JSON, and
@@ -157,14 +169,17 @@ Ordinary Bash, Zsh and Fish consoles install a function after user startup that 
 ### Publication ancestry diagnostics
 
 The panel listener captures kernel peer identity independently of session authorization. On its
-connection worker, before reading requests, a pane-bound callback classifies the peer's ancestry
-as inside, outside or unknown. The callback is installed after the PTY child is spawned and before
-the listener opens, including when session restoration is disabled. The PTY's revocable lifetime
-invalidates observations after closure; the callback cannot keep the pane alive.
+connection worker, before reading requests, a pane-bound native scope classifies the peer's
+ancestry as inside, outside or unknown. Unix installs its existing callback; Windows carries the
+concrete scope through callback-free worker services. Both are installed after the PTY child is
+spawned and before the listener opens, including when session restoration is disabled. The PTY's
+revocable lifetime invalidates observations after closure; retaining a scope cannot keep the pane alive.
 
 `term-core` walks at most 64 ancestors using native birth identities and stable parent snapshots:
 Linux uses `/proc` and pidfds; macOS uses `LOCAL_PEERPID` with `PROC_PIDTBSDINFO` start seconds and
-microseconds. Missing, exited, reused or unstable processes yield unknown. The Linux session peer
+microseconds. Windows retains the verified fresh-pipe peer's process handle (D117), follows
+handle-bound parent identities, and pins the actual console root and its verified Ivy parent as
+boundaries (D119). Missing, exited, reused or unstable processes yield unknown. The Linux session peer
 and foreground checks retain their existing authorization rules.
 
 The app stores publication origin beside the current panel document. Only confirmed outside

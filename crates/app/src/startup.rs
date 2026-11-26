@@ -85,6 +85,8 @@ pub fn run() -> eframe::Result {
         APP_NAME,
         options,
         Box::new(move |cc| {
+            #[cfg(windows)]
+            crate::diagnostics_log::graphics_ready();
             let mut window =
                 opening::native_window(cc, with_what, requested, persistence, measuring)?;
             window.restoration = restoration;

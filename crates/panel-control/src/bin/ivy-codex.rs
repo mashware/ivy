@@ -134,9 +134,40 @@ fn classify(args: &[OsString]) -> Kind {
 
 fn main() {
     let mut args = env::args_os().skip(1);
-    let Some(exe) = args.next() else {
-        eprintln!("ivy-codex: missing client executable");
-        std::process::exit(2)
+    // D124: a native alias preserves PowerShell status and bypasses its function binder.
+    let shell_entry = env::current_exe().ok().is_some_and(|path| {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("ivy-codex-shell"))
+    });
+    let exe = if shell_entry {
+        let path = env::var_os("PATH").unwrap_or_default();
+        let directories: Vec<_> = env::split_paths(&path)
+            .filter(|dir| dir.is_absolute())
+            .collect();
+        let found = ["codex.exe", "codex.cmd", "codex.bat"]
+            .into_iter()
+            .find_map(|name| {
+                directories
+                    .iter()
+                    .map(|dir| dir.join(name))
+                    .find(|candidate| candidate.is_file())
+            });
+        match found {
+            Some(path) => path.into_os_string(),
+            None => {
+                eprintln!("ivy-codex: codex executable not found in absolute PATH directories");
+                std::process::exit(127);
+            }
+        }
+    } else {
+        match args.next() {
+            Some(exe) => exe,
+            None => {
+                eprintln!("ivy-codex: missing client executable");
+                std::process::exit(2);
+            }
+        }
     };
     if let (Ok(target), Ok(this)) = (
         std::fs::canonicalize(&exe),
@@ -174,6 +205,11 @@ fn main() {
     }
     match classify(&original) {
         Kind::Interactive { already: false } => {
+            #[cfg(windows)]
+            eprintln!(
+                "ivy-codex: shared panel routing is not supported on Windows: Ivy cannot yet verify the owning console for a shared conversation; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
+            );
+            #[cfg(not(windows))]
             eprintln!(
                 "ivy-codex: this platform or invocation cannot use Ivy's shared-panel bridge; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
             );

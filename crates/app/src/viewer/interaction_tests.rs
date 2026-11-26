@@ -145,7 +145,7 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
         );
     };
     git(&["init", "-q"]);
-    fs::write(path.join("example.txt"), "base\n").unwrap();
+    fs::write(path.join("example.txt"), "BASE_WITNESS\n").unwrap();
     git(&["add", "example.txt"]);
     git(&[
         "-c",
@@ -158,9 +158,10 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
         "-qm",
         "base",
     ]);
-    fs::write(path.join("example.txt"), "staged\n").unwrap();
+    fs::write(path.join("example.txt"), "INDEX_WITNESS\n").unwrap();
     git(&["add", "example.txt"]);
-    fs::write(path.join("example.txt"), "unstaged\n").unwrap();
+    fs::write(path.join("example.txt"), "WORKTREE_WITNESS\n").unwrap();
+    let _prepared_diffs = load::PreparedControlDiffs::new(&path, "main");
 
     let script = format!("cd '{}' && sleep 30", path.display());
     let mut window = window_of_tabs([["sleep 30", script.as_str()]]);
@@ -196,7 +197,7 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
             .pane_called(name)
             .unwrap()
             .screen
-            .advance(format!("\x1b]7;file://{}\x07", cwd.display()).as_bytes());
+            .advance(format!("\x1b]7;{}\x07", url::Url::from_file_path(&cwd).unwrap()).as_bytes());
     }
     click_review(&mut window, &ctx, 1);
     assert_eq!(window.viewer.origin.as_ref().unwrap().pane, names[1]);
@@ -208,16 +209,24 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
             .iter()
             .any(|(text, _)| text == "Repository directory")
     );
-    let wait_for = |window: &mut crate::Window, expected: &str| {
+    let wait_for = |window: &mut crate::Window, kind: Kind, expected: [&str; 2], absent: &str| {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let painted = frame(window, &ctx, vec![]);
-            if painted.iter().any(|(text, _)| text.contains(expected)) {
+            if expected
+                .iter()
+                .all(|expected| painted.iter().any(|(text, _)| text.contains(expected)))
+            {
+                assert_eq!(window.viewer.kind, kind);
+                assert!(
+                    !painted.iter().any(|(text, _)| text.contains(absent)),
+                    "unexpected {absent}: {painted:?}"
+                );
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "missing {expected}; message={:?}, requested={:?}, loading={}",
+                "missing {expected:?}; message={:?}, requested={:?}, loading={}",
                 window.viewer.message,
                 window.viewer.requested,
                 window.viewer.job.is_some()
@@ -225,19 +234,37 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
             std::thread::sleep(Duration::from_millis(10));
         }
     };
-    wait_for(&mut window, "unstaged");
+    wait_for(
+        &mut window,
+        Kind::Local,
+        ["BASE_WITNESS", "WORKTREE_WITNESS"],
+        "INDEX_WITNESS",
+    );
     choose_comparison(&mut window, &ctx, "Staged changes");
-    wait_for(&mut window, "staged");
+    wait_for(
+        &mut window,
+        Kind::Staged,
+        ["BASE_WITNESS", "INDEX_WITNESS"],
+        "WORKTREE_WITNESS",
+    );
     assert_eq!(window.viewer.kind, Kind::Staged);
     choose_comparison(&mut window, &ctx, "Unstaged changes");
-    wait_for(&mut window, "unstaged");
+    wait_for(
+        &mut window,
+        Kind::Unstaged,
+        ["INDEX_WITNESS", "WORKTREE_WITNESS"],
+        "BASE_WITNESS",
+    );
 }
 
 #[test]
 fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     let mut nonce = [0; 8];
     getrandom::fill(&mut nonce).unwrap();
-    let path = std::env::temp_dir().join(format!("viewer-path-{:x}", u64::from_ne_bytes(nonce)));
+    let path = std::env::temp_dir().join(format!(
+        "viewer-path-{:x}-long-enough-to-wrap-across-terminal-columns",
+        u64::from_ne_bytes(nonce)
+    ));
     fs::create_dir(&path).unwrap();
     let _directory = Directory(path.clone());
     fs::write(
@@ -246,6 +273,26 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     )
     .unwrap();
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    // Native directory polling must agree with the synthetic OSC 7 report, even when
+    // rendering takes longer than the poll interval. Set cwd at spawn, before any frame.
+    #[cfg(unix)]
+    {
+        let (pty, output) = term_core::Pty::spawn_with_env_in(
+            "sh",
+            &["-c", "sleep 30"],
+            crate::INITIAL_GRID,
+            &[],
+            Some(&path),
+        )
+        .unwrap();
+        let pane = window.active_mut().panes_mut().remove(0);
+        pane.pty = pty.into();
+        pane.pty_output = crate::pty_output::PtyOutput::new(output, || {});
+    }
+    // The path below is synthetic: keep native startup and resize redraws out of its fixture.
+    let (_output_guard, output) = std::sync::mpsc::channel();
+    window.active_mut().panes_mut()[0].pty_output =
+        crate::pty_output::PtyOutput::new(output, || {});
     let ctx = egui::Context::default();
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, vec![]);
@@ -268,9 +315,17 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
     let painted = window.active().panes()[0].painted_console.as_ref().unwrap();
-    let pos = painted.area.min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
     assert!(
-        painted.local_at(pos, &metrics, painted.frame).is_some(),
+        path.join("viewer-click.md").to_string_lossy().len()
+            > usize::from(painted.view.size().cols),
+        "the path fixture must exercise wrapped text"
+    );
+    let pos = painted.area.min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
+    assert_eq!(
+        painted
+            .local_at(pos, &metrics, painted.frame)
+            .map(|target| target.path),
+        Some(path.join("viewer-click.md")),
         "painted target missing: {:?} row: {:?} size: {:?}",
         painted.view.local_path_at(0, 5),
         painted
@@ -298,6 +353,9 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
         ],
     );
     assert!(crate::sidebar::files_visible(&window));
+    // Force a fresh native cwd observation before consuming the reveal reply.
+    window.projects = Default::default();
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(
         &mut window,
         &ctx,
@@ -346,8 +404,9 @@ crate::windows_unix_omission!(
     "unix-only: verifies a real shell process and Linux repository state after a viewer interaction"
 );
 
-/// Ctrl+click on a screenshot path a console printed opens it in the drawer, pinned to that
-/// console rather than to the focused one, without revealing it in Files.
+/// Ctrl+click on a screenshot path a console printed opens it in the drawer, in that console's
+/// slot, and focuses it, without revealing it in Files; another console's stuck read holds it up
+/// in nothing.
 #[test]
 fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
     let mut nonce = [0; 8];
@@ -360,6 +419,10 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
         .save_with_format(&shot, ::image::ImageFormat::Png)
         .unwrap();
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    // The painted URL is synthetic; ConPTY startup and resize output must not rewrite it.
+    let (_output_guard, output) = std::sync::mpsc::channel();
+    window.active_mut().panes_mut()[1].pty_output =
+        crate::pty_output::PtyOutput::new(output, || {});
     let ctx = egui::Context::default();
     frame(&mut window, &ctx, vec![]);
     frame(&mut window, &ctx, vec![]);
@@ -382,6 +445,19 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
         ..Default::default()
     };
     let control_click = |window: &mut crate::Window| {
+        let painted = window
+            .pane_called(names[1])
+            .unwrap()
+            .painted_console
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            painted
+                .local_at(pos, &metrics, painted.frame)
+                .map(|target| target.path),
+            Some(shot.clone()),
+            "the click fixture must still show the complete image path"
+        );
         for pressed in [true, false] {
             frame(
                 window,
@@ -399,40 +475,45 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
             );
         }
     };
-    // A decode that has not finished refuses the click, and the drawer says which file it reads.
-    let other = path.join("other.png");
-    open_image_target(&mut window, names[0], other.clone()).unwrap();
-    let stalled = window.image.stall();
+    // A read stuck in another console holds up only that console: the click focuses the console
+    // it was printed in and opens the image there, which decodes.
+    open_image_target(&mut window, names[0], path.join("other.png")).unwrap();
+    let stalled = super::image::focused_mut(&mut window.tabs, window.active)
+        .unwrap()
+        .stall();
+    open_image_target(&mut window, names[0], path.join("third.png")).unwrap();
     frame(&mut window, &ctx, vec![]);
+    assert_eq!(window.active().focus, names[0]);
     control_click(&mut window);
-    assert_eq!(shown_image(&window), Some((names[1], shot.clone())));
-    let still = format!("Still reading {}…", other.display());
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !frame(&mut window, &ctx, vec![])
-        .iter()
-        .any(|(text, _)| *text == still)
-    {
-        assert!(Instant::now() < deadline, "{:?}", window.image.message());
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    drop(stalled);
-    control_click(&mut window);
+    assert_eq!(window.active().focus, names[1]);
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Document)
+        Some(crate::sidebar::Tool::Image)
     );
     assert_eq!(shown_image(&window), Some((names[1], shot)));
+    assert!(window.viewer.keyboard, "the drawer does not hold the keys");
     assert!(!crate::sidebar::files_visible(&window));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    assert_eq!(
+        super::image::slot_of(&mut window.tabs, names[0])
+            .and_then(|slot| slot.path())
+            .map(ToOwned::to_owned),
+        Some(path.join("third.png")),
+        "the click touched the other console's image"
+    );
+    fn shown(window: &crate::Window) -> &super::image::Slot {
+        super::image::focused(window).unwrap()
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !frame(&mut window, &ctx, vec![])
         .iter()
         .any(|(text, _)| text == "Screen Shot.PNG")
-        || window.image.message().is_none() && !window.image.loaded()
+        || shown(&window).message().is_none() && !shown(&window).loaded()
     {
-        assert!(Instant::now() < deadline, "{:?}", window.image.message());
+        assert!(Instant::now() < deadline, "{:?}", shown(&window).message());
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(window.image.message(), None);
+    assert_eq!(shown(&window).message(), None);
+    drop(stalled);
 }
 
 #[cfg(target_os = "linux")]

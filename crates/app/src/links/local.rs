@@ -106,12 +106,10 @@ mod tests {
                 .line,
             Some(12)
         );
-        assert_eq!(
-            LocalTarget::parse("file:///tmp/a%20b.md", None)
-                .unwrap()
-                .path,
-            Path::new("/tmp/a b.md")
-        );
+        let file = std::env::temp_dir().join("a b.md");
+        let url = url::Url::from_file_path(&file).unwrap();
+        assert!(url.as_str().contains("a%20b.md"));
+        assert_eq!(LocalTarget::parse(url.as_str(), None).unwrap().path, file);
         assert_eq!(
             LocalTarget::parse("docs/a.md", None).unwrap().path,
             Path::new("docs/a.md")
@@ -191,12 +189,12 @@ mod tests {
                 }
             );
         }
-        assert_eq!(
-            LocalTarget::parse("file:///tmp/folder/", None)
-                .unwrap()
-                .path,
-            Path::new("/tmp/folder/")
-        );
+        let folder = std::env::temp_dir().join("folder");
+        let url = url::Url::from_directory_path(&folder).unwrap();
+        assert_eq!(LocalTarget::parse(url.as_str(), None).unwrap().path, folder);
+        let hidden = std::env::temp_dir().join("\u{1b}hidden.rs");
+        let hidden_url = url::Url::from_file_path(hidden).unwrap();
+        assert!(LocalTarget::parse(hidden_url.as_str(), None).is_none());
         for path in [
             "ordinary",
             "file://remote.invalid/tmp/folder",

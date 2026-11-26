@@ -1,6 +1,16 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "shell_integration::tests::git_bash_routes_the_native_launcher_instead_of_the_extensionless_npm_shim",
+    "reason": "unix-only: exercises the MSYS lookup branch using executable POSIX shell fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::load::tests::off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened",
+    "reason": "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "agent_setup::tests::refuses_symlink_destination",
     "reason": "unix-only: requires Unix symlinks to plant a competing destination"
   },
@@ -236,6 +246,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "control::tests::an_image_open_waits_for_the_window_and_wakes_it",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "control::tests::finishing_the_report_waits_for_admitted_callbacks_and_closes_admission",
     "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
   },
@@ -433,6 +448,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::fixture_read_failure_preserves_child_traceback_and_stage",
+    "reason": "unix-only: launches /usr/bin/python3 in a POSIX PTY to retain a real child traceback"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "panel::overlay::native_tests::foreign_client_root_and_closed_holder_are_refused",
     "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
   },
@@ -616,6 +636,16 @@
     "binary": "app/app:lib",
     "name": "session::ownership::tests::fork_owner_child",
     "reason": "unix-only: forks a child process to verify owner lease lifetime"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "session::ownership::tests::readable_non_writable_live_lease_is_preserved_until_owner_exits",
+    "reason": "unix-only: POSIX permissions and process-owned record locks"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "session::ownership::tests::readable_non_writable_stale_lease_does_not_block_startup",
+    "reason": "unix-only: POSIX permissions and process-owned record locks"
   },
   {
     "binary": "app/app:lib",
@@ -1019,6 +1049,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::board::tests::milestone_filter_cannot_activate_a_hidden_console",
+    "reason": "unix-only: creates POSIX shell consoles to exercise Board focus"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::board::tests::project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan",
     "reason": "unix-only: exercises the Unix panel-control endpoint"
   },
@@ -1215,6 +1250,16 @@
   {
     "binary": "app/app:lib",
     "name": "tests::only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke",
     "reason": "unix-only: exercises the Unix panel-control endpoint"
   },
   {
@@ -1712,6 +1757,11 @@
   },
   {
     "binary": "panel-control/panel-mcp:bin",
+    "name": "tests::off_windows_an_image_under_a_name_windows_would_rewrite_passes_the_bridge",
+    "reason": "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
+  },
+  {
+    "binary": "panel-control/panel-mcp:bin",
     "name": "tests::idle_revocation_disconnects_the_producer_without_another_tool_call",
     "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
   },
@@ -1772,6 +1822,11 @@
   },
   {
     "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::an_image_open_travels_with_its_path_and_its_text_comes_back",
+    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
     "name": "codex_relay::tests::empty_config_requires_complete_inventory_before_accepting_resume",
     "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
   },
@@ -1784,51 +1839,6 @@
     "binary": "panel-control/panel_control:lib",
     "name": "codex_relay::tests::loaded_resume_success_is_held_until_the_running_mcp_proves_its_route",
     "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::binding_and_old_revocation",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::binding_another_conversation_revokes_only_the_same_pane",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::binding_waits_until_inflight_route_guard_is_released",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::cancellation_does_not_wait_for_inflight_guard_and_fresh_epoch_reuses_route",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::failed_mapping_commit_restores_the_previous_record_and_removes_temporary_file",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::failed_replacement_restores_the_displaced_pane",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::interrupted_unrelated_record_does_not_poison_a_new_binding",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::orphan_active_after_interruption_is_found_without_a_thread_mapping",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_route::tests::public_proof_is_immutable_across_bind_and_revoke",
-    "reason": "unix-only: Codex route writes need atomic replacement, which is not ported to Windows"
   },
   {
     "binary": "panel-control/panel_control:lib",
@@ -1859,6 +1869,16 @@
     "binary": "panel-control/panel_control:lib",
     "name": "endpoint::tests::what_was_bound_is_what_gets_connected_to",
     "reason": "unix-only: requires Unix stream socket connection semantics"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "image::tests::off_windows_the_one_spelling_is_the_path_as_given",
+    "reason": "unix-only: off Windows the spelling is the path as given; Windows has its own spelling witness"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "image::tests::off_windows_a_name_windows_would_rewrite_is_walked_as_written",
+    "reason": "unix-only: off Windows no name is rewritten; Windows has its own spelling witness"
   },
   {
     "binary": "panel-control/panel_control:lib",
@@ -1924,16 +1944,6 @@
     "binary": "panel-control/panel_control:lib",
     "name": "listener::tests::closing_the_pane_ends_every_thread_it_had",
     "reason": "unix-only: requires Unix-domain socket acceptor and shutdown lifecycle"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "listener::tests::diagnostic_peer_is_the_connected_process",
-    "reason": "unix-only: requires Unix socket peer credentials"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "listener::tests::inspector_runs_once_and_its_observation_reaches_each_delivery",
-    "reason": "unix-only: requires Unix socket peer credentials"
   },
   {
     "binary": "panel-control/panel_control:lib",

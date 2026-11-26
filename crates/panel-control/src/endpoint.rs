@@ -25,6 +25,8 @@ use interprocess::local_socket::{Name, ToNsName};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
+pub(crate) use windows::WindowsPeer;
+#[cfg(windows)]
 pub use windows::{Listener, Stream};
 
 /// The channel-owned end of a private wake pair.
@@ -276,6 +278,18 @@ pub fn connect_authenticated(dir: &Path, id: &str, expected_pid: u32) -> io::Res
     let stream = windows::connect(dir, id)?;
     stream.verify_server_pid(expected_pid)?;
     Ok(stream)
+}
+
+/// Opens an opt-in verified Windows stream within the caller's total operation deadline.
+/// Explicit unverified negotiation keeps ordinary publications usable without granting authority.
+#[cfg(windows)]
+pub(crate) fn connect_verified_authenticated(
+    dir: &Path,
+    id: &str,
+    expected_pid: u32,
+    deadline: std::time::Instant,
+) -> io::Result<Stream> {
+    windows::connect_verified(dir, id, expected_pid, deadline)
 }
 
 #[cfg(test)]

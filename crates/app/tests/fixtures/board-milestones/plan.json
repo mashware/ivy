@@ -1,0 +1,888 @@
+{
+  "title": "TaxPlatform",
+  "source": "docs/roadmap.md",
+  "milestones": [
+    {
+      "id": "H0",
+      "title": "Foundations",
+      "items": [
+        {
+          "id": "H0-0",
+          "text": "Foundations deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "H0-1",
+          "text": "Foundations deliverable 2",
+          "mark": "done"
+        },
+        {
+          "id": "H0-2",
+          "text": "Foundations deliverable 3",
+          "mark": "done"
+        },
+        {
+          "id": "H0-3",
+          "text": "Foundations deliverable 4",
+          "mark": "done"
+        },
+        {
+          "id": "H0-4",
+          "text": "Foundations deliverable 5",
+          "mark": "done"
+        }
+      ],
+      "depends_on": [],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H1",
+      "title": "Organizations",
+      "items": [
+        {
+          "id": "H1-0",
+          "text": "Organizations deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "H1-1",
+          "text": "Organizations deliverable 2",
+          "mark": "done"
+        },
+        {
+          "id": "H1-2",
+          "text": "Organizations deliverable 3",
+          "mark": "done"
+        },
+        {
+          "id": "H1-3",
+          "text": "Organizations deliverable 4",
+          "mark": "done"
+        },
+        {
+          "id": "H1-4",
+          "text": "Organizations deliverable 5",
+          "mark": "done"
+        },
+        {
+          "id": "H1-5",
+          "text": "Organizations deliverable 6",
+          "mark": "done"
+        },
+        {
+          "id": "H1-6",
+          "text": "Organizations deliverable 7",
+          "mark": "done"
+        },
+        {
+          "id": "H1-7",
+          "text": "Organizations deliverable 8",
+          "mark": "done"
+        },
+        {
+          "id": "H1-8",
+          "text": "Organizations deliverable 9",
+          "mark": "done"
+        },
+        {
+          "id": "H1-9",
+          "text": "Organizations deliverable 10",
+          "mark": "done"
+        },
+        {
+          "id": "H1-10",
+          "text": "Organizations deliverable 11",
+          "mark": "done"
+        }
+      ],
+      "depends_on": [
+        "H0"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H2",
+      "title": "TaxIds",
+      "items": [
+        {
+          "id": "H2-0",
+          "text": "TaxIds deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "H2-1",
+          "text": "TaxIds deliverable 2",
+          "mark": "done"
+        },
+        {
+          "id": "H2-2",
+          "text": "TaxIds deliverable 3",
+          "mark": "done"
+        },
+        {
+          "id": "H2-3",
+          "text": "TaxIds deliverable 4",
+          "mark": "done"
+        },
+        {
+          "id": "H2-4",
+          "text": "TaxIds deliverable 5",
+          "mark": "done"
+        },
+        {
+          "id": "H2-5",
+          "text": "TaxIds deliverable 6",
+          "mark": "done"
+        },
+        {
+          "id": "H2-6",
+          "text": "TaxIds deliverable 7",
+          "mark": "done"
+        },
+        {
+          "id": "H2-7",
+          "text": "TaxIds deliverable 8",
+          "mark": "done"
+        },
+        {
+          "id": "H2-8",
+          "text": "TaxIds deliverable 9",
+          "mark": "done"
+        },
+        {
+          "id": "H2-9",
+          "text": "TaxIds deliverable 10",
+          "mark": "done"
+        },
+        {
+          "id": "H2-10",
+          "text": "TaxIds deliverable 11",
+          "mark": "done"
+        },
+        {
+          "id": "H2-11",
+          "text": "TaxIds deliverable 12",
+          "mark": "done"
+        },
+        {
+          "id": "H2-12",
+          "text": "TaxIds deliverable 13",
+          "mark": "done"
+        },
+        {
+          "id": "H2-13",
+          "text": "TaxIds deliverable 14",
+          "mark": "done"
+        },
+        {
+          "id": "H2-14",
+          "text": "TaxIds deliverable 15",
+          "mark": "done"
+        },
+        {
+          "id": "H2-15",
+          "text": "TaxIds deliverable 16",
+          "mark": "done"
+        },
+        {
+          "id": "H2-16",
+          "text": "TaxIds deliverable 17",
+          "mark": "done"
+        },
+        {
+          "id": "AEAT-SEAL",
+          "text": "Sello o certificado de la AEAT por organización",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H1"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "First use",
+      "title": "First production use",
+      "items": [
+        {
+          "id": "First use-0",
+          "text": "First production use deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "First use-1",
+          "text": "First production use deliverable 2",
+          "mark": "done"
+        },
+        {
+          "id": "First use-2",
+          "text": "Shadow mode in the Mailsuite backend",
+          "mark": "current"
+        },
+        {
+          "id": "First use-3",
+          "text": "First production use deliverable 4",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H1"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H3",
+      "title": "TaxRates",
+      "items": [
+        {
+          "id": "H3-0",
+          "text": "TaxRates deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "H3-1",
+          "text": "TaxRates deliverable 2",
+          "mark": "done"
+        },
+        {
+          "id": "H3-2",
+          "text": "TaxRates deliverable 3",
+          "mark": "done"
+        },
+        {
+          "id": "H3-3",
+          "text": "TaxRates deliverable 4",
+          "mark": "done"
+        },
+        {
+          "id": "H3-4",
+          "text": "TaxRates deliverable 5",
+          "mark": "done"
+        },
+        {
+          "id": "TERRITORIES",
+          "text": "Special European territories and their tax details",
+          "mark": "pending"
+        },
+        {
+          "id": "H3-6",
+          "text": "TaxRates deliverable 7",
+          "mark": "pending"
+        },
+        {
+          "id": "H3-7",
+          "text": "TaxRates deliverable 8",
+          "mark": "pending"
+        },
+        {
+          "id": "H3-8",
+          "text": "TaxRates deliverable 9",
+          "mark": "pending"
+        },
+        {
+          "id": "H3-9",
+          "text": "TaxRates deliverable 10",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H0"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H4",
+      "title": "Taxation",
+      "items": [
+        {
+          "id": "H4-0",
+          "text": "Taxation deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-1",
+          "text": "Taxation deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-2",
+          "text": "Taxation deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-3",
+          "text": "Taxation deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-4",
+          "text": "Taxation deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-5",
+          "text": "Taxation deliverable 6",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-6",
+          "text": "Taxation deliverable 7",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-7",
+          "text": "Taxation deliverable 8",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-8",
+          "text": "Taxation deliverable 9",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-9",
+          "text": "Taxation deliverable 10",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-10",
+          "text": "Taxation deliverable 11",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-11",
+          "text": "Taxation deliverable 12",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-12",
+          "text": "Taxation deliverable 13",
+          "mark": "pending"
+        },
+        {
+          "id": "H4-13",
+          "text": "Taxation deliverable 14",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H3"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H5",
+      "title": "Integrations",
+      "items": [
+        {
+          "id": "H5-0",
+          "text": "Integrations deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-1",
+          "text": "Integrations deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-2",
+          "text": "Integrations deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-3",
+          "text": "Integrations deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-4",
+          "text": "Integrations deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-5",
+          "text": "Integrations deliverable 6",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-6",
+          "text": "Integrations deliverable 7",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-7",
+          "text": "Integrations deliverable 8",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-8",
+          "text": "Integrations deliverable 9",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-9",
+          "text": "Integrations deliverable 10",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-10",
+          "text": "Integrations deliverable 11",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-11",
+          "text": "Integrations deliverable 12",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-12",
+          "text": "Integrations deliverable 13",
+          "mark": "pending"
+        },
+        {
+          "id": "H5-13",
+          "text": "Integrations deliverable 14",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H1"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H6",
+      "title": "Customers",
+      "items": [
+        {
+          "id": "H6-0",
+          "text": "Customers deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-1",
+          "text": "Customers deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-2",
+          "text": "Customers deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-3",
+          "text": "Customers deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-4",
+          "text": "Customers deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-5",
+          "text": "Customers deliverable 6",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-6",
+          "text": "Customers deliverable 7",
+          "mark": "pending"
+        },
+        {
+          "id": "H6-7",
+          "text": "Customers deliverable 8",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H2",
+        "H5"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H7",
+      "title": "Invoicing",
+      "items": [
+        {
+          "id": "H7-0",
+          "text": "Invoicing deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "H7-1",
+          "text": "Invoicing deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-2",
+          "text": "Invoicing deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-3",
+          "text": "Invoicing deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-4",
+          "text": "Invoicing deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-5",
+          "text": "Invoicing deliverable 6",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-6",
+          "text": "Invoicing deliverable 7",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-7",
+          "text": "Invoicing deliverable 8",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-8",
+          "text": "Invoicing deliverable 9",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-9",
+          "text": "Invoicing deliverable 10",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-10",
+          "text": "Invoicing deliverable 11",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-11",
+          "text": "Invoicing deliverable 12",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-12",
+          "text": "Invoicing deliverable 13",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-13",
+          "text": "Invoicing deliverable 14",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-14",
+          "text": "Invoicing deliverable 15",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-15",
+          "text": "Invoicing deliverable 16",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-16",
+          "text": "Invoicing deliverable 17",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-17",
+          "text": "Invoicing deliverable 18",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-18",
+          "text": "Invoicing deliverable 19",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-19",
+          "text": "Invoicing deliverable 20",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-20",
+          "text": "Invoicing deliverable 21",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-21",
+          "text": "Invoicing deliverable 22",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-22",
+          "text": "Invoicing deliverable 23",
+          "mark": "pending"
+        },
+        {
+          "id": "H7-23",
+          "text": "Invoicing deliverable 24",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H6"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H8",
+      "title": "NetSuite",
+      "items": [
+        {
+          "id": "H8-0",
+          "text": "NetSuite deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "H8-1",
+          "text": "NetSuite deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H8-2",
+          "text": "NetSuite deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H8-3",
+          "text": "NetSuite deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H8-4",
+          "text": "NetSuite deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H8-5",
+          "text": "NetSuite deliverable 6",
+          "mark": "pending"
+        },
+        {
+          "id": "H8-6",
+          "text": "NetSuite deliverable 7",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H7"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H9",
+      "title": "Users and permissions",
+      "items": [
+        {
+          "id": "H9-0",
+          "text": "Users and permissions deliverable 1",
+          "mark": "done"
+        },
+        {
+          "id": "H9-1",
+          "text": "Users and permissions deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H9-2",
+          "text": "Users and permissions deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H9-3",
+          "text": "Users and permissions deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H9-4",
+          "text": "Users and permissions deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H9-5",
+          "text": "Users and permissions deliverable 6",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H1"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H10",
+      "title": "Reports",
+      "items": [
+        {
+          "id": "H10-0",
+          "text": "Reports deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-1",
+          "text": "Reports deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-2",
+          "text": "Reports deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-3",
+          "text": "Reports deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-4",
+          "text": "Reports deliverable 5",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-5",
+          "text": "Reports deliverable 6",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-6",
+          "text": "Reports deliverable 7",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-7",
+          "text": "Reports deliverable 8",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-8",
+          "text": "Reports deliverable 9",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-9",
+          "text": "Reports deliverable 10",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-10",
+          "text": "Reports deliverable 11",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-11",
+          "text": "Reports deliverable 12",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-12",
+          "text": "Reports deliverable 13",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-13",
+          "text": "Reports deliverable 14",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-14",
+          "text": "Reports deliverable 15",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-15",
+          "text": "Reports deliverable 16",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-16",
+          "text": "Reports deliverable 17",
+          "mark": "pending"
+        },
+        {
+          "id": "H10-17",
+          "text": "Reports deliverable 18",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H7"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "H11",
+      "title": "Compliance",
+      "items": [
+        {
+          "id": "H11-0",
+          "text": "Compliance deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "H11-1",
+          "text": "Compliance deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "H11-2",
+          "text": "Compliance deliverable 3",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H7"
+      ],
+      "done_when": "All acceptance checks pass"
+    },
+    {
+      "id": "Quaderno",
+      "title": "Quaderno",
+      "items": [
+        {
+          "id": "Quaderno-0",
+          "text": "Quaderno deliverable 1",
+          "mark": "pending"
+        },
+        {
+          "id": "Quaderno-1",
+          "text": "Quaderno deliverable 2",
+          "mark": "pending"
+        },
+        {
+          "id": "Quaderno-2",
+          "text": "Quaderno deliverable 3",
+          "mark": "pending"
+        },
+        {
+          "id": "Quaderno-3",
+          "text": "Quaderno deliverable 4",
+          "mark": "pending"
+        },
+        {
+          "id": "Quaderno-4",
+          "text": "Quaderno deliverable 5",
+          "mark": "pending"
+        }
+      ],
+      "depends_on": [
+        "H3"
+      ],
+      "done_when": "All acceptance checks pass"
+    }
+  ],
+  "outside": [
+    {
+      "text": "Request company certificate"
+    },
+    {
+      "text": "Registry credentials"
+    }
+  ]
+}

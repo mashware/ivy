@@ -193,27 +193,48 @@ mod tests {
     //! The newborn shell writes pwd to a file: terminal echo cannot forge the assertion.
     use super::*;
     use crate::tests::window_of_tabs;
-    use std::{fs, path::PathBuf, time::Duration};
+    use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
-    struct Sandbox(PathBuf);
+    struct Sandbox {
+        dir: PathBuf,
+        _shell: crate::shell_integration::TestShell,
+    }
     impl Sandbox {
         fn new() -> Self {
+            Self::with_startup(false)
+        }
+        fn with_startup(change_directory: bool) -> Self {
             let mut nonce = [0u8; 8];
             getrandom::fill(&mut nonce).unwrap();
             let path =
                 std::env::temp_dir().join(format!("ivy-split-{}", u64::from_ne_bytes(nonce)));
             fs::create_dir(&path).unwrap();
-            Self(path)
+            let startup = if change_directory {
+                let directory = path.join("ordinary startup");
+                fs::create_dir(&directory).unwrap();
+                format!("cd '{}'\n", directory.display())
+            } else {
+                String::new()
+            };
+            // Directory routing must not depend on a person's startup scripts finishing or
+            // leaving queued input intact. Keep a real shell, with startup owned by the fixture.
+            let program = path.join("test-shell");
+            fs::write(&program, format!("#!/bin/sh\n{startup}exec /bin/sh\n")).unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+            Self {
+                dir: path,
+                _shell: crate::shell_integration::TestShell::use_program(program.to_str().unwrap()),
+            }
         }
         fn directory(&self, name: &str) -> PathBuf {
-            let path = self.0.join(name);
+            let path = self.dir.join(name);
             fs::create_dir(&path).unwrap();
             path
         }
     }
     impl Drop for Sandbox {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_dir_all(&self.dir);
         }
     }
     fn wait(mut ready: impl FnMut() -> bool) {
@@ -227,7 +248,7 @@ mod tests {
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0))
     }
     fn assert_newborn_pwd(window: &mut Window, sandbox: &Sandbox, expected: &std::path::Path) {
-        let output = sandbox.0.join("pwd.txt");
+        let output = sandbox.dir.join("pwd.txt");
         let name = window.active().focus;
         window
             .all_panes_mut()
@@ -248,9 +269,9 @@ mod tests {
             let sandbox = Sandbox::new();
             let first = sandbox.directory("first");
             let second = sandbox.directory("second space;$dollar");
-            let ready = sandbox.0.join("ready");
-            let change = sandbox.0.join("change");
-            let changed = sandbox.0.join("changed");
+            let ready = sandbox.dir.join("ready");
+            let change = sandbox.dir.join("change");
+            let changed = sandbox.dir.join("changed");
             let script = format!(
                 "cd '{}' && touch '{}' && while ! test -f '{}'; do sleep 0.01; done; cd '{}' && touch '{}' && exec sleep 30",
                 first.display(),
@@ -281,7 +302,7 @@ mod tests {
     fn split_directory_uses_named_toolbar_target_instead_of_focus() {
         let sandbox = Sandbox::new();
         let source = sandbox.directory("clicked console");
-        let ready = sandbox.0.join("ready");
+        let ready = sandbox.dir.join("ready");
         let script = format!(
             "cd '{}' && touch '{}' && exec sleep 30",
             source.display(),
@@ -344,10 +365,10 @@ mod tests {
 
     #[test]
     fn split_directory_unknown_after_source_exit_uses_ordinary_launch_directory() {
-        let sandbox = Sandbox::new();
-        let output = sandbox.0.join("ordinary-pwd.txt");
+        let sandbox = Sandbox::with_startup(true);
+        let output = sandbox.dir.join("ordinary-pwd.txt");
         let ctx = egui::Context::default();
-        // Observe the ordinary user-shell launch, including its own startup configuration.
+        // Observe the ordinary launch after a controlled startup changes its directory.
         let mut ordinary =
             Pane::new_counting_reads(&ctx, 90, crate::control::ReadActivity::default()).unwrap();
         ordinary
@@ -356,6 +377,10 @@ mod tests {
             .unwrap();
         wait(|| fs::read_to_string(&output).is_ok_and(|s| !s.trim().is_empty()));
         let expected = PathBuf::from(fs::read_to_string(&output).unwrap().trim_end());
+        assert_eq!(
+            expected,
+            fs::canonicalize(sandbox.dir.join("ordinary startup")).unwrap()
+        );
         let mut window = window_of_tabs([["exit 0", "sleep 30"]]);
         wait(|| {
             window.active_mut().panes_mut()[0]
@@ -410,7 +435,7 @@ mod tests {
     fn split_directory_foreign_report_vetoes_native_and_previous_local_directory() {
         let sandbox = Sandbox::new();
         let source = sandbox.directory("local ssh directory");
-        let ready = sandbox.0.join("ready");
+        let ready = sandbox.dir.join("ready");
         let script = format!(
             "cd '{}' && touch '{}' && exec sleep 30",
             source.display(),
@@ -432,7 +457,7 @@ mod tests {
             &CellMetrics::of(8.0, 16.0),
         );
         assert_eq!(window.active().panes().len(), 3);
-        let output = sandbox.0.join("remote-pwd.txt");
+        let output = sandbox.dir.join("remote-pwd.txt");
         let name = window.active().focus;
         window
             .all_panes_mut()

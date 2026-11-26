@@ -600,11 +600,12 @@ struct Pane {
     pty_output: PtyOutput,
     /// Startup assets stay alive until the console's shell no longer needs them.
     _shell_integration: Option<shell_integration::Prepared>,
-    /// The annotated screenshots Send wrote into [`Self::panel`]'s directory, removed when the
-    /// console closes. **Declared before `panel` on purpose**: fields drop in declaration order, and
-    /// the directory is removed without recursion, so the copies have to be gone first or every
-    /// such close leaves the directory behind and says so.
-    annotated: viewer::image::send::Written,
+    /// This console's image, with its marks, and the annotated screenshots Send wrote into
+    /// [`Self::panel`]'s directory, removed when the console closes. **Declared before `panel` on
+    /// purpose**: fields drop in declaration order, and the directory is removed without recursion,
+    /// so the copies have to be gone first or every such close leaves the directory behind and
+    /// says so.
+    image: viewer::image::Console,
     /// The directory where this console's program publishes its state, and the identifier it is
     /// known by. It is deleted when the console is dropped, because the type deletes it when it
     /// dies.
@@ -1603,11 +1604,7 @@ impl eframe::App for Window {
             // own.
             if pane_outcome.color.rasterized + pane_outcome.color.failed > 0 {
                 self.timed_separately += pane_outcome.color.spent;
-                self.color.record(
-                    pane_outcome.color.spent,
-                    pane_outcome.color.rasterized,
-                    pane_outcome.color.failed,
-                );
+                self.color.record(&pane_outcome.color);
             }
             // **Noting and subtracting are the same decision, so they are taken together** — the
             // rule the tab bar's own accumulation states: without subtracting, the strip is
@@ -1922,6 +1919,7 @@ mod tests {
     mod settings_chrome;
     mod settings_editor;
     mod title_typography;
+    pub(crate) mod windows_fixture;
 
     // **The tests reach further into the two modules than the code above does**, and this is
     // where that is said. They build tilings and weights directly to assert the arithmetic;
@@ -3572,6 +3570,8 @@ mod tests {
         "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
     );
 
+    const LISTENER_CHILD_READY: &str = "ivy-child-ready";
+
     /// Makes that console's reading end in a way that is **not** an ordinary ending, and waits for
     /// the reason to be recorded.
     ///
@@ -3581,6 +3581,24 @@ mod tests {
     /// the reading with no listener while the program inside is alive and writing, which is exactly
     /// what the sentence on the glass claims.
     fn make_it_go_quiet(pane: &mut Pane) {
+        // ConPTY can write its cursor query before the child runs. Keep the real bridge and
+        // Screen alive so Pane::pump answers that query, including one split across reads.
+        // Every writer used here computes this marker rather than echoing its full spelling;
+        // seeing it proves child execution, not merely host output or command echo.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !pane.screen.to_text().contains(LISTENER_CHILD_READY) {
+            assert!(
+                Instant::now() < deadline,
+                "the child never produced its readiness marker; screen: {:?}",
+                pane.screen.to_text()
+            );
+            pane.pump(Default::default());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(pane.pty.ending(), None, "the writer must still be alive");
+
+        // The child keeps producing after disconnection. Only the ending stamp is awaited:
+        // Windows may still be draining the live child's output after recording delivery loss.
         let (orphan, nowhere) = std::sync::mpsc::channel();
         pane.pty_output = PtyOutput::new(nowhere, || {});
         drop(orphan);
@@ -3592,10 +3610,10 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_ne!(
+        assert_eq!(
             pane.pty.ending(),
-            Some(term_core::Ending::EndedWell),
-            "this console ended well, so there would be nothing to say about it"
+            Some(term_core::Ending::NobodyListening),
+            "the live child's delivery must fail because its listener was removed"
         );
     }
 
@@ -3747,7 +3765,13 @@ mod tests {
         // covers nothing leaves the shape queued and invisible.
         let text = shapes
             .iter()
-            .find(|clipped| matches!(clipped.shape, egui::Shape::Text(_)))
+            .find(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => text
+                    .galley
+                    .text()
+                    .starts_with(painter::notices::STOPPED_RECEIVING),
+                _ => false,
+            })
             .expect("the sentence is drawn");
         assert!(
             text.clip_rect.max.y <= box_of_it.max.y + 1.0
@@ -3816,7 +3840,7 @@ mod tests {
             // in `tests/scripts.rs` reads a plain double-quoted literal; a continuation left this
             // command outside every rule it enforces, and the guard that says so had been red on
             // the main branch before anybody read it.
-            "stty -echo -icanon && printf '\\033[?1000h\\033[?1002h\\033[?1006h' && echo ready && yes",
+            "stty -echo -icanon && printf '\\033[?1000h\\033[?1002h\\033[?1006h' && echo ready && yes \"$(printf '%s%s' ivy-child -ready)\"",
             "sleep 30",
         );
         // **The mode itself is what is waited for, not a word on screen**: the program floods, so
@@ -4291,7 +4315,7 @@ mod tests {
         // its listener is gone (its own doc comment: "while the program inside is alive and
         // writing"). `sleep` alone never writes again after the marker and this premise stalls.
         let mut window = window_with(
-            "stty raw -echo && printf refused-marker && exec yes",
+            "stty raw -echo && printf refused-marker && exec yes \"$(printf '%s%s' ivy-child -ready)\"",
             "sleep 30",
         );
         {
@@ -5692,23 +5716,25 @@ mod tests {
             b"{\"lines\":[\"written during the hold\"]}",
         )
         .expect("publish by file");
-        std::fs::File::open(
-            pane.panel
-                .as_ref()
-                .unwrap()
-                .path()
-                .join(panel_contract::PANEL_FILE),
-        )
-        .unwrap()
-        .set_modified(
-            pane.panel_state
-                .last_understood()
-                .unwrap()
-                .written_at
-                .unwrap()
-                + Duration::from_secs(1),
-        )
-        .unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(
+                pane.panel
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .join(panel_contract::PANEL_FILE),
+            )
+            .unwrap()
+            .set_modified(
+                pane.panel_state
+                    .last_understood()
+                    .unwrap()
+                    .written_at
+                    .unwrap()
+                    + Duration::from_secs(1),
+            )
+            .unwrap();
         pane.to_reread.raise();
         pane.refresh_its_panel(&egui::Context::default());
         assert!(
@@ -5765,7 +5791,9 @@ mod tests {
                     .path()
                     .join(panel_contract::PANEL_FILE);
                 std::fs::write(&path, r#"{"lines":["later file"]}"#).unwrap();
-                std::fs::File::open(&path)
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
                     .unwrap()
                     .set_modified(now + Duration::from_secs(2))
                     .unwrap();
@@ -6339,7 +6367,9 @@ mod tests {
                     .path()
                     .join(panel_contract::PANEL_FILE);
                 std::fs::write(&path, r#"{"lines":["later file"]}"#).unwrap();
-                std::fs::File::open(&path)
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
                     .unwrap()
                     .set_modified(now + Duration::from_secs(1))
                     .unwrap();
@@ -6899,6 +6929,100 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
+    /// **An agent's image goes to the console whose endpoint asked, and to no other** (D121): the
+    /// window's drain answers with the sentence the agent reads, the console that asked holds the
+    /// image, and the one beside it still has none.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        let asking = window.active().panes()[1].name;
+        let beside = window.active().panes()[0].name;
+        attach_a_channel(&mut window, asking);
+        // A folder only this process names, so no other run's file is what the worker reads.
+        let path = std::env::temp_dir()
+            .join(format!("ivy-agent-image-{}", std::process::id()))
+            .join("shot.png");
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            asking,
+            7,
+            panel_control::What::ImageOpen { path: path.clone() },
+        );
+        assert!(
+            matches!(&answer, panel_control::Answer::Text(said) if said.starts_with("opened")),
+            "{answer:?}"
+        );
+        let active = window.active;
+        window.tabs[active].focus = asking;
+        assert_eq!(crate::viewer::shown_image(&window), Some((asking, path)));
+        window.tabs[active].focus = beside;
+        assert_eq!(
+            crate::viewer::shown_image(&window),
+            None,
+            "it reached another console"
+        );
+    }
+
+    crate::windows_unix_omission!(
+        an_image_open_fills_the_slot_of_the_console_that_asked_and_no_other,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    /// **An agent's image shown in the console being typed into loses no keystroke** (D121): the
+    /// request is answered by the real frame's drain, after that frame's keys, the drawer opens on
+    /// the Image tab, and the key typed in that frame and the one typed in the next both reach the
+    /// console.
+    #[test]
+    #[cfg(unix)]
+    fn an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        let typing = window.active().focus;
+        attach_a_channel(&mut window, typing);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 800.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let (answering, answer) = std::sync::mpsc::sync_channel(1);
+        window
+            .pane_called(typing)
+            .and_then(|pane| pane.control.as_mut())
+            .expect("that console keeps its channel")
+            .push_for_the_tests(panel_control::Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
+                connection: 7,
+                what: panel_control::What::ImageOpen {
+                    // A folder only this process names, so no other run's file is read.
+                    path: std::env::temp_dir()
+                        .join(format!("ivy-agent-image-{}", std::process::id()))
+                        .join("shot.png"),
+                },
+                answer: answering,
+                #[cfg(windows)]
+                release: None,
+            });
+        let typed = |window: &mut Window| window.pane_called(typing).unwrap().keystrokes.clone();
+        one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("a".into())]);
+        assert!(
+            matches!(answer.try_recv(), Ok(panel_control::Answer::Text(said)) if said == "opened and shown in the drawer of this console, which the person is working in; if the drawer cannot show it, it says why there"),
+            "the drain of this frame did not show it"
+        );
+        assert_eq!(sidebar::active(&window), Some(sidebar::Tool::Image));
+        assert_eq!(
+            typed(&mut window),
+            b"a",
+            "the key of the drain's frame was lost"
+        );
+        one_frame_in(&mut window, &ctx, area, vec![egui::Event::Text("b".into())]);
+        assert_eq!(typed(&mut window), b"b", "the drawer took the next key");
+    }
+
+    crate::windows_unix_omission!(
+        an_agents_image_shown_in_the_console_being_typed_into_loses_no_keystroke,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
     /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
     /// close would pass the refusal tests and close nothing.
@@ -7026,6 +7150,60 @@ mod tests {
         "unix-only: exercises the Unix panel-control endpoint"
     );
 
+    // Directly seeded UI screens must not race with ConPTY startup or later child output.
+    // Keep the real bridge alive so the child's reader is neither disconnected nor abandoned.
+    #[must_use]
+    pub(crate) struct IsolatedOutput {
+        _sources: Vec<(PtyOutput, std::sync::mpsc::Sender<Vec<u8>>)>,
+    }
+
+    pub(crate) fn isolate_output(window: &mut Window) -> IsolatedOutput {
+        let mut sources = Vec::new();
+        for tab in &mut window.tabs {
+            for pane in tab.panes_mut() {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let live = std::mem::replace(&mut pane.pty_output, PtyOutput::new(receiver, || {}));
+                sources.push((live, sender));
+            }
+        }
+        IsolatedOutput { _sources: sources }
+    }
+
+    #[test]
+    fn seeded_ui_fixture_keeps_pending_program_output_away_from_its_selection() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        let area = area_of(800.0);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.screen.advance(b"\x1b[2J\x1b[Hfixture\x1b[?25l");
+        pane.screen.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
+        });
+        pane.screen.extend_selection(Cell {
+            row: 0,
+            col: 6,
+            half: Half::Right,
+        });
+        assert_eq!(pane.screen.selected_text().as_deref(), Some("fixture"));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let live_output = std::mem::replace(
+            &mut pane.pty_output,
+            PtyOutput::seeded(receiver, b"\x1b[2J\x1b[H\x1b[?25h".to_vec(), || {}),
+        );
+        let _live_output = (sender, live_output);
+        let _output = isolate_output(&mut window);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        assert_eq!(
+            window.active().panes()[0].screen.selected_text().as_deref(),
+            Some("fixture"),
+            "unrelated program output changed a directly seeded UI fixture"
+        );
+    }
+
     /// Builds a pane with a program inside, with no interface framework in the way.
     ///
     /// The two halves of the frame tested here —pumping and resizing— do not touch the desktop
@@ -7033,33 +7211,17 @@ mod tests {
     /// [`Pane::new_counting_reads`].
     fn pane_with(program: &str, name: usize) -> Pane {
         #[cfg(unix)]
+        let program = if program == "yes" {
+            "yes \"$(printf '%s%s' ivy-child -ready)\""
+        } else {
+            program
+        };
+        #[cfg(unix)]
         let (pty, output) = Pty::spawn("sh", &["-c", program], INITIAL_GRID)
             .expect("could not open the pseudoterminal");
         #[cfg(windows)]
         let (pty, output) = {
-            let command = if let Some(seconds) = program.strip_prefix("sleep ") {
-                assert!(
-                    seconds.parse::<f64>().is_ok(),
-                    "invalid sleep fixture: {program}"
-                );
-                format!("Start-Sleep -Seconds {seconds}")
-            } else if program == "yes" {
-                "while ($true) { [Console]::WriteLine('y') }".to_owned()
-            } else if program == "true" {
-                "exit 0".to_owned()
-            } else if let Some(text) = program.strip_prefix("printf ") {
-                let text = text
-                    .strip_prefix('\'')
-                    .and_then(|t| t.strip_suffix('\''))
-                    .unwrap_or(text);
-                let text = text
-                    .replace("\\n", "\n")
-                    .replace("\\r", "\r")
-                    .replace('\'', "''");
-                format!("[Console]::Write('{text}')")
-            } else {
-                panic!("unsupported Windows test fixture: {program}");
-            };
+            let command = windows_fixture::command(program);
             Pty::spawn(
                 "powershell.exe",
                 &[
@@ -7074,6 +7236,20 @@ mod tests {
             .expect("could not open the pseudoterminal")
         };
 
+        let screen = Screen::new(INITIAL_GRID);
+        #[cfg(windows)]
+        let screen = {
+            let mut screen = screen;
+            // These interaction fixtures need a known local directory. The system ConPTY host
+            // does not preserve OSC7; its transport has a separate bundled-host test in term-core.
+            // The child still changes directory, witnessed by its relative input file.
+            if let Some(folder) = windows_fixture::directory(program) {
+                let uri =
+                    url::Url::from_directory_path(folder).expect("absolute fixture directory");
+                screen.advance(format!("\x1b]7;{uri}\x07").as_bytes());
+            }
+            screen
+        };
         Pane {
             name,
             label: None,
@@ -7084,12 +7260,12 @@ mod tests {
             pty: pty.into(),
             pty_output: PtyOutput::new(output, || {}),
             _shell_integration: None,
-            annotated: Default::default(),
+            image: Default::default(),
             panel: None,
             control: None,
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
-            screen: Screen::new(INITIAL_GRID),
+            screen,
             painted_console: None,
             timings: Timings::default(),
             pending_measurement: None,
@@ -8763,17 +8939,7 @@ mod tests {
         // which is an ending that is not «ended well» and reaches this predicate exactly as a
         // failure would.
         let mut pane = pane_with("yes", 0);
-        let (_orphan, nowhere) = std::sync::mpsc::channel();
-        pane.pty_output = PtyOutput::new(nowhere, || {});
-        drop(_orphan);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while pane.pty.ending().is_none() {
-            assert!(
-                Instant::now() < deadline,
-                "the reading never noticed its listener was gone"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        make_it_go_quiet(&mut pane);
 
         let queue_left = pane.pump(Default::default());
 
@@ -10086,6 +10252,7 @@ mod tests {
         let ctx = egui::Context::default();
         let area = area_of(800.0);
         let mut window = window_with("sleep 30", "sleep 30");
+        let _output = isolate_output(&mut window);
         let pane = &mut window.active_mut().panes_mut()[0];
         pane.screen.advance(b"https://example.test/painted");
         one_frame_in(&mut window, &ctx, area, Vec::new());
@@ -16727,11 +16894,7 @@ mod tests {
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
-                color.record(
-                    outcome.color.spent,
-                    outcome.color.rasterized,
-                    outcome.color.failed,
-                );
+                color.record(&outcome.color);
             }
         });
         output.drop_without_applying_deltas();
@@ -17804,7 +17967,21 @@ mod tests {
     fn with_the_flag_raised_the_frame_reads_again() {
         let mut pane = pane_with_panel(r#"{"lines":["the first one"]}"#);
 
+        let path = pane
+            .panel
+            .as_ref()
+            .unwrap()
+            .path()
+            .join(panel_contract::PANEL_FILE);
+        // Distinct publications need distinct dates even on a coarse or cached filesystem clock.
+        let seen = std::fs::metadata(&path).unwrap().modified().unwrap();
         publish_at(&pane, r#"{"lines":["the second one"]}"#);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(seen + Duration::from_secs(1))
+            .unwrap();
         pane.to_reread.raise();
         one_frame_over(&mut pane);
 
@@ -19726,8 +19903,7 @@ mod tests {
         // the program. Without that whole path, an agent formats its output for eighty columns
         // inside a pane of twenty, and none of the tests above would fall.
         //
-        // It is asked with `stty size` because there is no other way: the size lives in the kernel,
-        // on the slave's side, and cannot be read from this process.
+        // Ask the child for its terminal geometry, not the parent's screen or formatting width.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(100.0);
@@ -19757,7 +19933,16 @@ mod tests {
         }
 
         // The focus is on the newborn, so what is typed goes to its program.
-        enqueue(&ctx, vec![egui::Event::Text("stty size\n".to_owned())]);
+        #[cfg(unix)]
+        let size_command = "stty size";
+        #[cfg(windows)]
+        let size_command =
+            "[Console]::WriteLine(('{0} {1}' -f [Console]::WindowHeight, [Console]::WindowWidth))";
+        // A literal LF in Text can enter PowerShell's continuation editor. Submit through the
+        // same Enter encoding as a person, after delivering the command's text.
+        enqueue(&ctx, vec![egui::Event::Text(size_command.to_owned())]);
+        window.send_keys_to_the_focused(&ctx);
+        enqueue(&ctx, key_with(egui::Key::Enter, egui::Modifiers::NONE));
         window.send_keys_to_the_focused(&ctx);
 
         let at = window
@@ -19770,6 +19955,10 @@ mod tests {
             "the newborn kept the startup grid and the wait below would prove nothing"
         );
         let its_size = format!("{} {}", newborn.measured.rows, newborn.measured.cols);
+        assert!(
+            !size_command.contains(&its_size),
+            "the expected dimensions must come from execution, not the command's echo"
+        );
         wait_for_the_screen_to_say(newborn, &its_size);
     }
 
@@ -26011,7 +26200,9 @@ mod tests {
             .expect("the pane has a directory")
             .path()
             .join(panel_contract::PANEL_FILE);
-        std::fs::File::open(&path)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
             .expect("open the panel")
             .set_modified(SystemTime::now() - std::time::Duration::from_secs(60 * 60))
             .expect("move the date backwards");

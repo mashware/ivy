@@ -167,8 +167,9 @@ the agent's session or project instructions:
 > console must leave the panel alone. An agent started in a console of its own keeps its own panel.
 
 The bridge exposes `panel_set`, `panel_get`, `panel_patch` and `panel_retire`, plus `split_open`,
-`split_read` and `split_close` for auxiliary consoles owned by that connection. A person's input
-into an auxiliary console revokes the agent's read and close handle. See the
+`split_read` and `split_close` for auxiliary consoles owned by that connection, and `image_open`,
+which shows a screenshot in the agent's own console's Image tab for the person to mark up and send
+back. A person's input into an auxiliary console revokes the agent's read and close handle. See the
 [architecture](docs/03-architecture.md) and [contract](docs/04-panel-contract.md) for connection
 and ownership rules.
 

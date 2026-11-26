@@ -647,6 +647,7 @@ mod tests {
     }
     #[test]
     fn blocked_filesystem_reader_leaves_frames_and_console_input_progressing() {
+        let diagnostics = crate::tests::windows_fixture::Diagnostics::new();
         use crate::tests::{one_frame_in, window_of_tabs};
         let temp = TempDir::new();
         let marker = temp.0.join("console-input");
@@ -664,6 +665,18 @@ mod tests {
         while window.projects.directory(pane) != Some(temp.0.as_path()) {
             one_frame_in(&mut window, &ctx, area, vec![]);
             assert!(Instant::now() < deadline, "native directory unavailable");
+            thread::sleep(Duration::from_millis(10));
+        }
+        // The Windows directory is pre-seeded; wait for the child's post-Prepare file before
+        // starting the blocked-reader scenario, without spending its input-delivery budget.
+        let ready = Instant::now() + Duration::from_secs(10);
+        while !matches!(fs::read(&marker).as_deref(), Ok(b"")) {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+            assert!(
+                Instant::now() < ready,
+                "input fixture did not open its witness: {}",
+                diagnostics.report(&mut window)
+            );
             thread::sleep(Duration::from_millis(10));
         }
         let (started_tx, started_rx) = mpsc::sync_channel(1);

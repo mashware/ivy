@@ -11,6 +11,11 @@ pub(crate) fn run(
     stdout_limit: usize,
     stderr_limit: usize,
 ) -> Result<std::process::Output, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     let mut child = command
         .spawn()
         .map_err(|e| format!("Cannot start Git: {e}"))?;
@@ -95,4 +100,63 @@ fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+    use std::process::Stdio;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetConsoleWindow() -> *mut std::ffi::c_void;
+    }
+
+    #[test]
+    fn background_runner_does_not_allocate_a_console() {
+        const CASE: &str =
+            "git_process::windows_tests::background_runner_does_not_allocate_a_console";
+        const MARKER: &str = "git-child-without-console";
+        match std::env::var("IVY_GIT_CONSOLE_TEST").as_deref() {
+            Ok("witness") => {
+                assert!(unsafe { GetConsoleWindow() }.is_null());
+                println!("{MARKER}");
+            }
+            Ok("host") => {
+                assert!(unsafe { GetConsoleWindow() }.is_null());
+                let mut command = Command::new(std::env::current_exe().unwrap());
+                command
+                    .args([CASE, "--exact", "--nocapture"])
+                    .env("IVY_GIT_CONSOLE_TEST", "witness")
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                let output = run(command, Duration::from_secs(15), 65536, 65536).unwrap();
+                assert!(output.status.success(), "{:?}", output);
+                assert!(String::from_utf8_lossy(&output.stdout).contains(MARKER));
+            }
+            _ => {
+                let mut host = Command::new(std::env::current_exe().unwrap());
+                host.args([CASE, "--exact", "--nocapture"])
+                    .env("IVY_GIT_CONSOLE_TEST", "host")
+                    .creation_flags(0x0000_0008) // DETACHED_PROCESS
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                let mut host = host.spawn().unwrap();
+                let deadline = Instant::now() + Duration::from_secs(20);
+                loop {
+                    if let Some(status) = host.try_wait().unwrap() {
+                        assert!(status.success());
+                        break;
+                    }
+                    if Instant::now() >= deadline {
+                        stop_child(&mut host);
+                        panic!("detached host timed out");
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+    }
 }

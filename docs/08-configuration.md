@@ -299,6 +299,9 @@ Braille patterns in titles, including Codex's activity glyphs such as `⠸`, are
 than requested from the installed font. This preserves the published title's text and animation;
 it does not interpret a pattern as agent activity.
 
+Other title symbols, including Claude's `◐`, use the bundled text fallback faces when Geist and
+the proportional fallbacks do not contain them. No installed font or configuration is required.
+
 ### The blink, if you want it settled
 
 ```
@@ -572,6 +575,25 @@ Hidden programs keep running. Right-clicking a header retains its console action
 
 ## Board
 
+Configure a repository's versioned plan with:
+
+```text
+roadmap.backend = /path/to/project/plan.json
+```
+
+A `.json` extension (case-insensitive) selects the [Project plan document](04-panel-contract.md#project-plan-document),
+the same JSON accepted by `plan_set`. Other extensions retain Markdown task lists; Ivy does not
+inspect content to guess the format. Use JSON to declare milestone and deliverable IDs, completion
+criteria, dependencies, marks, references, links, outside work and the plan source. A console publishing
+`milestone: "H3"` and `deliverable: "MT-16700"` attaches to that identified deliverable.
+
+Both formats reload automatically after saves, atomic replacement, deletion and reappearance.
+The file must be regular UTF-8 and at most 256 KiB. Invalid JSON and oversized or unavailable files
+show a roadmap diagnostic. Unsupported marks reported by the shared parser also show a diagnostic,
+while the valid remainder stays on the Board. A published plan hides the file until `plan_retire`;
+JSON files do not publish or persist a separate plan in Ivy's state. `roadmap.window` remains retired
+(D93); JSON uses the same current Board visibility as a published plan.
+
 The global **Board** control shows every console in every tab, including a console hidden by
 maximization or a folded information panel. The default shortcut is **Ctrl+Shift+O**:
 
@@ -587,8 +609,8 @@ A bar across the top of the board carries **Board**, the window's console and pr
 buttons that choose the arrangement — **By state** and **By milestone** — the **All / Claiming you**
 narrowing, a field that filters consoles by console, tab or task name, and **Close**. **Claiming
 you** keeps the consoles waiting for you, stuck, or finished with nobody having looked; its count is
-taken over the whole window. Click the field to type in it; Enter or the first Escape leaves the
-field, and the next Escape closes the board. A query holds at most 256 characters. In a narrow
+taken over the whole window. Click the field to type in it; Enter leaves the field. In By state,
+the first Escape leaves the field and the next closes Board; in By milestone Escape closes it immediately. A query holds at most 256 characters. In a narrow
 window the bar stacks its controls on more rows. A key hint runs along the board's foot. Both
 arrangements stay; the last one chosen is remembered in the file and opens the next board — the
 first choice creates the file when there is none. Its value is `state` or `milestone`:
@@ -609,31 +631,29 @@ colour, its consoles and how many sit in each claiming column; its roadmap lives
 so a project known only by its roadmap file appears there and not here. Right-edge column badges count
 that project's consoles.
 
-**By milestone** lays each project's roadmap out as columns, one per milestone, with its
-deliverables, their progress and **after** the milestones it depends on, named by title. A
-console's card sits under the deliverable its panel declares (`milestone` and `deliverable`), at
-milestone level when the deliverable is not in the plan, and in **Off the plan** when it declares
-none or a milestone the plan lacks — nothing is guessed. A milestone's **Done when** criterion sits
-under its header, and the plan's work outside its milestones is listed at the top of **Off the
-plan**, above the consoles there. A project without a roadmap shows its
-cards in one row and says **no roadmap**; one whose roadmap cannot be read says why. Each project
-header shows its colour, how many consoles sit in each claiming column and its roadmap's source.
-Every card opens with its state: the claim's pill and words for waiting, stuck and finished, the
-column's mark for working and idle, and the observed wait in minutes. A project with a configured
+**By milestone** shows one compact strip for the whole roadmap, then columns for active/claiming,
+ready, outside and explicitly opened work. Relevant items appear by default; headers and remaining
+counts expose the full milestone and its closing criterion. Cards use exact declared milestone/item
+IDs, with milestone-level fallback for an unknown item and Off the plan for an absent/unknown
+milestone. Off the plan consoles precede outside tasks. Plan-less projects use a responsive grid
+capped at four columns; unreadable plans state their error. The full reader rules are below under
+Board milestone reading.
+By state cards open with their effective state, including Working/Idle marks; compact By milestone
+cards show a band for claims only, with an observed wait duration when known. A project with a configured
 roadmap file and no console keeps its columns there; a published plan shows while its project has a
 console. Published plans override configured files as a
 whole; retirement reveals the file again. Plain-string plan items retain their text and count toward
 totals.
 
-A card uses the first producer title, the current phase and the available worktree branch. Its body
+Both card arrangements use the first producer title, phase and available worktree branch. In By state, the body
 retains native panel content, marks, references, styles, links and section summaries in Bellwether's
 monospaced presentation, with aligned references and independent reader controls. Long
-panels initially show eighteen source lines; **Show all** exposes the remainder. Finished and Idle
+panels initially show eighteen source lines; their **Show all** exposes the remainder. Finished and Idle
 cards start compact; **Show panel** opens them. Section-fold choices belong to the Board reader and
 survive producer republishes independently of the sidebar. Freshness and publication-origin notices
 remain visible. A console without a panel says **publishes nothing** and its card is dashed; an old
 state nobody refreshes is veiled. When none has published, the screen says **No task state has been
-published yet** and still includes every console; when the narrowing leaves nothing, it says so.
+published yet** and still includes every console. By state reports an empty narrowed result; By milestone retains the plan and its items while hiding filtered cards.
 
 State comes only from published attention and supported explicit client declarations. An explicit
 working signal suppresses a lingering panel wait; block and done retain priority, followed by an
@@ -884,7 +904,7 @@ Preserve unrelated settings and existing title items you want. If `terminal_titl
 
 The guide previews a stable destination beneath Ivy's configuration directory: `agent-integrations/opencode/ivy-opencode.tsx`. **Install / repair** writes only that bundled asset. Copy its path into the existing `plugin` array in OpenCode's `tui.json`, preserving other entries, then restart OpenCode inside the intended console. Enable before starting; if the adapter received a refusal while disabled, restart OpenCode after enabling. The guide's copy button confirms completion with **Copied**. Configuration instructions and fixture commands accompany the [bundled adapter](../resources/agent-integrations/opencode/README.md).
 
-The TUI plugin follows that TUI's displayed session, not every session on a server or in a directory. It reconciles root/direct-child prompts against the local pending-request API; these requests do not call a model or send prompt contents. The current adapter is inactive on Windows. A missing/moved asset, failed plugin load or lack of observed declarations remains setup-required/unverified; enabling the checkbox does not prove installation.
+The TUI plugin follows that TUI's displayed session, not every session on a server or in a directory. It reconciles root/direct-child prompts against the local pending-request API; these requests do not call a model or send prompt contents. On Windows it uses Ivy's bundled helper; after updating Ivy, repair the plugin and restart OpenCode. The helper's location and console identity are supplied by Ivy and must not be hard-coded. A missing/moved asset or helper, failed plugin load or lack of observed declarations remains setup-required/unverified; enabling the checkbox does not prove installation. Native adapter tests and installed-client desktop verification remain separate, as recorded in the bundled adapter's README. This support does not enable conversation recovery.
 
 Before marking a client version live-verified, exercise working/idle, displayed permission and question open/reply/denial/cancellation, explicit clear/exit, manual-title preservation and independent routing from two consoles on a real desktop. Source fixtures and headless painting tests do not satisfy those checks.
 
@@ -914,3 +934,33 @@ retain precedence. Shift movement moves the caret without selecting query text.
 
 The caret follows the application's existing cursor blink setting and idle/focus rules. Search
 options and the floating box's position are unchanged.
+
+## Board milestone reading
+
+**By milestone** shows every milestone in one compact strip and the relevant work in columns below.
+Milestone bodies initially show their console cards without roadmap task previews;
+click the milestone header to reveal all task items and the closing criterion. Click it again to
+collapse the task details. Click a completed or later milestone in the strip to open it; click again or its close
+control to remove it. **Show all** exposes the full roadmap in order. Only the columns scroll
+horizontally when their minimum widths do not fit. Fourteen milestones fit the strip at 1440 points;
+labels truncate on smaller windows or larger plans, with full details on hover.
+
+The console filter hides cards only; it does not remove roadmap items or change milestone classes.
+**Claiming you** limits the columns to claiming work; Show all temporarily takes precedence over
+that column restriction. Tab visits the strip, columns/items and cards, arrows move within the
+focused area, and Enter/Space opens a strip milestone. Enter on a card goes to its console. Escape
+closes By milestone even while its filter is being edited. Opened milestones and expansion choices
+survive closing/reopening Board for the session; they reset on application restart.
+
+Console placement uses the producer's exact `milestone` and `deliverable` IDs. A known milestone
+with an unknown item retains the card at milestone level; absent/unknown milestone IDs remain Off
+the plan. Titles in different languages never establish identity. Compact milestone cards show the
+producer title and up to three literal body lines, prioritizing explicit wait/block marks, plus
+attention, freshness, branch and phase. The full panel remains in the console. A resolvable local
+roadmap source opens in the read-only document viewer; unavailable sources explain why on hover.
+Drag a vertical separator to adjust the two neighboring caption groups. Groups retain their
+readable column minima; overflow scrolls horizontally. Each caption has Hide and Maximize/Restore
+controls. Named Show controls above the columns recover hidden groups even when all are hidden.
+Maximize temporarily shows one group; Restore layout returns the previous widths and visibility.
+These choices are per project for the current app session. Show all temporarily bypasses them and
+keeps its flat roadmap order. No new configuration keys are introduced.

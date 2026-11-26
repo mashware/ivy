@@ -9,7 +9,7 @@ impl Folder {
         getrandom::fill(&mut nonce).unwrap();
         let path = std::env::temp_dir().join(format!("opener-{}", u64::from_ne_bytes(nonce)));
         std::fs::create_dir(&path).unwrap();
-        Self(std::fs::canonicalize(path).unwrap())
+        Self(canonical(&path).unwrap())
     }
 
     fn file(&self, name: &str) -> PathBuf {

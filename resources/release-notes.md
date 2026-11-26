@@ -1,6 +1,64 @@
-# Ivy 0.1.0-alpha.14
+# Ivy 0.1.0-alpha.22
 
 ## New in this alpha
+
+- Select text beyond the visible part of a code document: holding the pointer above or below the view scrolls it without losing the selection's starting point. Scrollbars remain visible, and the Open menu has clearer spacing and a visible Wrap lines checkbox.
+- The Board gives project sections more room, keeps controls aligned and reveals tasks on demand.
+- Codex stays connected when opening its plugins screen.
+- On Windows, PowerShell reports its current directory to Ivy for project identity, new splits, Review and relative links. Its native Codex entry preserves arguments and exit status.
+- On Windows, OpenCode can publish working, permission and question indicators through Ivy's bundled helper. Installed-client desktop verification and session recovery remain pending.
+- Windows Codex route records use private storage. Shared mobile/panel conversations remain unavailable there; ordinary launches explain the limitation and preserve Codex's original behavior.
+- Shell startup failures on Windows remain visible instead of closing Ivy silently.
+
+Desktop appearance, operating-system clipboard copying and the reported code-toolbar alignment still need manual verification. Downloads remain unsigned and experimental.
+
+## Previously in 0.1.0-alpha.21
+
+- On Windows, launching Ivy and refreshing project or Git views no longer opens extra console windows. Ivy carries its own application icon and version.
+- Windows installers include the session helpers and recovery adapters needed by agent integration.
+- Claude title symbols remain legible when the selected font does not include them.
+
+## Previously in 0.1.0-alpha.19
+
+- See a large project roadmap in one compact milestone strip, with readable columns for work in progress, ready work and milestones you open yourself.
+- Keep console cards beneath their explicitly linked roadmap tasks, with compact published summaries and clear waiting states.
+- Expand milestones, show the whole roadmap and filter console cards without losing the project overview.
+- Board columns and cards have aligned headers, consistent spacing and word-wrapped text.
+- Agents can open images directly in their own console through Ivy's MCP bridge, including remote images.
+- On Windows, Ctrl+Alt types characters from your keyboard layout once, including @ on Spanish keyboards, while ordinary Ctrl+Alt shortcuts still work.
+
+## Previously in 0.1.0-alpha.16
+
+- Saved layouts restore even when an obsolete session-ownership file was left by another account.
+- Configured project roadmaps can be JSON documents as well as Markdown files.
+- Codex responses stay connected while an active MCP request is still streaming.
+- Console headers keep their title when an agent does not publish activity signals.
+
+## Previously in 0.1.0-alpha.15
+
+- Screenshots printed in a console open in the drawer, with zoom and pan. Each console keeps its own screenshot in an Image tab, and you can paste one from the clipboard into it.
+- Annotate a screenshot in the drawer and send it to its console. The annotation drawer stays usable when short, undoes one note at a time and offers a way out of a stuck send.
+- Open any file from Files as read-only, coloured code. Its header shows where the file lives and opens it safely.
+- Search the console and Files with regular expressions.
+- Each project gets a clearly different colour, and the focused console is outlined in green.
+- Console header buttons linger, then fade out instead of vanishing.
+- One click focuses a console after using the drawer, and a narrow drawer hides inactive tabs before the active one.
+- Ivy keeps a log of its own failures and crashes, which you can find from Settings.
+- A panel published over MCP no longer warns that its file is gone.
+- On macOS, Codex keeps Ivy's panel after Ivy was launched from a temporary copy.
+
+### Windows
+
+- Ivy no longer closes on launch, and graphics startup failures are explained.
+- Consoles run on Microsoft's own console host, shipped with Ivy. They end with their program, close without freezing, and say when their output was lost.
+- Agents can publish status panels and use Ivy's MCP tools through a private, per-user channel.
+- Clipboard shortcuts behave like a terminal's, while text fields keep their own.
+- Emoji are drawn in colour.
+- Review and links find a console's folder, and paths are handled in Windows' own form.
+- The diagnostics log stays bounded even after a failed rotation.
+- Real Windows desktop trials are still pending for this alpha.
+
+## Previously in 0.1.0-alpha.14
 
 - On macOS, closing a console no longer freezes Ivy when its program cannot be stopped right away.
 - On macOS, Codex publishes its status panel to its own console instead of another one.
@@ -94,7 +152,7 @@
 - Install on Windows 11 x64 with a per-user installer, Start menu shortcut and uninstaller.
 - Updates and removal preserve existing preferences and saved layouts.
 - Downloads for Ubuntu, Arch, macOS and Windows are unsigned and experimental.
-- Windows installer lifecycle checks pass in CI; real Windows desktop trials are still pending. The Windows MCP/control listener is not available yet.
+- Windows installer lifecycle checks pass in CI; real Windows desktop trials are still pending.
 
 ## Work across consoles
 
@@ -126,12 +184,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.14_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha14-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.14-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.14-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.14-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.22_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha22-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.22-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.22-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.22-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.14/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.22/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.

@@ -15,8 +15,11 @@ const MARKDOWN_LIMIT: usize = 1024 * 1024;
 const CODE_LIMIT: usize = 1024 * 1024;
 /// How far into a file a NUL byte is looked for before it is called binary.
 const BINARY_SNIFF: usize = 8 * 1024;
-const IMAGE_LIMIT: usize = 32 * 1024 * 1024;
-const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
+/// The bridge refuses the same size before an agent's open reaches the window (D121).
+pub(super) const IMAGE_LIMIT: usize = panel_control::image::MAX_BYTES as usize;
+/// Asks one entry of a path whether it is a link an agent's open is refused through.
+pub(super) type IsLink = fn(&Path) -> std::io::Result<bool>;
+pub(super) const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 64 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -59,6 +62,61 @@ pub(super) struct Job<T = Loaded> {
     finished: Cell<bool>,
 }
 
+#[cfg(test)]
+type ControlDiffs = Option<(PathBuf, String, Vec<(Kind, Loaded)>)>;
+#[cfg(test)]
+thread_local! {
+    static CONTROL_DIFFS: std::cell::RefCell<ControlDiffs> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) struct PreparedControlDiffs;
+#[cfg(test)]
+impl PreparedControlDiffs {
+    pub(super) fn new(path: &Path, base: &str) -> Self {
+        // Prepare real Git data before timing control painting; process setup has its own
+        // deadlines, so the interaction budget must not include that backend work.
+        CONTROL_DIFFS.with(|fixtures| assert!(fixtures.borrow().is_none()));
+        let responses = [Kind::Local, Kind::Staged, Kind::Unstaged]
+            .into_iter()
+            .map(|kind| {
+                let job = Job::start_with_base(
+                    path.to_owned(),
+                    kind,
+                    base.to_owned(),
+                    egui::Context::default(),
+                )
+                .unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    if let Some(loaded) = job.poll() {
+                        break (kind, loaded.unwrap());
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "Git fixture loader did not finish: {kind:?}"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+            })
+            .collect();
+        CONTROL_DIFFS.with(|fixtures| {
+            assert!(
+                fixtures
+                    .replace(Some((path.to_owned(), base.to_owned(), responses)))
+                    .is_none()
+            );
+        });
+        Self
+    }
+}
+#[cfg(test)]
+impl Drop for PreparedControlDiffs {
+    fn drop(&mut self) {
+        CONTROL_DIFFS.with(|fixtures| *fixtures.borrow_mut() = None);
+    }
+}
+
 /// What decoding an image yields: the original at full resolution, and a copy no side of which
 /// exceeds the GPU's largest texture, which the viewer hands over once and does not keep.
 pub(crate) struct Picture {
@@ -84,6 +142,28 @@ impl Job {
         base: String,
         ctx: egui::Context,
     ) -> Result<Self, String> {
+        #[cfg(test)]
+        if let Some(loaded) = CONTROL_DIFFS.with(|fixtures| {
+            let mut fixtures = fixtures.borrow_mut();
+            let (expected_path, expected_base, responses) = fixtures.as_mut()?;
+            assert_eq!(
+                &path, expected_path,
+                "controls requested a different repository"
+            );
+            assert_eq!(&base, expected_base, "controls requested a different base");
+            let index = responses
+                .iter()
+                .position(|(prepared, _)| *prepared == kind)
+                .expect("controls requested an unprepared comparison");
+            Some(responses.remove(index).1)
+        }) {
+            let (job, sender) = stalled();
+            sender
+                .send(Ok(loaded))
+                .unwrap_or_else(|_| panic!("prepared diff receiver vanished"));
+            ctx.request_repaint();
+            return Ok(job);
+        }
         spawn(ctx, move || match kind {
             Kind::Markdown => read_markdown(&path).and_then(|text| {
                 let markdown = Some(super::markdown::MarkdownDocument::parse(&text)?);
@@ -117,12 +197,15 @@ impl Job {
 }
 
 impl Job<Picture> {
+    /// Decodes `path` on the worker. `links` is set for an agent's open: the walk that refuses a
+    /// path through a link runs there, before the open, with that reader (D121).
     pub(super) fn image(
         path: PathBuf,
         max_side: usize,
+        links: Option<IsLink>,
         ctx: egui::Context,
     ) -> Result<Self, String> {
-        spawn(ctx, move || decode_image(&path, max_side))
+        spawn(ctx, move || decode_image(&path, max_side, links))
     }
 
     pub(super) fn poll(&self) -> Option<Result<Picture, String>> {
@@ -184,6 +267,12 @@ fn open_regular(path: &Path) -> Result<std::fs::File, String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Directories need this flag before handle metadata can provide the folder diagnostic.
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS);
+    }
     let file = options
         .open(path)
         .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
@@ -226,10 +315,27 @@ fn read_text(path: &Path) -> Result<String, String> {
 
 /// Decodes a PNG or JPEG, keeping the original and a copy no side of which exceeds `max_side`,
 /// the largest texture the GPU takes.
-fn decode_image(path: &Path, max_side: usize) -> Result<Picture, String> {
+fn decode_image(path: &Path, max_side: usize, links: Option<IsLink>) -> Result<Picture, String> {
     use image::{ImageDecoder, ImageFormat, ImageReader};
     let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
-    let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
+    // The enforcement of what the bridge only advises, for an agent's open. A person's own open is
+    // not walked (D121), so a refusal over a link tells the person reading it that open is theirs to
+    // make; one over the path's text — what Windows made of it is no file on a drive — is left at
+    // that.
+    // An agent's path is opened in the walk's own spelling (D121), since the walk is only worth the
+    // entries it asked if they are the ones opened; a person's is opened as given.
+    let opened = match links {
+        Some(is_link) => panel_control::image::no_link_on_the_way(path, is_link).map_err(
+            |refused| match refused {
+                panel_control::image::Refused::Link(why) => {
+                    format!("{why}. Open it from Files to see it yourself.")
+                }
+                panel_control::image::Refused::Text(why) => why,
+            },
+        )?,
+        None => path.to_path_buf(),
+    };
+    let bytes = read_bounded(open_regular(&opened)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(unreadable)?;
@@ -875,10 +981,10 @@ mod tests {
     #[test]
     fn an_image_that_is_not_a_regular_png_or_jpeg_within_the_size_cap_says_why() {
         let temp = Temp::new();
-        let folder = decode_image(&temp.0, 4096).err().unwrap();
+        let folder = decode_image(&temp.0, 4096, None).err().unwrap();
         assert_eq!(folder, "This is a folder, not a file");
         let missing = temp.0.join("missing.png");
-        let error = decode_image(&missing, 4096).err().unwrap();
+        let error = decode_image(&missing, 4096, None).err().unwrap();
         assert!(
             error.starts_with(&format!("Cannot open {}: ", missing.display())),
             "{error}"
@@ -888,7 +994,7 @@ mod tests {
             .unwrap()
             .set_len(IMAGE_LIMIT as u64 + 1)
             .unwrap();
-        let error = decode_image(&large, 4096).err().unwrap();
+        let error = decode_image(&large, 4096, None).err().unwrap();
         assert!(
             error.starts_with(&format!("Cannot read {}: ", large.display())),
             "{error}"
@@ -901,10 +1007,83 @@ mod tests {
             let path = temp.0.join(name);
             fs::write(&path, bytes).unwrap();
             assert_eq!(
-                decode_image(&path, 4096).err().unwrap(),
+                decode_image(&path, 4096, None).err().unwrap(),
                 "This file is not a PNG or JPEG image",
                 "{name}"
             );
+        }
+    }
+
+    /// **An agent's image is walked before it is opened** (D121): on Windows the open through a
+    /// link is what reaches the host. The file here does not exist, so a worker that opened first
+    /// would say «Cannot open …» instead of the link sentence. The reader is handed in because the
+    /// real one calls no entry a link off Windows, and stops at the missing file on it. A refusal
+    /// over a link, or over an entry the walk could not ask, is followed by the sentence that
+    /// sends the person to Files.
+    #[test]
+    fn an_agents_image_is_walked_before_the_worker_opens_it() {
+        let temp = Temp::new();
+        let missing = temp.0.join("missing.png");
+        assert_eq!(
+            decode_image(&missing, 4096, Some(|_| Ok(true)))
+                .err()
+                .unwrap(),
+            format!(
+                "{} passes through a link, and an agent's image is not opened through one. Open it from \
+                 Files to see it yourself.",
+                missing.display()
+            )
+        );
+        let denied: IsLink = |_| Err(std::io::Error::other("access is denied"));
+        assert_eq!(
+            decode_image(&missing, 4096, Some(denied)).err().unwrap(),
+            format!(
+                "cannot tell whether {} passes through a link: access is denied. Open it from Files \
+                 to see it yourself.",
+                missing.display()
+            )
+        );
+    }
+
+    crate::windows_unix_omission!(
+        off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened,
+        "unix-only: off Windows no name is rewritten; the walk's Windows spelling is panel-control's witness"
+    );
+
+    /// **Off Windows an agent's image is opened under any name a file can have** (D121): a `..`, a
+    /// name ending in a dot, one made only of dots and a DOS device name are walked as written and
+    /// the image is decoded, the file last among the entries asked.
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_an_agents_image_under_a_name_windows_would_rewrite_is_opened() {
+        use std::sync::Mutex;
+        static ASKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+        let temp = Temp::new();
+        for folder in ["x.", "...", "COM9", "sub"] {
+            fs::create_dir(temp.0.join(folder)).unwrap();
+        }
+        let shot = image::RgbaImage::from_fn(4, 2, |x, _| image::Rgba([x as u8, 9, 30, 255]));
+        for path in [
+            temp.0.join("x.").join("a.png"),
+            temp.0.join("...").join("a.png"),
+            temp.0.join("COM9").join("aux.png"),
+            temp.0.join("sub").join("..").join("con.png"),
+        ] {
+            shot.save_with_format(&path, image::ImageFormat::Png)
+                .unwrap();
+            ASKED.lock().unwrap().clear();
+            let recorded: IsLink = |at| {
+                ASKED.lock().unwrap().push(at.to_path_buf());
+                Ok(false)
+            };
+            let picture = decode_image(&path, 4096, Some(recorded));
+            assert_eq!(
+                picture.map(|p| p.original.dimensions()),
+                Ok((4, 2)),
+                "{}",
+                path.display()
+            );
+            assert_eq!(ASKED.lock().unwrap().last(), Some(&path));
         }
     }
 
@@ -916,7 +1095,7 @@ mod tests {
         let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
         assert!(
-            decode_image(&fifo, 4096)
+            decode_image(&fifo, 4096, None)
                 .err()
                 .unwrap()
                 .contains("not a regular file")
@@ -932,7 +1111,7 @@ mod tests {
             let path = temp.0.join(name);
             fs::write(&path, png_header(width, width, color)).unwrap();
             assert_eq!(
-                decode_image(&path, 4096).err().unwrap(),
+                decode_image(&path, 4096, None).err().unwrap(),
                 "This image needs more memory than the viewer allows",
                 "{name}"
             );
@@ -946,11 +1125,14 @@ mod tests {
         image::RgbaImage::from_fn(300, 120, |x, y| image::Rgba([x as u8, y as u8, 30, 255]))
             .save_with_format(&png, image::ImageFormat::Png)
             .unwrap();
-        let picture = decode_image(&png, 100).unwrap();
+        let picture = decode_image(&png, 100, None).unwrap();
         assert_eq!(picture.original.dimensions(), (300, 120));
         assert_eq!(picture.display.size, [100, 40]);
-        assert_eq!(decode_image(&png, 299).unwrap().display.size, [299, 119]);
-        let exact = decode_image(&png, 300).unwrap();
+        assert_eq!(
+            decode_image(&png, 299, None).unwrap().display.size,
+            [299, 119]
+        );
+        let exact = decode_image(&png, 300, None).unwrap();
         assert_eq!(exact.display.size, [300, 120]);
         assert_eq!(exact.display.as_raw(), exact.original.as_raw().as_slice());
         let jpeg = temp.0.join("photo.JPG");
@@ -958,7 +1140,10 @@ mod tests {
             .save_with_format(&jpeg, image::ImageFormat::Jpeg)
             .unwrap();
         assert_eq!(
-            decode_image(&jpeg, 4096).unwrap().original.dimensions(),
+            decode_image(&jpeg, 4096, None)
+                .unwrap()
+                .original
+                .dimensions(),
             (64, 32)
         );
     }

@@ -14,6 +14,9 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
+mod pane;
+use pane::assemble_pane;
+
 #[cfg(test)]
 #[cfg(unix)]
 mod codex_tests;
@@ -153,80 +156,7 @@ impl Window {
         size: Option<egui::Vec2>,
         persistence: session::Persistence,
     ) -> term_core::Result<Self> {
-        // **The program is received, and the branch that restores is the one that uses it.** The
-        // factory branch opens the user's shell as it always has, just like the three dozen tests
-        // that call it: passing it all the way down there would mean touching the signature of a
-        // constructor with thirty-three calls for the one path this PR does not introduce. It is
-        // said because the previous comment claimed that **no** branch read the environment, and
-        // that was false precisely for the factory one — the two reviews caught it.
-        let mut do_not_overwrite = None;
-        let opened = match with_what {
-            OpenWith::Factory { tabs, layout } => Self::with_tabs(ctx, tabs, layout, size),
-            OpenWith::Restored(saved) => {
-                let panes = saved.leaves();
-                let control = control::WindowActivity::default();
-                // **Opening them is what is timed, not reading the file, and the difference
-                // matters.** What grows with the size of the layout are the `fork`s and `exec`s
-                // here: reading a four-leaf document and a two-hundred-leaf one cost almost the
-                // same. What reading cost travels with the persistence, which already knows how
-                // long its own load took.
-                let before = Instant::now();
-                match Self::materialize_counting_reads(
-                    ctx,
-                    &saved,
-                    program,
-                    control.read_activity(),
-                ) {
-                    Ok(tabs) => {
-                        Self::with_these_tabs(ctx, tabs, size, control).map(|mut window| {
-                            // **Only when they really were opened.** If materializing fails it
-                            // opens factory-fresh, and a factory window declaring «restored» would
-                            // be the disguise this line exists to remove.
-                            //
-                            // **And the stopwatch closes HERE, with the window already built, not
-                            // when the processes exist.** Behind `materialize` there are two jobs
-                            // that **grow with the number of consoles** —arming each directory's
-                            // watcher and describing the whole tree for the first mirror—, and
-                            // stopping it earlier left them out of a number that claims to measure
-                            // exactly that.
-                            window.restoring = Some(measure::Restoring {
-                                consoles: panes,
-                                read: persistence.load_time(),
-                                opening: before.elapsed(),
-                            });
-                            window
-                        })
-                    }
-                    Err(failure) => {
-                        eprintln!(
-                            "the saved layout of {panes} consoles could not be opened ({failure}); \
-                             opening the factory one, and what is saved is left alone"
-                        );
-                        // **And this session does not step on the file, which is what avoids losing
-                        // the layout for ever.** What is left on screen is a factory window; with
-                        // automatic saving on, the user's first change would write it over their
-                        // twenty consoles. Before this milestone the file survived a failed
-                        // start-up and the next one recovered it: this preserves that property.
-                        do_not_overwrite = Some("the layout that was saved could not be opened");
-                        Self::with_tabs(ctx, 1, OpeningLayout::DEFAULT, size)
-                    }
-                }
-            }
-        };
-
-        // **The one that loaded at start-up stays with the window, and this was a debt with a
-        // name.** The veto of a newer version lives in it: building a second one mid-session would
-        // lose that veto and would overwrite the layout of a newer binary, which is the exact
-        // damage the format version exists to avoid. It is installed here, after building, instead
-        // of being pushed down through the three constructors: the factory one is called by
-        // thirty-three tests that save nothing.
-        opened.map(|mut window| {
-            window.persistence = persistence;
-            if let Some(reason) = do_not_overwrite {
-                window.persistence.forbid_overwrite(reason);
-            }
-            window
-        })
+        construct_window(ctx, with_what, program, size, persistence)
     }
 
     /// The rest of the window, which is the same whether it was restored or not.
@@ -253,6 +183,87 @@ impl Window {
 
         Ok(window)
     }
+}
+
+fn construct_window(
+    ctx: &egui::Context,
+    with_what: OpenWith,
+    program: &str,
+    size: Option<egui::Vec2>,
+    persistence: session::Persistence,
+) -> term_core::Result<Window> {
+    // **The program is received, and the branch that restores is the one that uses it.** The
+    // factory branch opens the user's shell as it always has, just like the three dozen tests
+    // that call it: passing it all the way down there would mean touching the signature of a
+    // constructor with thirty-three calls for the one path this PR does not introduce. It is
+    // said because the previous comment claimed that **no** branch read the environment, and
+    // that was false precisely for the factory one — the two reviews caught it.
+    let mut do_not_overwrite = None;
+    let opened = match with_what {
+        OpenWith::Factory { tabs, layout } => Window::with_tabs(ctx, tabs, layout, size),
+        OpenWith::Restored(saved) => {
+            let panes = saved.leaves();
+            let control = control::WindowActivity::default();
+            // **Opening them is what is timed, not reading the file, and the difference
+            // matters.** What grows with the size of the layout are the `fork`s and `exec`s
+            // here: reading a four-leaf document and a two-hundred-leaf one cost almost the
+            // same. What reading cost travels with the persistence, which already knows how
+            // long its own load took.
+            let before = Instant::now();
+            match Window::materialize_counting_reads(ctx, &saved, program, control.read_activity())
+            {
+                Ok(tabs) => {
+                    Window::with_these_tabs(ctx, tabs, size, control).map(|mut window| {
+                        // **Only when they really were opened.** If materializing fails it
+                        // opens factory-fresh, and a factory window declaring «restored» would
+                        // be the disguise this line exists to remove.
+                        //
+                        // **And the stopwatch closes HERE, with the window already built, not
+                        // when the processes exist.** Behind `materialize` there are two jobs
+                        // that **grow with the number of consoles** —arming each directory's
+                        // watcher and describing the whole tree for the first mirror—, and
+                        // stopping it earlier left them out of a number that claims to measure
+                        // exactly that.
+                        window.restoring = Some(measure::Restoring {
+                            consoles: panes,
+                            read: persistence.load_time(),
+                            opening: before.elapsed(),
+                        });
+                        window
+                    })
+                }
+                Err(failure) => {
+                    eprintln!(
+                        "the saved layout of {panes} consoles could not be opened ({failure}); \
+                         opening the factory one, and what is saved is left alone"
+                    );
+                    // **And this session does not step on the file, which is what avoids losing
+                    // the layout for ever.** What is left on screen is a factory window; with
+                    // automatic saving on, the user's first change would write it over their
+                    // twenty consoles. Before this milestone the file survived a failed
+                    // start-up and the next one recovered it: this preserves that property.
+                    do_not_overwrite = Some("the layout that was saved could not be opened");
+                    Window::with_tabs(ctx, 1, OpeningLayout::DEFAULT, size)
+                }
+            }
+        }
+    };
+
+    // **The one that loaded at start-up stays with the window, and this was a debt with a
+    // name.** The veto of a newer version lives in it: building a second one mid-session would
+    // lose that veto and would overwrite the layout of a newer binary, which is the exact
+    // damage the format version exists to avoid. It is installed here, after building, instead
+    // of being pushed down through the three constructors: the factory one is called by
+    // thirty-three tests that save nothing.
+    opened
+        .or_else(|error| failed_window(ctx, size, error))
+        .map(|mut window| {
+            window.persistence = persistence;
+            if let Some(reason) = do_not_overwrite {
+                window.persistence.forbid_overwrite(reason);
+            }
+            window
+        })
 }
 
 /// Initial state shared by fresh and restored windows; the caller records the first layout mirror.
@@ -628,11 +639,9 @@ fn launch(
         identity.extend(prepared.env());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let waker = ctx.clone();
-    let wake: std::sync::Arc<dyn Fn() + Send + Sync> =
-        std::sync::Arc::new(move || waker.request_repaint());
-    let (mut pty, output) = crate::launch::Process::start(
-        std::sync::Arc::clone(&wake),
+    let launch_waker = ctx.clone();
+    let (pty, output) = crate::launch::Process::start(
+        std::sync::Arc::new(move || launch_waker.request_repaint()),
         reads.clone(),
         crate::launch::Request {
             program,
@@ -644,72 +653,38 @@ fn launch(
         },
     )?;
 
-    pty.context = Some(ctx.clone());
-
-    #[cfg(test)]
-    crate::tests::completed_operation(crate::tests::OperationWork::Launch);
-
-    let output_wake = std::sync::Arc::clone(&wake);
-    let pty_output = PtyOutput::new(output, move || output_wake());
-    let mut restoration = crate::restoration::PaneState {
-        wake: Some(wake),
-        ..Default::default()
-    };
-    let callback = restoration.route.callback();
-    // Diagnostic attribution has its own lifetime and is installed regardless of whether session
-    // restoration is enabled. The listener starts below, after the PTY root already exists.
-    let provenance_inspector = pty
-        .foreground_scope()
-        .map(panel::provenance_route::inspector)
-        .unwrap_or_else(|_| panel::provenance_route::unavailable());
-    let (panel_state, control) = if pty.pending() {
-        (panel::PanelState::default(), None)
-    } else {
-        panel::pane::state_and_control_with_authority(
-            ctx,
-            panel.as_ref(),
-            reads,
-            Some(callback),
-            pty.foreground_scope()
-                .ok()
-                .map(crate::panel::overlay::Authority::new),
-            provenance_inspector,
-        )
-    };
-
-    Ok(Pane {
-        signals: Default::default(),
+    Ok(assemble_pane(
+        ctx,
         name,
-        label: None,
-        project: None,
-        program: None,
-        restoration,
-        pty,
-        pty_output,
-        _shell_integration: integration,
-        annotated: Default::default(),
+        reads,
         panel,
+        integration,
+        pty,
+        output,
+    ))
+}
+
+fn failed_window(
+    ctx: &egui::Context,
+    size: Option<egui::Vec2>,
+    error: term_core::Error,
+) -> term_core::Result<Window> {
+    // D125: recovery here leaves the directory and saved-client retry paths their errors.
+    let failure = error.downcast::<crate::launch::StartupFailure>()?;
+    crate::pty_output::say(&format!("console could not be started: {failure}"));
+    let control = control::WindowActivity::default();
+    let (process, output) = crate::launch::Process::failed(*failure);
+    let pane = assemble_pane(ctx, 0, control.read_activity(), None, None, process, output);
+    let layout = OpeningLayout {
+        columns: 1,
+        rows: 1,
+    };
+    Window::with_these_tabs(
+        ctx,
+        vec![Tab::with_panes(vec![pane], &layout, 0)],
+        size,
         control,
-        panel_state,
-        to_reread: Flag::raised(),
-        screen: Screen::new(INITIAL_GRID),
-        painted_console: None,
-        received: Vec::new(),
-        keystrokes: Vec::new(),
-        held: None,
-        typed: false,
-        search: crate::search::OnThisConsole::default(),
-        measured: INITIAL_GRID,
-        timings: Timings::default(),
-        pending_measurement: None,
-        panel_reread_unpainted: std::time::Duration::ZERO,
-        control_unpainted: std::time::Duration::ZERO,
-        reflowed: std::time::Duration::ZERO,
-        pending_wheel: WheelInput::default(),
-        panel_width: panel::DEFAULT_WIDTH,
-        folded: false,
-        taken_over: None,
-    })
+    )
 }
 
 /// Which layout the environment variable asks for, if it asks for a valid one.
@@ -872,6 +847,312 @@ pub(crate) fn insist_on_size(window: &mut Window, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MissingProgram;
+
+    impl MissingProgram {
+        fn new() -> Self {
+            let missing = std::env::temp_dir().join(format!(
+                "ivy-no-shell-{}.exe",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            crate::launch::TEST_SPAWN_PROGRAM
+                .with(|value| *value.borrow_mut() = Some(missing.to_string_lossy().into_owned()));
+            Self
+        }
+    }
+
+    impl Drop for MissingProgram {
+        fn drop(&mut self) {
+            crate::launch::TEST_SPAWN_PROGRAM.with(|value| value.borrow_mut().take());
+        }
+    }
+
+    fn failed_start(ctx: &egui::Context) -> Window {
+        let _missing = MissingProgram::new();
+        Window::opening(
+            ctx,
+            OpenWith::Factory {
+                tabs: 1,
+                layout: OpeningLayout {
+                    columns: 1,
+                    rows: 1,
+                },
+            },
+            "unused-factory-argument",
+            None,
+            session::Persistence::at(None),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn shell_startup_failure_keeps_the_real_window_open_and_paints_its_cause() {
+        let ctx = egui::Context::default();
+        let mut window = failed_start(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        for _ in 0..3 {
+            let logic = ctx.run_logic(&Default::default(), |ctx| {
+                eframe::App::logic(&mut window, ctx, &mut frame)
+            });
+            assert!(
+                !logic
+                    .viewport_commands
+                    .get(&egui::ViewportId::ROOT)
+                    .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close))
+            );
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(&mut window, ui, &mut frame),
+            );
+            let text: String = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            assert!(
+                text.contains("This console's program could not be started."),
+                "{text}"
+            );
+            assert!(text.contains("ivy-no-shell-"), "{text}");
+            assert!(text.contains("Reason:"), "{text}");
+            assert!(text.contains("diagnostic log"), "{text}");
+        }
+        let pane = window.active_mut().panes_mut().remove(0);
+        assert!(pane.pty.write(b"must not run\n").is_err());
+        assert!(pane.screen.to_text().trim().is_empty());
+        assert!(
+            pane.control.is_none(),
+            "a nonexistent program acquired a control listener"
+        );
+    }
+
+    #[test]
+    fn shell_startup_failure_does_not_turn_a_strict_launch_into_success() {
+        let ctx = egui::Context::default();
+        let missing = std::env::temp_dir().join("ivy-nonexistent-exact-shell-202.exe");
+        assert!(!missing.exists());
+        let result = launch_exact(
+            &ctx,
+            Launch {
+                program: missing.to_str().unwrap(),
+                args: &[],
+                directory: None,
+                path: None,
+            },
+            None,
+            0,
+            Default::default(),
+        );
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(
+            error
+                .downcast_ref::<crate::launch::StartupFailure>()
+                .is_some()
+        );
+        assert!(failed_window(&ctx, None, "not a shell startup error".into()).is_err());
+    }
+
+    #[test]
+    fn shell_startup_failure_of_first_choice_still_runs_the_fallback() {
+        let missing = std::env::temp_dir().join("ivy-nonexistent-fallback-shell-202.exe");
+        assert!(!missing.exists());
+        let (mut process, output) = crate::launch::Process::start(
+            std::sync::Arc::new(|| {}),
+            Default::default(),
+            crate::launch::Request {
+                program: missing.to_str().unwrap(),
+                args: &[],
+                size: INITIAL_GRID,
+                env: &[],
+                directory: None,
+                fallback: true,
+            },
+        )
+        .unwrap();
+        let command = if cfg!(windows) {
+            "echo IVY^_FALLBACK_OK\r\n"
+        } else {
+            "printf IVY%s _FALLBACK_OK\\n\n"
+        };
+        process.write(command.as_bytes()).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(30);
+        let mut seen = String::new();
+        let mut answered = 0;
+        while !seen.contains("IVY_FALLBACK_OK") {
+            assert!(
+                Instant::now() < deadline,
+                "fallback did not execute: {seen}"
+            );
+            if let Ok(bytes) = output.recv_timeout(std::time::Duration::from_millis(20)) {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            let asked = seen.matches("\x1b[6n").count();
+            for _ in answered..asked {
+                process.write(b"\x1b[1;1R").unwrap();
+            }
+            answered = asked;
+        }
+    }
+
+    #[test]
+    fn shell_startup_failure_dismissal_keeps_the_window_and_explicit_close_still_works() {
+        let ctx = egui::Context::default();
+        let mut window = failed_start(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let input = || egui::RawInput {
+            screen_rect: Some(area),
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input(), |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let at = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text)
+                if text
+                    .galley
+                    .text()
+                    .contains("This console's program could not be started.") =>
+            {
+                Some(text.pos + egui::vec2(5.0, 5.0))
+            }
+            _ => None,
+        });
+        output.drop_without_applying_deltas();
+        let at = at.expect("failure notice was not painted");
+        for pressed in [true, false] {
+            let mut raw = input();
+            raw.events = vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            ctx.run_ui(raw, |ui| eframe::App::ui(&mut window, ui, &mut frame))
+                .drop_without_applying_deltas();
+        }
+        let output = ctx.run_ui(input(), |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let still_visible = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("This console's program could not be started.")));
+        output.drop_without_applying_deltas();
+        assert!(!still_visible);
+        let logic = ctx.run_logic(&Default::default(), |ctx| {
+            eframe::App::logic(&mut window, ctx, &mut frame)
+        });
+        assert!(
+            !logic
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close))
+        );
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let closed = ctx.run_logic(&Default::default(), |ctx| {
+            window.apply(WindowRequest::CloseTab, ctx, area, &metrics)
+        });
+        assert!(
+            closed
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close))
+        );
+    }
+
+    #[test]
+    fn shell_startup_failure_after_restore_cannot_overwrite_the_saved_layout() {
+        let ctx = egui::Context::default();
+        let initial = failed_start(&ctx);
+        let document = initial.describe();
+        let bytes = session::serialize(&document).unwrap().into_bytes();
+        let snapshot = std::env::temp_dir().join(format!(
+            "ivy-startup-snapshot-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&snapshot, &bytes).unwrap();
+        let mut persistence = session::Persistence::at(Some(snapshot.clone()));
+        let saved = persistence.load().unwrap();
+        let _missing = MissingProgram::new();
+        let mut window = Window::opening(
+            &ctx,
+            OpenWith::Restored(saved),
+            "missing-restored-shell",
+            None,
+            persistence,
+        )
+        .unwrap();
+        window.active_mut().panes_mut()[0].label = Some("A changed failed console".into());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+        let actual = std::fs::read(&snapshot).unwrap();
+        std::fs::remove_file(snapshot).unwrap();
+        assert_eq!(
+            actual, bytes,
+            "failed-start fallback overwrote the saved layout"
+        );
+    }
+
+    #[test]
+    fn shell_startup_failure_long_unicode_details_keep_a_visible_headline_and_native_cause() {
+        let ctx = egui::Context::default();
+        let mut window = failed_start(&ctx);
+        let theme = window.theme;
+        let pane = window.active_mut().panes_mut().remove(0);
+        let failure = pane.pty.startup_failure.as_mut().unwrap();
+        failure.program = format!("C:\\{}\\missing-shell.exe", "日本語é\\".repeat(200));
+        failure.reason = format!(
+            "CreateProcessW {}: missing interpreter (os error 2)",
+            "長い原因".repeat(400)
+        );
+        for width in [300.0, 1000.0] {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let area =
+                    egui::Rect::from_min_size(egui::pos2(30.0, 50.0), egui::vec2(width, 700.0));
+                let metrics =
+                    CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+                let boxes = painter::notices::the_boxes(ui.painter(), pane, &theme, &metrics, area);
+                assert!(boxes.silence.is_some());
+                assert!(boxes.silence.unwrap().bottom() <= area.center().y);
+                painter::notices::paint_them_over_it(
+                    ui.painter(),
+                    pane,
+                    &theme,
+                    &metrics,
+                    area,
+                    painter::Keys::Elsewhere,
+                );
+            });
+            let text: String = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            assert!(text.contains("This console's program could not be started."));
+            assert!(text.contains("missing-shell.exe"), "{text}");
+            assert!(text.contains("os error 2"), "{text}");
+            assert!(text.contains('…'));
+            assert!(!text.contains('�'));
+        }
+    }
 
     fn viewport(enabled: bool, macos: bool) -> egui::ViewportBuilder {
         chrome_viewport_on(egui::ViewportBuilder::default(), enabled, macos)

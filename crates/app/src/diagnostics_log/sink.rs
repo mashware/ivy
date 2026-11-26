@@ -44,7 +44,7 @@ impl RotatingSink {
             None => true,
         };
         if full {
-            self.rotate();
+            self.rotate()?;
         }
         let file = match &mut self.file {
             Some(file) => file,
@@ -71,18 +71,31 @@ impl RotatingSink {
     /// Two windows that find the file full in the same instant can both rename: the second moves
     /// the first one's fresh file over the copy. Accepted: it takes two processes crossing the cap
     /// within the same few microseconds, and costs one copy, never the current file.
-    fn rotate(&mut self) {
+    fn rotate(&mut self) -> std::io::Result<()> {
         self.file = None;
         let moved = std::fs::rename(&self.path, rotated(&self.path));
         self.file = append(&self.path).ok();
         if let (Err(why), Some(file)) = (moved, &mut self.file) {
-            let _ = file.set_len(0);
-            let _ = writeln!(
-                file,
-                "ivy: could not move the full log aside ({why}); it was started again"
-            );
+            restart(file, &self.path, &why)?;
         }
+        Ok(())
     }
+}
+
+/// Windows append handles cannot truncate. The writable handle must still reach the file the
+/// append handle holds: another window could have rotated the name between the two opens.
+fn restart(file: &mut File, path: &Path, why: &std::io::Error) -> std::io::Result<()> {
+    let writable = OpenOptions::new().write(true).open(path)?;
+    if identity(&writable)? != identity(file)? {
+        return Err(std::io::Error::other(
+            "the log changed while it was being reset",
+        ));
+    }
+    writable.set_len(0)?;
+    writeln!(
+        file,
+        "ivy: could not move the full log aside ({why}); it was started again"
+    )
 }
 
 /// Where a full file goes: the same name with `.1`, replacing the one there before.
@@ -220,6 +233,7 @@ mod tests {
         let dir = scratch("stuck");
         let path = dir.join("ivy.log");
         let mut sink = RotatingSink::open(path.clone(), 4).unwrap();
+        let mut other_window = RotatingSink::open(path.clone(), 4).unwrap();
         sink.write(b"1234").unwrap();
         // A directory where the copy should go makes every rename fail, on every platform.
         std::fs::create_dir(rotated(&path)).unwrap();
@@ -231,6 +245,54 @@ mod tests {
         );
         assert!(text.ends_with("it was started again\n5"), "{text}");
         assert!(!text.contains("1234"), "the full file was emptied: {text}");
+
+        // The explanation itself crossed this tiny cap: another window must reset it again.
+        other_window.write(b"6").unwrap();
+        let again = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            again.starts_with("ivy: could not move the full log aside ("),
+            "{again}"
+        );
+        assert!(again.ends_with("it was started again\n6"), "{again}");
+        assert_eq!(
+            again
+                .matches("ivy: could not move the full log aside (")
+                .count(),
+            1,
+            "the previous explanation and bytes were emptied: {again}"
+        );
+    }
+
+    #[test]
+    fn a_failed_writable_open_preserves_the_log_without_claiming_a_restart() {
+        let dir = scratch("missing-parent");
+        let path = dir.join("ivy.log");
+        let mut file = append(&path).unwrap();
+        file.write_all(b"1234").unwrap();
+
+        assert!(
+            restart(
+                &mut file,
+                &dir.join("missing-parent/ivy.log"),
+                &std::io::Error::other("rotation failed")
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"1234");
+    }
+
+    #[test]
+    fn another_windows_fresh_log_is_not_emptied_through_an_old_append_handle() {
+        let dir = scratch("replaced");
+        let path = dir.join("ivy.log");
+        let mut old = append(&path).unwrap();
+        old.write_all(b"old full log").unwrap();
+        std::fs::rename(&path, rotated(&path)).unwrap();
+        std::fs::write(&path, b"another window's fresh log").unwrap();
+
+        assert!(restart(&mut old, &path, &std::io::Error::other("rotation failed")).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"another window's fresh log");
+        assert_eq!(std::fs::read(rotated(&path)).unwrap(), b"old full log");
     }
 
     #[cfg(unix)]

@@ -290,11 +290,8 @@ mod tests {
 
     #[test]
     fn distinct_worktrees_and_switches_refresh() {
-        let root = std::env::temp_dir().join(format!(
-            "board-branches-{}-{:?}",
-            std::process::id(),
-            Instant::now()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("board-branches-{:016x}", getrandom::u64().unwrap()));
         let repo = root.join("repo");
         let worktree = root.join("worktree");
         std::fs::create_dir_all(&repo).unwrap();

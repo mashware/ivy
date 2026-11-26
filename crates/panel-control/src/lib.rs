@@ -50,6 +50,7 @@ pub mod codex_relay;
 pub mod codex_route;
 pub mod diagnostic_peer;
 pub mod endpoint;
+pub mod image;
 pub mod listener;
 pub mod session;
 #[cfg(windows)]

@@ -225,8 +225,8 @@ wants two lines, let them publish two elements in `lines`.
 
 ## Project plan document
 
-The board accepts a project plan from `plan_set`. It is parsed into the same model as the settings-file
-Markdown fallback. Unknown or malformed fields are dropped independently; an invalid top-level
+The board accepts this project plan document from `plan_set` or a configured JSON roadmap file.
+Both use the same parser and model; Markdown task lists remain a file fallback. Unknown or malformed fields are dropped independently; an invalid top-level
 document or one over `MAX_BYTES` is refused whole. Item marks are the closed vocabulary `done`,
 `current`, `pending`, `wait`, and `block`; `info` is not a plan mark. Unknown item marks are dropped
 and reported to the producer.
@@ -255,6 +255,17 @@ whole panel document to change them. A matching pair places its card under that 
 matching milestone alone places it under the milestone. A known milestone with an unknown deliverable
 keeps its console attached at milestone level. Only an absent or unknown milestone appears in
 **Off the plan**, and a console without a published panel is not assigned an invented plan position.
+
+A configured `roadmap.<name> = <path>` selects this format when the path has a `.json` extension
+(case-insensitive). All other extensions use Markdown task lists; content is never guessed, and an
+invalid `.json` file never falls back to Markdown. JSON files preserve every supported field above,
+including milestone and deliverable IDs, so panels can attach through `milestone` / `deliverable`.
+
+Files must be regular UTF-8 files of at most `MAX_BYTES` (256 KiB). A valid document remains usable
+when `Dropped` reports unsupported item marks: the file diagnostic names what was discarded.
+Invalid JSON, an invalid top-level document and oversized files show a file diagnostic instead of a
+plan. The same worker reloads both formats after saves, atomic replacement, deletion and reappearance.
+Published plans continue to override the configured file until `plan_retire`.
 
 ## Project plan channel
 
@@ -449,8 +460,13 @@ is that **a channel has somebody to tell** what that tolerance dropped — see
 ← {"ok":true,"text":"..."}
 → {"tool":"split_close","pane":"<opaque handle>"}
 ← {"ok":true}
+→ {"tool":"image_open","path":"/home/me/shots/login.png"}
+← {"ok":true,"text":"opened; the person is not looking at this console's drawer, so its tab and header mark a new image until they do; if the drawer cannot show it, it says why there"}
 ← {"ok":false,"error":"..."}
 ```
+
+On Windows the path is written with its drive, `"C:\\Users\\me\\shots\\login.png"`: `/home/…` has
+no drive there and is relative.
 
 ### What fell away is said
 
@@ -715,6 +731,60 @@ only verbs that name another pane:
   taking the console back. This is an **application** boundary and not a confidentiality one: the
   program `split_open` launched keeps reading whatever the person types afterwards.
 
+### `image_open`
+
+It shows an image to the person in the drawer of **the console whose endpoint asked** — it names no
+pane, and a `pane` sent beside it reaches nothing (**D121**). Each console holds one image, and this
+replaces it.
+
+- **`path` is absolute and on this machine.** A relative path is refused — there is no directory it
+  could honestly be read from — and on Windows anything but a drive letter or a volume GUID
+  (`C:\…`, `\\?\C:\…`, `\\?\Volume{…}\…`) is refused too: a share, a device or another name in
+  the object namespace (`\\host\share\…`, `\\?\UNC\…`, `\\?\GLOBALROOT\…`, `\\.\…`). A mapped
+  drive letter passes, because it is the user's own mapping. No extension is asked for: the file's
+  bytes decide whether it is a PNG or a JPEG. `panel-mcp` refuses one that is neither (below); a
+  hand-written line that skips it is opened, and the drawer says the file is not a PNG or JPEG
+  image. The line's own bound is the only bound on the path's length.
+- **On Windows no link is passed through.** If the file, or any folder on its way, is a symbolic
+  link, a junction or another reparse point that names a path, the open is refused with `<path>
+  passes through a link, and an agent's image is not opened through one`, and a folder or file that
+  cannot be looked at, other than one that is not there, refuses it with `cannot tell whether
+  <path> passes through a link: <error>`. Where a link leads is never read. `panel-mcp` refuses
+  before it asks for the file, and the window refuses again before its worker reads, where the
+  refusal is painted in the drawer followed by `Open it from Files to see it yourself.` A person's
+  own open of the same file is not refused, and other platforms refuse no link (**D121**).
+- **One Windows spelling for checks and read.** Before disk access, the bridge and the window's
+  image worker each make the agent's path absolute by text and rebuild it under `\\?\`, allowing
+  only a drive or volume-GUID prefix. Every entry checked for links and the file read use that
+  same spelling, so Windows does not reinterpret a partial path differently from the whole one
+  (**D121**). A `..` is resolved before the walk; dots, spaces and device names follow Windows'
+  interpretation once. A resulting device/share prefix refuses with `<path> is read by Windows
+  as <whole>, which is not a file on a drive` / `which is not on this machine`; failure to make
+  the path absolute refuses with `<path> cannot be read as a Windows path: <error>`. These text
+  refusals are painted alone, without `Open it from Files`. Linux and macOS keep the agent's
+  path as given, including `..` and names Windows would rewrite. The path on the wire stays the
+  original absolute path; a person's own open is unchanged.
+- **The answer is a sentence, in `text`**: `opened and shown in the drawer of this console, which the
+  person is working in; if the drawer cannot show it, it says why there` where the drawer shows the
+  image — it opened on it, or its Image tab was already on show for that console — and `opened; the
+  person is not looking at this console's drawer, so its tab and header mark a new image until they
+  do; if the drawer cannot show it, it says why there` everywhere else, a window too short for the
+  drawer included. The keyboard never moves. The answer comes before the file is decoded, and a
+  truncated or corrupt PNG or JPEG begins like a whole one, so both sentences say where such a file
+  is explained instead of promising the picture.
+- **It is refused** while that console's image carries marks the person has not sent (`the image open
+  in this console has marks the person has not sent; nothing was opened. Ask them to send or clear the
+  marks, then call image_open again`) and when the console that asked is gone. Malformed lines say
+  `an image_open names no "path"`, `an image_open's "path" is not text`, `an image_open's "path" is
+  not absolute`, `an image_open's "path" is not on this machine` (a share) or `an image_open's
+  "path" is not a drive path; give it as C:\…` (any other refused prefix, a local device path such
+  as `\\.\C:\…` included), and the connection lives on.
+- **`panel-mcp` checks the file first**, in its own process, which is not always the
+  agent's: a missing file, a folder, something that is not a regular file, a
+  file over 32 MiB and a file whose first bytes are neither a PNG's signature nor a JPEG's
+  `FF D8 FF` (`<path> is not a PNG or JPEG image`, a file too short to say included) are refused
+  before the window is asked. Those checks are a courtesy; the window's read is the enforcement.
+
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport
 itself. When it starts with a whole identity — `PANEL_ID` set, non-empty and UTF-8, and `PANEL_DIR`
@@ -882,3 +952,63 @@ when HOME is absolute. This covers desktop launches whose shell adds that direct
 An executable selected from PATH keeps precedence; unsupported scripts still refuse rather than
 falling through to another installation. The native candidate is canonicalized and all existing
 ancestry, foreground, lifetime and same-invocation checks still apply. No launch PATH is rewritten.
+
+## Windows verified-peer connection upgrade
+
+Windows clients may opt into a verified connection before sending ordinary control operations.
+This is a transport extension; it does not add an agent-facing MCP tool. Raw existing producers
+may omit the upgrade and continue using the ordinary JSON operations with Unknown provenance.
+They do not acquire session or attested-hook authorization. The reasoning is recorded in D117.
+
+The first newline-delimited request on the bootstrap pipe is:
+
+```json
+{"tool":"peer_hello","v":1}
+```
+
+After retaining a candidate process handle, the server creates a fresh user-only, local-only,
+one-shot pipe and replies:
+
+```json
+{"ok":true,"peer":{"v":1,"mode":"reconnect","name":"ivy-peer-0123456789abcdef0123456789abcdef"}}
+```
+
+The name must match `ivy-peer-[0-9a-f]{32}` exactly. A client constructs the local
+`\\.\pipe\` prefix itself and verifies this server against the same independently inherited
+`PANEL_SERVER_PID` used for the bootstrap. It does not open a path or remote host supplied in a
+reply. The server retains the candidate handle continuously, accepts one connector and verifies
+its kernel PID and liveness before replying on that new stream:
+
+```json
+{"ok":true,"peer":{"v":1,"mode":"verified"}}
+```
+
+Only this new stream carries verified control requests. The bootstrap and any bytes queued there
+are discarded; a valid bootstrap request is never replayed under the new stream's authority.
+The stream's clones retain the same process witness.
+
+If a candidate witness cannot be obtained, the server can explicitly retain an unverified stream:
+
+```json
+{"ok":true,"peer":{"v":1,"mode":"unverified"}}
+```
+
+That mode carries no process witness and preserves Unknown provenance. It is not an automatic
+fallback from a failed or malformed handshake, a wrong second connector, timeout or failed server
+check. Such failures close the attempted upgrade. Existing errors use the usual failure envelope:
+
+```json
+{"ok":false,"error":"..."}
+```
+
+An upgrade is allowed only as the first request. Each negotiation frame is at most 256 encoded
+bytes, including its newline. Ordinary legacy requests retain their existing `MAX_REQUEST` bound.
+One counted worker owns at most one rendezvous, which uses `FILE_FLAG_FIRST_PIPE_INSTANCE` and
+never reuses a name or pipe instance.
+
+A verified client uses one absolute two-second connection deadline. Session-helper calls establish
+their total two-second deadline before connecting and carry it through the upgrade and request
+exchange. The server's upgrade deadline starts when the complete first `peer_hello` is recognized;
+silent or partial pre-hello clients retain ordinary legacy idle behavior and remain subject to the
+existing connection cap and channel shutdown cancellation. Negotiation never blocks the acceptor
+or interface frame; every wait observes shutdown and drains pending overlapped completion.

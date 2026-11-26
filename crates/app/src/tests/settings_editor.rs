@@ -122,16 +122,36 @@ mod tests {
             settings::editor::Editor::resolved(settings::Entry::Measuring, Some("closed"));
         let ctx = egui::Context::default();
         let area = area_of(1280.0);
+        // Child startup is a fixture precondition, not part of Settings' output-delivery budget.
+        #[cfg(windows)]
+        {
+            let ready = Instant::now() + Duration::from_secs(10);
+            while window.tabs.iter().any(|tab| {
+                !tab.panes()[0]
+                    .screen
+                    .to_text()
+                    .contains("ivy-fixture-reading")
+            }) {
+                window.pump_them_all();
+                assert!(
+                    Instant::now() < ready,
+                    "a fixture child did not reach its input gate: {:?}",
+                    window
+                        .tabs
+                        .iter()
+                        .map(|tab| tab.panes()[0].screen.to_text())
+                        .collect::<Vec<_>>()
+                );
+                std::thread::yield_now();
+            }
+        }
         one_frame_in(&mut window, &ctx, area, Vec::new());
         let at = window.settings_editor.entry_rect().center();
         one_frame_in(&mut window, &ctx, area, click(at));
         assert!(window.settings_editor.is_open());
-        assert!(
-            window
-                .tabs
-                .iter()
-                .all(|t| !t.panes()[0].screen.to_text().contains("visible"))
-        );
+        for (tab, expected) in window.tabs.iter().zip(["visible", "hidden"]) {
+            assert!(!tab.panes()[0].screen.to_text().contains(expected));
+        }
         for tab in &mut window.tabs {
             tab.panes_mut()[0].pty.write(b"go\n").unwrap();
         }

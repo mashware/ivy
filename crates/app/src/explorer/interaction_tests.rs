@@ -260,6 +260,67 @@ fn wait_for_text(
     }
 }
 
+fn files_text_visible(
+    window: &crate::Window,
+    painted: &[(String, egui::Pos2)],
+    name: &str,
+) -> bool {
+    painted.iter().any(|(text, pos)| {
+        text == name
+            && window
+                .sidebar
+                .last_files
+                .is_some_and(|body| body.contains(*pos))
+    })
+}
+
+fn wait_for_file_text(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    name: &str,
+) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let painted = frame(window, ctx, area, vec![]);
+        if files_text_visible(window, &painted, name) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing Files row {name:?}: {painted:?}"
+        );
+        std::thread::yield_now();
+    }
+}
+
+/// Waits until the search's own matches hold `name`. Seeing the name on screen is not enough: the
+/// tree can show it while the search worker has not answered, and a key pressed then picks nothing.
+fn wait_for_match(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+    name: &str,
+) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        frame(window, ctx, area, vec![]);
+        let found = super::search::matches(&mut window.explorer, pane).entries;
+        if found
+            .iter()
+            .any(|entry| entry.path.file_name().is_some_and(|file| file == name))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the search never matched {name:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn wait_for_source(
     window: &mut crate::Window,
     ctx: &egui::Context,
@@ -312,6 +373,7 @@ fn publish_directory(window: &mut crate::Window, pane: usize, uri: &str) {
 
 #[test]
 fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
+    let diagnostics = crate::tests::windows_fixture::Diagnostics::new();
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let worktrees = Worktrees::new();
@@ -336,6 +398,18 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
     let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
     wait_for_source(&mut window, &ctx, area, ids[0], first);
     wait_for_source(&mut window, &ctx, area, ids[2], second);
+    // Windows publishes the fixture directory before PowerShell has prepared console input.
+    // Only the child's empty file proves the reader is ready to receive the tested LF.
+    let ready = Instant::now() + std::time::Duration::from_secs(10);
+    while !matches!(fs::read(&marker).as_deref(), Ok(b"")) {
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(
+            Instant::now() < ready,
+            "input fixture did not open its witness: {}",
+            diagnostics.report(&mut window)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let before: Vec<_> = window
         .all_panes()
         .map(|pane| (pane.name, pane.measured))
@@ -521,7 +595,31 @@ fn markdown_single_click_opens_the_file_from_the_active_console() {
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
         frame(&mut window, &ctx, area, vec![]);
         click_refresh(&mut window, &ctx, area);
-        wait_for_text(&mut window, &ctx, area, "handoff.md");
+        if tab == 1 {
+            // The old viewer's filename is not evidence that the new Files listing arrived.
+            window.explorer.loader = Loader::default();
+            let request = window.explorer.request(ids[2], second.0.clone());
+            window.explorer.cache.remove(&request);
+            window.explorer.loading = Some(request);
+            let painted = frame(&mut window, &ctx, area, vec![]);
+            assert!(painted.iter().any(|(text, pos)| {
+                text == "handoff.md"
+                    && window
+                        .sidebar
+                        .last_dock
+                        .is_some_and(|body| body.contains(*pos))
+            }));
+            assert!(painted.iter().any(|(text, pos)| {
+                text == "Loading…"
+                    && window
+                        .sidebar
+                        .last_files
+                        .is_some_and(|body| body.contains(*pos))
+            }));
+            assert!(!files_text_visible(&window, &painted, "handoff.md"));
+            window.explorer.loading = None;
+        }
+        wait_for_file_text(&mut window, &ctx, area, "handoff.md");
         click_text(&mut window, &ctx, area, "handoff.md");
         assert!(
             crate::viewer::is_open(&window),
@@ -535,6 +633,8 @@ fn markdown_single_click_opens_the_file_from_the_active_console() {
         wait_for_text(&mut window, &ctx, area, expected);
     }
     // Keyboard activation remains available without first clicking the file.
+    crate::viewer::apply_strip_action(&mut window, crate::viewer::StripAction::CloseDocument, &ctx);
+    assert!(!crate::viewer::is_open(&window));
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     let pane = ids[2];
@@ -585,7 +685,7 @@ fn remote_source_suspends_navigation_and_local_directory_changes_follow_automati
     publish_directory(
         &mut window,
         pane,
-        &format!("file://localhost{}", current.0.display()),
+        url::Url::from_directory_path(&current.0).unwrap().as_str(),
     );
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
     wait_for_text(&mut window, &ctx, area, "current.md");
@@ -610,7 +710,7 @@ fn remote_source_suspends_navigation_and_local_directory_changes_follow_automati
     publish_directory(
         &mut window,
         pane,
-        &format!("file://localhost{}", current.0.display()),
+        url::Url::from_directory_path(&current.0).unwrap().as_str(),
     );
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
     wait_for_text(&mut window, &ctx, area, "current.md");
@@ -865,7 +965,10 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
     assert!(listed("NeedleFolder"));
     assert!(listed("NeedleChild.txt"));
     assert!(
-        listed("src/nested/"),
+        listed(&format!(
+            "{}/",
+            std::path::Path::new("src").join("nested").display()
+        )),
         "a match shows its folder beside its name"
     );
     // The tree under the list still shows it once; a match would show it a second time.
@@ -965,6 +1068,62 @@ fn enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer() {
     assert!(window.explorer.visible, "Files stays beside the drawer");
 }
 
+/// Wait for both terminal cells and painted glyphs, including live child-output witnesses.
+fn wait_for_console_text(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+    expected: &str,
+    at_home: bool,
+) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let painted = frame(window, ctx, area, vec![]);
+        let console = window
+            .pane_called(pane)
+            .unwrap()
+            .painted_console
+            .as_ref()
+            .unwrap();
+        let first_row = console
+            .view
+            .row(0)
+            .unwrap()
+            .iter()
+            .map(|cell| cell.c)
+            .collect::<String>();
+        let drawn: String = painted
+            .iter()
+            .filter(|(_, pos)| console.area.contains(*pos))
+            .map(|(text, _)| text.as_str())
+            .collect();
+        if (!at_home || first_row.trim_end() == expected) && drawn.contains(expected) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "console did not paint {expected:?}: {painted:?}"
+        );
+        std::thread::yield_now();
+    }
+}
+
+fn paint_console_path(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+    path: &str,
+) {
+    window
+        .pane_called(pane)
+        .unwrap()
+        .screen
+        .advance(format!("\x1b[?25l\x1b[2J\x1b[H{path}").as_bytes());
+    wait_for_console_text(window, ctx, area, pane, path, true);
+}
+
 #[test]
 fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() {
     let ctx = egui::Context::default();
@@ -987,12 +1146,16 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
     let target = directory.0.join("folder/entry-60.rs");
     let other = window.active().panes()[1].name;
     window.active_mut().focus = other;
-    window
-        .pane_called(pane)
-        .unwrap()
-        .screen
-        .advance(b"\x1b[?25l\x1b[2J\x1b[Hfolder/entry-60.rs");
-    frame(&mut window, &ctx, area, vec![]);
+    // This test owns the screen contents; child startup and resize output are unrelated input.
+    // Keep a pending clear to prove the fixture stays isolated through the real frame pump.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let live_output = std::mem::replace(
+        &mut window.pane_called(pane).unwrap().pty_output,
+        crate::PtyOutput::seeded(receiver, b"\x1b[2J\x1b[H".to_vec(), || {}),
+    );
+    let _live_output = (sender, live_output);
+    let _output = crate::tests::isolate_output(&mut window);
+    paint_console_path(&mut window, &ctx, area, pane, "folder/entry-60.rs");
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
     let console = window
@@ -1032,12 +1195,7 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
         ("./folder", "entry-00.rs"),
         ("./missing.rs", "Path unavailable"),
     ] {
-        window
-            .pane_called(pane)
-            .unwrap()
-            .screen
-            .advance(format!("\x1b[2J\x1b[H{text}").as_bytes());
-        frame(&mut window, &ctx, area, vec![]);
+        paint_console_path(&mut window, &ctx, area, pane, text);
         let console = window
             .pane_called(pane)
             .unwrap()
@@ -1076,6 +1234,7 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
 
 #[test]
 fn scrolling_files_keeps_console_paint_and_geometry_stable() {
+    let diagnostics = crate::tests::windows_fixture::Diagnostics::new();
     fn colors(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> Vec<egui::Color32> {
         shapes
             .iter()
@@ -1100,19 +1259,67 @@ fn scrolling_files_keeps_console_paint_and_geometry_stable() {
     for index in 0..100 {
         fs::write(directory.0.join(format!("entry-{index:03}.txt")), "entry").unwrap();
     }
-    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    // The producer signals after console preparation, then waits while Files settles its layout.
+    // The Windows fixture already emits this readiness signal before its input gate.
+    #[cfg(unix)]
+    let announce = "printf ivy-fixture-reading; ";
+    #[cfg(windows)]
+    let announce = "";
+    let command = format!(
+        "cd '{}' && {announce}read -r line; printf \x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS; sleep 30",
+        directory.0.display()
+    );
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, area, vec![]);
     let pane = window.active().panes()[0].name;
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "entry-000.txt");
+    let ready = Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        frame(&mut window, &ctx, area, vec![]);
+        let text = window.pane_called(pane).unwrap().screen.to_text();
+        assert!(
+            !text.contains("CONSOLE_OPACITY_WITNESS"),
+            "producer bypassed its input gate"
+        );
+        if text.contains("ivy-fixture-reading") {
+            break;
+        }
+        assert!(
+            Instant::now() < ready,
+            "paint producer did not reach its read gate: {text}\n{}",
+            diagnostics.report(&mut window)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Keep pumping while the real producer is held: directory/layout readiness cannot forge it.
+    for _ in 0..10 {
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(
+            !window
+                .pane_called(pane)
+                .unwrap()
+                .screen
+                .to_text()
+                .contains("CONSOLE_OPACITY_WITNESS")
+        );
+    }
     window
         .pane_called(pane)
         .unwrap()
-        .screen
-        .advance(b"\x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS");
-    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
-    wait_for_text(&mut window, &ctx, area, "entry-000.txt");
+        .pty
+        .write(b"go\n")
+        .unwrap();
+    wait_for_console_text(
+        &mut window,
+        &ctx,
+        area,
+        pane,
+        "CONSOLE_OPACITY_WITNESS",
+        false,
+    );
     let baseline = painted_frame(&mut window, &ctx, area, vec![]).1;
     let console = window
         .pane_called(pane)
@@ -1589,17 +1796,19 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
         window.explorer.navigation[&pane].selected,
         Some(directory.0.join("docs/notes.txt"))
     );
-    // An image opens in the drawer's document tab, pinned to the console Files reads.
+    // An image opens in the drawer's image tab, pinned to the console Files reads.
     // Opening one closed the search; it is opened again to find the image.
     let shot = directory.0.join("docs/shot.png");
     click_icon(&mut window, &ctx, area, view::Icon::Search);
     type_text(&mut window, &ctx, area, "shot");
-    wait_for_text(&mut window, &ctx, area, "shot.png");
+    // The tree already shows shot.png (revealing notes.txt opened docs/), so the name on screen
+    // says nothing about the search: wait for the match itself.
+    wait_for_match(&mut window, &ctx, area, pane, "shot.png");
     assert_eq!(crate::viewer::shown_image(&window), None);
     frame(&mut window, &ctx, area, vec![open]);
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Document)
+        Some(crate::sidebar::Tool::Image)
     );
     assert_eq!(crate::viewer::shown_image(&window), Some((pane, shot)));
 }

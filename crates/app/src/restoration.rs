@@ -670,7 +670,7 @@ mod tests {
     fn oversized_serialized_snapshot_never_replaces_the_previous_file() {
         let fixture = Fixture::new();
         let original = fixture.seed(None);
-        let directory = PathBuf::from(format!("/{}", "a".repeat(3000)));
+        let directory = std::env::temp_dir().join("a".repeat(3000));
         let doc = StoredDocument {
             v: session::VERSION,
             tabs: (0..session::MAX_LEAVES)
@@ -702,15 +702,15 @@ mod tests {
 
     #[test]
     fn verified_client_directory_wins_over_wrapper_cwd_but_not_remote_veto() {
-        let declared = PathBuf::from("/tmp/client-project");
-        let wrapper = Path::new("/tmp/launch-wrapper");
+        let declared = std::env::temp_dir().join("client-project");
+        let wrapper = std::env::temp_dir().join("launch-wrapper");
         let mut state = PaneState {
             session_directory: Some(declared.clone()),
             ..Default::default()
         };
-        observe_directory(&mut state, Some(wrapper), false);
+        observe_directory(&mut state, Some(&wrapper), false);
         assert_eq!(state.directory, Some(declared));
-        observe_directory(&mut state, Some(wrapper), true);
+        observe_directory(&mut state, Some(&wrapper), true);
         assert!(state.directory.is_none());
     }
 

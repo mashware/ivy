@@ -75,6 +75,102 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "panel-control/tests/codex_route_windows_privacy.rs",
+        include_str!("../../panel-control/tests/codex_route_windows_privacy.rs"),
+    ),
+    (
+        "panel-control/tests/codex_route_windows_sharing.rs",
+        include_str!("../../panel-control/tests/codex_route_windows_sharing.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/signals.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/signals.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/signals_tests.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/signals_tests.rs"),
+    ),
+    (
+        "panel-control/src/client/agent_signal.rs",
+        include_str!("../../panel-control/src/client/agent_signal.rs"),
+    ),
+    (
+        "panel-control/src/client/agent_signal/tests.rs",
+        include_str!("../../panel-control/src/client/agent_signal/tests.rs"),
+    ),
+    (
+        "panel-control/tests/signals_helper.rs",
+        include_str!("../../panel-control/tests/signals_helper.rs"),
+    ),
+    (
+        "panel-control/src/codex_relay/transport_tests.rs",
+        include_str!("../../panel-control/src/codex_relay/transport_tests.rs"),
+    ),
+    (
+        "panel-control/src/codex_relay/windows_tests.rs",
+        include_str!("../../panel-control/src/codex_relay/windows_tests.rs"),
+    ),
+    (
+        "app/src/board/milestones/columns.rs",
+        include_str!("../src/board/milestones/columns.rs"),
+    ),
+    (
+        "app/src/board/milestones/compact.rs",
+        include_str!("../src/board/milestones/compact.rs"),
+    ),
+    (
+        "app/src/board/milestones/details.rs",
+        include_str!("../src/board/milestones/details.rs"),
+    ),
+    (
+        "app/src/board/milestones/projection.rs",
+        include_str!("../src/board/milestones/projection.rs"),
+    ),
+    (
+        "app/src/board/milestones/sections.rs",
+        include_str!("../src/board/milestones/sections.rs"),
+    ),
+    (
+        "app/src/board/milestones/state.rs",
+        include_str!("../src/board/milestones/state.rs"),
+    ),
+    (
+        "app/src/board/milestones/strip.rs",
+        include_str!("../src/board/milestones/strip.rs"),
+    ),
+    (
+        "app/src/board/milestones/tests.rs",
+        include_str!("../src/board/milestones/tests.rs"),
+    ),
+    (
+        "app/src/panel/provenance_route/windows_tests.rs",
+        include_str!("../src/panel/provenance_route/windows_tests.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/negotiation.rs",
+        include_str!("../../panel-control/src/endpoint/windows/negotiation.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/negotiation/tests.rs",
+        include_str!("../../panel-control/src/endpoint/windows/negotiation/tests.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/peer_tests.rs",
+        include_str!("../../panel-control/src/endpoint/windows/peer_tests.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/process.rs",
+        include_str!("../../panel-control/src/endpoint/windows/process.rs"),
+    ),
+    (
+        "panel-control/src/endpoint/windows/rendezvous.rs",
+        include_str!("../../panel-control/src/endpoint/windows/rendezvous.rs"),
+    ),
+    (
+        "panel-control/src/listener/windows_peer_tests.rs",
+        include_str!("../../panel-control/src/listener/windows_peer_tests.rs"),
+    ),
+    (
         "panel-control/src/endpoint/windows.rs",
         include_str!("../../panel-control/src/endpoint/windows.rs"),
     ),
@@ -305,6 +401,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/src/codex_relay.rs"),
     ),
     (
+        "panel-control/src/codex_relay/macos_daemon.rs",
+        include_str!("../../panel-control/src/codex_relay/macos_daemon.rs"),
+    ),
+    (
         "panel-control/src/codex_route.rs",
         include_str!("../../panel-control/src/codex_route.rs"),
     ),
@@ -327,6 +427,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "panel-control/src/wire.rs",
         include_str!("../../panel-control/src/wire.rs"),
+    ),
+    (
+        "panel-control/src/image.rs",
+        include_str!("../../panel-control/src/image.rs"),
     ),
     (
         "app/src/ai_sessions/mod.rs",
@@ -406,6 +510,38 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/src/foreground/linux.rs"),
     ),
     (
+        "term-core/src/foreground/windows.rs",
+        include_str!("../../term-core/src/foreground/windows.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/process.rs",
+        include_str!("../../term-core/src/foreground/windows/process.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/ancestry.rs",
+        include_str!("../../term-core/src/foreground/windows/ancestry.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/chain.rs",
+        include_str!("../../term-core/src/foreground/windows/chain.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/parameters.rs",
+        include_str!("../../term-core/src/foreground/windows/parameters.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/memory.rs",
+        include_str!("../../term-core/src/foreground/windows/memory.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/arguments.rs",
+        include_str!("../../term-core/src/foreground/windows/arguments.rs"),
+    ),
+    (
+        "term-core/src/foreground/windows/tests.rs",
+        include_str!("../../term-core/src/foreground/windows/tests.rs"),
+    ),
+    (
         "term-core/src/foreground/tests.rs",
         include_str!("../../term-core/src/foreground/tests.rs"),
     ),
@@ -420,6 +556,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/tests/title_typography.rs",
         include_str!("../src/tests/title_typography.rs"),
+    ),
+    (
+        "app/src/tests/windows_fixture.rs",
+        include_str!("../src/tests/windows_fixture.rs"),
     ),
     (
         "app/src/git_process.rs",
@@ -483,6 +623,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/image/send.rs"),
     ),
     (
+        "app/src/viewer/image/paste.rs",
+        include_str!("../src/viewer/image/paste.rs"),
+    ),
+    (
         "app/src/viewer/image/flatten.rs",
         include_str!("../src/viewer/image/flatten.rs"),
     ),
@@ -524,6 +668,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/viewer.rs", include_str!("../src/viewer.rs")),
     (
+        "app/src/viewer/focus.rs",
+        include_str!("../src/viewer/focus.rs"),
+    ),
+    (
         "app/src/viewer/load.rs",
         include_str!("../src/viewer/load.rs"),
     ),
@@ -548,6 +696,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/code/tests.rs"),
     ),
     (
+        "app/src/viewer/code/tests/navigation.rs",
+        include_str!("../src/viewer/code/tests/navigation.rs"),
+    ),
+    (
         "app/src/viewer/code/rows.rs",
         include_str!("../src/viewer/code/rows.rs"),
     ),
@@ -566,6 +718,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/diagnostics_log.rs",
         include_str!("../src/diagnostics_log.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/graphics.rs",
+        include_str!("../src/diagnostics_log/graphics.rs"),
     ),
     (
         "app/src/diagnostics_log/sink.rs",
@@ -879,6 +1035,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/control/retiring.rs"),
     ),
     (
+        "app/src/control/handles.rs",
+        include_str!("../src/control/handles.rs"),
+    ),
+    (
         "app/src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
     ),
@@ -971,6 +1131,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
+    (
+        "app/src/opening/pane.rs",
+        include_str!("../src/opening/pane.rs"),
+    ),
     (
         "app/src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
@@ -1157,6 +1321,10 @@ const MODULES: &[(&str, &str)] = &[
         "app/examples/fonts.rs",
         include_str!("../examples/fonts.rs"),
     ),
+    (
+        "app/examples/windows_altgr.rs",
+        include_str!("../examples/windows_altgr.rs"),
+    ),
     ("app/examples/leak.rs", include_str!("../examples/leak.rs")),
     (
         "app/examples/screen_demo.rs",
@@ -1176,6 +1344,10 @@ const MODULES: &[(&str, &str)] = &[
     ("app/tests/prose.rs", include_str!("prose.rs")),
     ("app/tests/shape.rs", include_str!("shape.rs")),
     ("app/tests/vendor_patch.rs", include_str!("vendor_patch.rs")),
+    (
+        "app/tests/windows_altgr.rs",
+        include_str!("windows_altgr.rs"),
+    ),
     ("app/tests/waits.rs", include_str!("waits.rs")),
     ("app/tests/common/mod.rs", include_str!("common/mod.rs")),
     (
