@@ -60,11 +60,17 @@ pub(super) fn wait(child: &mut Child) -> io::Result<ExitStatus> {
                 libc::WEXITED | libc::WNOWAIT,
             )
         };
-        if result == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+        if result == 0 {
             break;
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            DELEGATE_GROUP.store(0, Ordering::Relaxed);
+            return Err(error);
         }
     }
     DELEGATE_GROUP.store(0, Ordering::Relaxed);
+    // Bounded: waitid without WNOHANG observed the exit and WNOWAIT left it ready for reaping.
     child.wait()
 }
 

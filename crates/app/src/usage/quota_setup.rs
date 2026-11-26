@@ -1,11 +1,10 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 
@@ -117,40 +116,23 @@ fn identity(path: &Path) -> io::Result<(u64, u64, u64, i64, i64)> {
 }
 
 fn verify_version(program: &Path, path: &OsStr) -> io::Result<()> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .arg("--version")
         .env("PATH", path)
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        if let Some(status) = child.try_wait()? {
-            let mut version = String::new();
-            if let Some(output) = child.stdout.take() {
-                // A process surviving the version probe can hold the pipe open after Claude exits.
-                let fd = output.as_raw_fd();
-                // SAFETY: the owned pipe remains live while fcntl changes its status flags.
-                if unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK) } == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                output.take(256).read_to_string(&mut version)?;
-            }
-            if status.success() && version.trim() == VERSION {
-                return Ok(());
-            }
-            return Err(io::Error::other(
-                "This Claude Code version has not been verified for allowance reporting.",
-            ));
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(io::Error::other("Claude Code did not report its version."));
-        }
-        std::thread::sleep(Duration::from_millis(20));
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped());
+    let output = crate::git_process::run(command, Duration::from_secs(2), 256, 1024)
+        .map_err(|_| io::Error::other("Claude Code did not report its version."))?;
+    if output.status.success()
+        && std::str::from_utf8(&output.stdout).is_ok_and(|version| version.trim() == VERSION)
+    {
+        return Ok(());
     }
+    Err(io::Error::other(
+        "This Claude Code version has not been verified for allowance reporting.",
+    ))
 }
 
 fn effective_statusline(directory: &Path) -> io::Result<Option<Map<String, Value>>> {
@@ -183,6 +165,7 @@ fn statusline_for_profile(
     let user_settings = profile.join("settings.json");
     let project = directory.join(".claude");
     let local = project.join("settings.local.json");
+    // The installed client chose the main checkout's local command over the linked checkout's.
     let root_local =
         project_local_root(directory)?.map(|root| root.join(".claude/settings.local.json"));
     let mut statusline = read_statusline(&user_settings)?;

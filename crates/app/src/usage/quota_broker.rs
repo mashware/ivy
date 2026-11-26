@@ -112,12 +112,12 @@ struct Model {
     stopped: bool,
 }
 
-struct State {
+struct BrokerState {
     model: Mutex<Model>,
     wake: Arc<Wake>,
 }
 
-impl State {
+impl BrokerState {
     fn finish(&self, snapshot: Snapshot) {
         let mut model = self.model.lock().unwrap();
         if model.stopped
@@ -188,7 +188,7 @@ impl State {
 }
 
 pub(super) struct Broker {
-    state: Arc<State>,
+    state: Arc<BrokerState>,
     signal: UnixStream,
     endpoint: PathBuf,
 }
@@ -211,7 +211,7 @@ impl Broker {
         })?;
         signal.set_nonblocking(true)?;
         receive_signal.set_nonblocking(true)?;
-        let state = Arc::new(State {
+        let state = Arc::new(BrokerState {
             model: Mutex::new(Model {
                 root: None,
                 snapshot: Snapshot::Waiting,
@@ -304,7 +304,7 @@ impl Drop for Broker {
     }
 }
 
-fn run(state: &State, listener: UnixListener, signal: UnixStream) -> io::Result<()> {
+fn run(state: &BrokerState, listener: UnixListener, signal: UnixStream) -> io::Result<()> {
     let mut sequence = 0u64;
     loop {
         let root = {
@@ -350,7 +350,7 @@ fn run(state: &State, listener: UnixListener, signal: UnixStream) -> io::Result<
 
 fn receive(
     stream: UnixStream,
-    state: &State,
+    state: &BrokerState,
     root: &Root,
     signal: &UnixStream,
     sequence: &mut u64,
@@ -390,7 +390,7 @@ fn receive(
 
 struct FrameReader<'a> {
     stream: UnixStream,
-    state: &'a State,
+    state: &'a BrokerState,
     root: &'a Root,
     signal: &'a UnixStream,
     deadline: Instant,

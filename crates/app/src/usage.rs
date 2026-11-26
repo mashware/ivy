@@ -37,7 +37,7 @@ pub(crate) struct View {
     timing: Timing,
     measured: Option<Measurement>,
     #[cfg(target_os = "linux")]
-    quota: quota_view::View,
+    quota: quota_view::QuotaView,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

@@ -14,7 +14,7 @@ use std::{
 };
 
 #[derive(Default)]
-pub(super) struct View {
+pub(super) struct QuotaView {
     enabled: Arc<AtomicBool>,
     directory: String,
     wake: Option<Arc<Wake>>,
@@ -102,7 +102,7 @@ impl Startup {
     }
 }
 
-impl View {
+impl QuotaView {
     pub(super) fn open(&mut self, ctx: &egui::Context) {
         if self.directory.is_empty() {
             self.directory = std::env::current_dir()
@@ -404,9 +404,9 @@ mod tests {
         let wake = Wake::new(move || {
             callback.fetch_add(1, Ordering::Relaxed);
         });
-        let mut view = View {
+        let mut view = QuotaView {
             wake: Some(Arc::clone(&wake)),
-            ..View::default()
+            ..QuotaView::default()
         };
         let ctx = egui::Context::default();
         view.open(&ctx);
@@ -423,8 +423,8 @@ mod tests {
 
     #[test]
     fn consent_is_window_local_and_disable_revokes_the_shared_launch_flag() {
-        let mut first = View::default();
-        let second = View::default();
+        let mut first = QuotaView::default();
+        let second = QuotaView::default();
         first.enabled.store(true, Ordering::Release);
         let launch_flag = Arc::clone(&first.enabled);
         assert!(!second.enabled.load(Ordering::Acquire));
