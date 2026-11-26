@@ -9775,9 +9775,10 @@ No transcript reader, process-name recognizer, generic daemon or automatic clien
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
 
 Automatic capability replies share the bounded terminal reply batch and the ordered PTY writer.
-Claude Code 2.1.332 treats the second primary device-attributes reply as the end of negotiation:
-sending it before the capability reply suppresses native declarations even if both bytes arrive in
-the same write. Preserve query order, including when the terminator starts a new read. An already
+Claude Code 2.1.332 ends negotiation when it receives the second primary device-attributes reply.
+If it receives that reply before the capability reply, it omits native declarations even when both
+responses arrive in a single write. The one fixed-size capability reply has its own allowance.
+Preserve query order, including when the terminator starts a new read. An already
 queued reply is allowed to finish ahead of this batch. At most one capability reply is deferred
 when the writer reaches its ceiling or has a standing input refusal. Inferred client identity was
 discarded because it would bypass the native opt-in and would leave the broken handshake in place.

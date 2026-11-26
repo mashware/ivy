@@ -308,7 +308,8 @@ impl Screen {
         self.advance_with_client_replies(bytes, false, write)
     }
 
-    /// Include the opted-in client capability response in the ordinary terminal reply stream.
+    /// Include at most one opted-in client capability response in the ordinary terminal reply
+    /// stream. The fixed response has a separate allowance from the ordinary 16 KiB ceiling.
     pub fn advance_with_client_replies(
         &mut self,
         bytes: &[u8],
