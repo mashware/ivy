@@ -399,48 +399,6 @@ fn paint_window(ui: &mut egui::Ui, label: &str, state: WindowState) {
     ui.label(format!("{label} · {value}"));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::AtomicUsize;
-
-    #[test]
-    fn opening_and_closing_the_view_controls_its_quota_wakes() {
-        let repaints = Arc::new(AtomicUsize::new(0));
-        let callback = Arc::clone(&repaints);
-        let wake = Wake::new(move || {
-            callback.fetch_add(1, Ordering::Relaxed);
-        });
-        let mut view = QuotaView {
-            wake: Some(Arc::clone(&wake)),
-            ..QuotaView::default()
-        };
-        let ctx = egui::Context::default();
-        view.open(&ctx);
-        wake.changed();
-        wake.changed();
-        assert_eq!(repaints.load(Ordering::Relaxed), 1);
-        view.close();
-        wake.changed();
-        assert_eq!(repaints.load(Ordering::Relaxed), 1);
-        view.open(&ctx);
-        wake.changed();
-        assert_eq!(repaints.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn consent_is_window_local_and_disable_revokes_the_shared_launch_flag() {
-        let mut first = QuotaView::default();
-        let second = QuotaView::default();
-        first.enabled.store(true, Ordering::Release);
-        let launch_flag = Arc::clone(&first.enabled);
-        assert!(!second.enabled.load(Ordering::Acquire));
-        assert!(launch_flag.load(Ordering::Acquire));
-        first.disable();
-        assert!(!launch_flag.load(Ordering::Acquire));
-    }
-}
-
 #[cfg(target_os = "linux")]
 pub(super) fn launch_in_window(window: &mut crate::Window, ctx: &egui::Context, launch: Launch) {
     let started = std::time::Instant::now();
@@ -486,4 +444,46 @@ pub(super) fn launch_in_window(window: &mut crate::Window, ctx: &egui::Context, 
         Err(error) => window.usage.quota.failed(error.to_string()),
     }
     window.timed_separately += window.usage.timing.record(0, started.elapsed());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn opening_and_closing_the_view_controls_its_quota_wakes() {
+        let repaints = Arc::new(AtomicUsize::new(0));
+        let callback = Arc::clone(&repaints);
+        let wake = Wake::new(move || {
+            callback.fetch_add(1, Ordering::Relaxed);
+        });
+        let mut view = QuotaView {
+            wake: Some(Arc::clone(&wake)),
+            ..QuotaView::default()
+        };
+        let ctx = egui::Context::default();
+        view.open(&ctx);
+        wake.changed();
+        wake.changed();
+        assert_eq!(repaints.load(Ordering::Relaxed), 1);
+        view.close();
+        wake.changed();
+        assert_eq!(repaints.load(Ordering::Relaxed), 1);
+        view.open(&ctx);
+        wake.changed();
+        assert_eq!(repaints.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn consent_is_window_local_and_disable_revokes_the_shared_launch_flag() {
+        let mut first = QuotaView::default();
+        let second = QuotaView::default();
+        first.enabled.store(true, Ordering::Release);
+        let launch_flag = Arc::clone(&first.enabled);
+        assert!(!second.enabled.load(Ordering::Acquire));
+        assert!(launch_flag.load(Ordering::Acquire));
+        first.disable();
+        assert!(!launch_flag.load(Ordering::Acquire));
+    }
 }
