@@ -75,6 +75,18 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/launch/fresh.rs",
+        include_str!("../src/launch/fresh.rs"),
+    ),
+    (
+        "app/src/opening/fresh.rs",
+        include_str!("../src/opening/fresh.rs"),
+    ),
+    (
+        "app/src/chrome/connection/fresh.rs",
+        include_str!("../src/chrome/connection/fresh.rs"),
+    ),
+    (
         "panel-control/tests/codex_route_windows_privacy.rs",
         include_str!("../../panel-control/tests/codex_route_windows_privacy.rs"),
     ),

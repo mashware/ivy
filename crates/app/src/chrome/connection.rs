@@ -1,4 +1,6 @@
 //! In-app setup help reports published panels, never inferred client installation (D73).
+#[cfg(windows)]
+mod fresh;
 mod recovery;
 mod translocation;
 use crate::{Window, panel};
@@ -79,6 +81,8 @@ struct Published {
 
 #[derive(Default, Debug)]
 pub(super) struct Guide {
+    #[cfg(windows)]
+    fresh: fresh::Form,
     open: bool,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
@@ -241,6 +245,13 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe:
         .application_status(window.settings_editor.is_applying());
     if window.chrome.guide.open {
         show(&mut window.chrome.guide, ctx, &window.theme);
+        #[cfg(windows)]
+        if let Some(request) = window.chrome.guide.fresh.request.take() {
+            match crate::opening::fresh::create(window, ctx, request) {
+                Ok(()) => window.chrome.guide.open = false,
+                Err(error) => window.chrome.guide.message = error,
+            }
+        }
         if std::mem::take(&mut window.chrome.guide.save_preferences) {
             let desired = window.chrome.guide.desired;
             window.chrome.guide.message =
@@ -452,6 +463,8 @@ fn setup_prompt(bridge: &Bridge) -> String {
 }
 
 fn body(guide: &mut Guide, ui: &mut egui::Ui) {
+    #[cfg(windows)]
+    fresh::show(&mut guide.fresh, ui);
     let published = guide.published;
     ui.label(
         "Set up Ivy once per AI client. Ivy updates normally keep your saved MCP registration.",

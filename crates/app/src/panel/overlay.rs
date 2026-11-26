@@ -274,14 +274,15 @@ fn admit(
     }
 }
 
-impl super::PanelState {
-    #[cfg(windows)]
-    pub(crate) fn hook_hold(&self) -> Option<(Connection, u64, String)> {
-        self.overlay
-            .snapshot()
-            .map(|hold| (hold.connection, hold.incarnation, hold.source))
-    }
+#[cfg(windows)]
+pub(crate) fn committed_hold(state: &super::PanelState) -> Option<(Connection, u64, String)> {
+    state
+        .overlay
+        .snapshot()
+        .map(|hold| (hold.connection, hold.incarnation, hold.source))
+}
 
+impl super::PanelState {
     pub(crate) fn accepts_overlay(&self, connection: Connection, incarnation: u64) -> bool {
         self.overlay
             .snapshot()

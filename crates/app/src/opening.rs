@@ -14,6 +14,8 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
+#[cfg(windows)]
+pub(crate) mod fresh;
 mod pane;
 use pane::assemble_pane;
 

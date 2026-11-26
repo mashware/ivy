@@ -251,6 +251,14 @@ fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
     String::from_utf8(data).map_err(|_| error("Codex command output was not UTF-8"))
 }
 
+/// Check the explicit local launch option without enabling shared routing.
+pub fn supports_local_launch(exe: &OsStr) -> io::Result<bool> {
+    let help = output(exe, &["--help"], Duration::from_secs(2))?;
+    Ok(help
+        .split_ascii_whitespace()
+        .any(|word| word == "--no-daemon"))
+}
+
 fn home() -> io::Result<PathBuf> {
     let path = if let Some(home) = std::env::var_os("CODEX_HOME") {
         PathBuf::from(home)

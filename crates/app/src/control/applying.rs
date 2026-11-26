@@ -58,7 +58,9 @@ impl PaneControl {
                         delivery.origin,
                     ) {
                         Ok(()) => {
-                            if let Some((connection, incarnation, source)) = state.hook_hold() {
+                            if let Some((connection, incarnation, source)) =
+                                crate::panel::overlay::committed_hold(state)
+                            {
                                 self.windows_hooks.commit(
                                     connection,
                                     incarnation,
@@ -127,7 +129,9 @@ impl PaneControl {
                     ) {
                         Ok(()) => {
                             #[cfg(windows)]
-                            if let Some((connection, incarnation, source)) = state.hook_hold() {
+                            if let Some((connection, incarnation, source)) =
+                                crate::panel::overlay::committed_hold(state)
+                            {
                                 self.windows_hooks
                                     .commit(connection, incarnation, &source, None);
                             }

@@ -9,6 +9,8 @@ fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
     (
         Process {
             live: None,
+            #[cfg(windows)]
+            invocation: None,
             terminal: term_core::Termination::Pending,
             cost: Duration::ZERO,
             context: None,

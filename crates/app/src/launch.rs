@@ -4,9 +4,11 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", windows, test))]
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+#[cfg(windows)]
+pub(crate) mod fresh;
 use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
@@ -34,9 +36,11 @@ impl std::error::Error for StartupFailure {
 struct Ready {
     spawned: Spawned,
     startup: Vec<u8>,
+    #[cfg(windows)]
+    invocation: Option<term_core::WindowsInvocation>,
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", windows, test))]
 fn prepare(spawned: Spawned) -> Ready {
     let mut startup = Vec::new();
     // term-core holds at most eight 8192-byte reads. Capture that finite FIFO prefix on the
@@ -44,7 +48,12 @@ fn prepare(spawned: Spawned) -> Ready {
     for chunk in spawned.1.try_iter().take(8) {
         startup.extend(chunk);
     }
-    Ready { spawned, startup }
+    Ready {
+        spawned,
+        startup,
+        #[cfg(windows)]
+        invocation: None,
+    }
 }
 
 #[cfg(test)]
@@ -69,6 +78,8 @@ pub fn enable(launcher: PathBuf) {
 
 pub(crate) struct Process {
     live: Option<Pty>,
+    #[cfg(windows)]
+    invocation: Option<term_core::WindowsInvocation>,
     terminal: term_core::Termination,
     cost: std::time::Duration,
     pub(crate) context: Option<eframe::egui::Context>,
@@ -94,6 +105,8 @@ impl From<Pty> for Process {
     fn from(live: Pty) -> Self {
         Self {
             live: Some(live),
+            #[cfg(windows)]
+            invocation: None,
             terminal: term_core::Termination::Pending,
             cost: std::time::Duration::ZERO,
             context: None,
@@ -118,6 +131,8 @@ impl Process {
     pub(crate) fn deaf() -> Self {
         Self {
             live: None,
+            #[cfg(windows)]
+            invocation: None,
             terminal: term_core::Termination::Pending,
             cost: std::time::Duration::ZERO,
             context: None,
@@ -236,6 +251,8 @@ impl Process {
         drop(sender);
         let process = Self {
             live: None,
+            #[cfg(windows)]
+            invocation: None,
             terminal: term_core::Termination::Ordinary,
             cost: std::time::Duration::ZERO,
             context: None,
@@ -367,13 +384,22 @@ impl Process {
             Ok(Ready {
                 spawned: (pty, output),
                 startup,
+                #[cfg(windows)]
+                invocation,
             }) => {
+                #[cfg(windows)]
+                {
+                    self.invocation = invocation;
+                }
                 self.live = Some(pty);
                 self.startup = startup.len();
                 Some((output, startup, pending.reads))
             }
             Err(error) => {
                 self.failure = Some(error.to_string());
+                if let Ok(failure) = error.downcast::<StartupFailure>() {
+                    self.startup_failure = Some(*failure);
+                }
                 self.input.clear();
                 None
             }
@@ -413,10 +439,13 @@ pub(crate) fn complete(pane: &mut crate::Pane) {
             &pane.panel_state,
             reads,
             Some(callback),
-            pane.pty
-                .foreground_scope()
-                .ok()
-                .map(crate::panel::overlay::Authority::new),
+            pane.pty.foreground_scope().ok().map(|scope| {
+                #[cfg(windows)]
+                if let Some(invocation) = pane.pty.invocation.clone() {
+                    return crate::panel::overlay::Authority::fresh(scope, invocation);
+                }
+                crate::panel::overlay::Authority::new(scope)
+            }),
             inspector,
             move || {
                 if let Some(wake) = &wake {
@@ -519,9 +548,9 @@ pub(crate) fn finish_input(pane: &mut crate::Pane) {
     pane.pty.cost += before.elapsed();
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", windows, test))]
 struct CompletionWake(std::sync::Arc<dyn Fn() + Send + Sync>);
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", windows, test))]
 impl Drop for CompletionWake {
     fn drop(&mut self) {
         (self.0)();
@@ -534,6 +563,15 @@ fn start_worker(
     reads: crate::control::ReadActivity,
     operation: impl FnOnce() -> term_core::Result<Spawned> + Send + 'static,
 ) -> term_core::Result<(Process, Receiver<Vec<u8>>)> {
+    start_prepared_worker(wake, reads, move || operation().map(prepare))
+}
+
+#[cfg(any(target_os = "linux", windows, test))]
+fn start_prepared_worker(
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    reads: crate::control::ReadActivity,
+    operation: impl FnOnce() -> term_core::Result<Ready> + Send + 'static,
+) -> term_core::Result<(Process, Receiver<Vec<u8>>)> {
     let (sender, result) = channel();
     let (output_open, output) = channel();
     std::thread::Builder::new()
@@ -542,11 +580,13 @@ fn start_worker(
             let _completed = CompletionWake(wake);
             // On receiver cancellation the undelivered child is shut down on this worker.
             let deliver = sender;
-            let _ = deliver.send(operation().map(prepare));
+            let _ = deliver.send(operation());
         })?;
     Ok((
         Process {
             live: None,
+            #[cfg(windows)]
+            invocation: None,
             terminal: term_core::Termination::Pending,
             cost: std::time::Duration::ZERO,
             context: None,
