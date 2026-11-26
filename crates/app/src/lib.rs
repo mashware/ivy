@@ -101,6 +101,7 @@ pub mod theme;
 mod tiling;
 mod tree;
 mod ui;
+mod usage;
 mod viewer;
 mod visibility;
 pub mod watcher;
@@ -909,6 +910,7 @@ struct Window {
     headers: header::Headers,
     header_input: header::actions::Input,
     settings_editor: settings::editor::Editor,
+    usage: usage::View,
     chrome: chrome::Chrome,
     pane_view: pane_view::State,
     clipboard: clipboard::Service,
@@ -1364,6 +1366,7 @@ impl eframe::App for Window {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         chrome::begin_pass(self, ui, frame);
+        usage::begin_pass(self, ui);
         clipboard::deliver(self, ui.ctx());
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
@@ -7427,6 +7430,7 @@ mod tests {
             last_frame_with_buttons: None,
             header_input: header::actions::Input::default(),
             settings_editor: settings::editor::Editor::default(),
+            usage: usage::View::default(),
             chrome: chrome::Chrome::default(),
             pane_view: pane_view::State::default(),
             clipboard: clipboard::Service::default(),

@@ -211,6 +211,7 @@
 # are synthetic fixture injections, not native console metadata.
 # Settings variants: settings-closed, settings-open and settings-fonts reuse C’s load.
 # Their global row has identical geometry; historical C keeps the row vetoed.
+# Usage variants run the same isolated synthetic import with AI usage closed or visible.
 # EVERY BATCH IS RUN TWICE and the mean of the two is published, which is what the annex does. It is
 # not for precision: two runs that do not look alike give away a contaminated one, and a single run
 # cannot be audited. What this script does NOT reproduce is the wake-up figure the annex cites: that
@@ -271,6 +272,31 @@ alike() {
         if (p[1] == "" || p[2] == "" || q[1] == "" || q[2] == "") exit 1
         exit !(p[1] - q[1] <= m && q[1] - p[1] <= m && p[2] - q[2] <= m && q[2] - p[2] <= m)
     }'
+}
+
+check_usage_report() {
+    mode=$(sed -n 's/^usage measurement: \([^,]*\), tokens=.*/\1/p' "$REPORT")
+    usage_tokens=$(sed -n 's/^usage measurement: [^,]*, tokens=\([0-9]*\)$/\1/p' "$REPORT")
+    snapshots=$(sed -n 's/^Usage snapshot: frames=\([0-9]*\),.*/\1/p' "$REPORT")
+    paint=$(sed -n 's/^Usage paint: frames=\([0-9]*\),.*/\1/p' "$REPORT")
+    case "$snapshots:$paint" in
+        *[!0-9:]*|:*|*:) invalidate "usage report lacks one count per usage series" ;;
+    esac
+    if [ "${USAGE:-}" = open ]; then
+        [ "$mode" = open ] && [ "$snapshots" -gt 0 ] && [ "$paint" -gt 0 ] ||
+            invalidate "usage-open did not measure the visible view"
+    fi
+    if [ "${USAGE:-}" = closed ]; then
+        [ "$mode" = closed ] && [ "$snapshots" -gt 0 ] && [ "$paint" -eq 0 ] ||
+            invalidate "usage-closed did not measure collection with the view closed"
+    fi
+    if [ -z "${USAGE:-}" ]; then
+        [ "$mode:$snapshots:$paint" = none:0:0 ] ||
+            invalidate "usage work leaked into an unrelated batch"
+    else
+        [ "$usage_tokens" = 160 ] ||
+            invalidate "usage measurement did not import the approved synthetic fixture"
+    fi
 }
 
 # Graphical settings report validation (also exercised with synthetic reports).
@@ -538,6 +564,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
             -e 's/^settings chrome: */settings chrome /p' \
             -e 's/^settings UI: */settings /p' \
             -e 's/^settings mode: */settings mode /p' \
+            -e 's/^usage measurement: */usage measurement /p' \
             -e 's/^board mode: */board mode /p' \
             -e 's/^tabs: */tabs /p' \
             -e 's/^  pane [0-9]*: */pane /p' \
@@ -691,13 +718,14 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH= DOCK= COLR=
+LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH= DOCK= COLR= USAGE=
 case "$BATCH" in
     ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
     dock-v2-4-closed|dock-v2-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-}; DOCK=${BATCH##*-} ;;
     projects) TABS=1; PANES=2x2; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; CHROME_EXPECTED_VISIBLE=4 ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
+    usage-closed|usage-open) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; INTEGRATED_CHROME=1; USAGE=${BATCH#usage-} ;;
     settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
     E)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=search; SEARCH=1 ;; # two, and SEARCHING the left console's scrollback while both dump: its control is C, LEFT against LEFT, because the two consoles of one run already differ with no gesture (D61)
@@ -1263,7 +1291,7 @@ fi
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|usage-closed|usage-open|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1326,6 +1354,17 @@ if [ -n "$INTEGRATED_CHROME" ]; then
     export MEASURE_CHROME="$INTEGRATED_CHROME"
 else
     unset MEASURE_CHROME
+fi
+if [ -n "$USAGE" ]; then
+    USAGE_TEMP=$(mktemp -d /tmp/ivy-usage-frame.XXXXXXXX)
+    trap 'rm -rf -- "$USAGE_TEMP"' 0
+    USAGE_ROOT="$USAGE_TEMP/sources"
+    mkdir "$USAGE_ROOT"
+    stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    printf '%s\n' "{\"type\":\"assistant\",\"requestId\":\"req_usage_fixture\",\"timestamp\":\"$stamp\",\"message\":{\"id\":\"msg_usage_fixture\",\"model\":\"claude-sonnet-4-6\",\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":30,\"cache_creation_input_tokens\":10,\"output_tokens\":20,\"cache_creation\":{\"ephemeral_5m_input_tokens\":10,\"ephemeral_1h_input_tokens\":0}}}}" > "$USAGE_ROOT/fixture.jsonl"
+    export MEASURE_USAGE="$USAGE" MEASURE_USAGE_ROOT="$USAGE_ROOT" MEASURE_USAGE_CACHE="$USAGE_TEMP/store"
+else
+    unset MEASURE_USAGE MEASURE_USAGE_ROOT MEASURE_USAGE_CACHE
 fi
 if [ -n "${SETTINGS:-}" ]; then
     export MEASURE_SETTINGS="$SETTINGS"
@@ -1719,6 +1758,7 @@ check_header_report
 
 # Settings-specific witnesses, independent of the existing config veto.
 check_settings_report
+check_usage_report
 
 check_chrome_report
 check_projects_report

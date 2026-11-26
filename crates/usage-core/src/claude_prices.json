@@ -1,0 +1,31 @@
+{
+  "version": "2026-11-26",
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "id_source": "https://platform.claude.com/docs/en/claude_api_primer",
+  "rate_units": "microdollars USD per million tokens",
+  "basis": "Anthropic Claude API standard global list rates",
+  "unpriced": "Claude Haiku 5.5 uses prompt-length tiers outside the flat-rate catalog.",
+  "models": {
+    "claude-fable-5": {"input": 10000000, "cache_read": 1000000, "cache_write_5m": 12500000, "cache_write_1h": 20000000, "output": 50000000},
+    "claude-fable-5-1": {"input": 10000000, "cache_read": 250000, "cache_write_5m": 12500000, "cache_write_1h": 20000000, "output": 50000000},
+    "claude-fable-5-2": {"input": 8000000, "cache_read": 200000, "cache_write_5m": 10000000, "cache_write_1h": 16000000, "output": 40000000},
+    "claude-haiku-4-5-20251001": {"input": 1000000, "cache_read": 100000, "cache_write_5m": 1250000, "cache_write_1h": 2000000, "output": 5000000},
+    "claude-haiku-5-5": null,
+    "claude-mythos-5": {"input": 10000000, "cache_read": 1000000, "cache_write_5m": 12500000, "cache_write_1h": 20000000, "output": 50000000},
+    "claude-mythos-5-1": {"input": 10000000, "cache_read": 250000, "cache_write_5m": 12500000, "cache_write_1h": 20000000, "output": 50000000},
+    "claude-mythos-5-2": {"input": 8000000, "cache_read": 200000, "cache_write_5m": 10000000, "cache_write_1h": 16000000, "output": 40000000},
+    "claude-opus-4-1-20250805": {"input": 15000000, "cache_read": 1500000, "cache_write_5m": 18750000, "cache_write_1h": 30000000, "output": 75000000},
+    "claude-opus-4-20250514": {"input": 15000000, "cache_read": 1500000, "cache_write_5m": 18750000, "cache_write_1h": 30000000, "output": 75000000},
+    "claude-opus-4-5-20251101": {"input": 5000000, "cache_read": 500000, "cache_write_5m": 6250000, "cache_write_1h": 10000000, "output": 25000000},
+    "claude-opus-4-6": {"input": 5000000, "cache_read": 500000, "cache_write_5m": 6250000, "cache_write_1h": 10000000, "output": 25000000},
+    "claude-opus-4-7": {"input": 5000000, "cache_read": 500000, "cache_write_5m": 6250000, "cache_write_1h": 10000000, "output": 25000000},
+    "claude-opus-4-8": {"input": 5000000, "cache_read": 500000, "cache_write_5m": 6250000, "cache_write_1h": 10000000, "output": 25000000},
+    "claude-opus-5": {"input": 5000000, "cache_read": 500000, "cache_write_5m": 6250000, "cache_write_1h": 10000000, "output": 25000000},
+    "claude-opus-5-5": {"input": 4000000, "cache_read": 200000, "cache_write_5m": 5000000, "cache_write_1h": 8000000, "output": 20000000},
+    "claude-sonnet-4-20250514": {"input": 3000000, "cache_read": 300000, "cache_write_5m": 3750000, "cache_write_1h": 6000000, "output": 15000000},
+    "claude-sonnet-4-5-20250929": {"input": 3000000, "cache_read": 300000, "cache_write_5m": 3750000, "cache_write_1h": 6000000, "output": 15000000},
+    "claude-sonnet-4-6": {"input": 3000000, "cache_read": 300000, "cache_write_5m": 3750000, "cache_write_1h": 6000000, "output": 15000000},
+    "claude-sonnet-5": {"input": 2000000, "cache_read": 200000, "cache_write_5m": 2500000, "cache_write_1h": 4000000, "output": 10000000},
+    "claude-sonnet-5-5": {"input": 2000000, "cache_read": 100000, "cache_write_5m": 2500000, "cache_write_1h": 4000000, "output": 10000000}
+  }
+}

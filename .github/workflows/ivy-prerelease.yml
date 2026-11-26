@@ -54,6 +54,8 @@ jobs:
         run: cargo test --locked -p panel-control
       - name: Test native terminal core
         run: cargo test --locked -p term-core
+      - name: Test native Claude usage collection and storage
+        run: cargo test --locked -p usage-core
       - name: Prove native Codex daemon attribution regression
         run: python3 scripts/macos-codex-mutations.py
 

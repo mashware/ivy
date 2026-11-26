@@ -540,6 +540,35 @@ mod tests {
     }
 
     #[test]
+    fn usage_modal_keeps_drawer_commands_out_of_its_backdrop() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        crate::viewer::activate(&mut window, true);
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
+        frame(&mut window, &ctx, area, vec![]);
+        let dock = window.sidebar.last_dock.unwrap();
+        let close =
+            crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Close).unwrap();
+
+        window.usage.open_for_test();
+        frame(&mut window, &ctx, area, vec![]);
+        frame(&mut window, &ctx, area, click_at(close));
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Document)
+        );
+
+        frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
+        frame(&mut window, &ctx, area, vec![]);
+        frame(&mut window, &ctx, area, click_at(close));
+        assert_eq!(crate::sidebar::active(&window), None);
+    }
+
+    #[test]
     fn neutral_connection_icon_and_guide_observe_file_publication_even_in_a_background_tab() {
         for tab in [0, 1] {
             let ctx = egui::Context::default();
@@ -2719,6 +2748,7 @@ mod tests {
             "What's new",
             "Preferences",
             "Keyboard shortcuts",
+            "AI usage",
             "Connect agents",
             "Search console",
         ] {

@@ -2065,6 +2065,9 @@ mod tests {
         crate::settings::editor::Editor::resolved(crate::settings::Entry::Measuring, None)
             .publish(&mut window_spans)
             .expect("writing to memory does not fail");
+        crate::usage::View::default()
+            .publish(&mut window_spans)
+            .expect("writing to memory does not fail");
         typed_into
             .publish_spans(&mut window_spans)
             .expect("writing to memory does not fail");

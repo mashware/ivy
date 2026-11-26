@@ -148,6 +148,7 @@ pub fn run() -> eframe::Result {
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
             // machine. It needs the context, which only exists here.
             ligatures::configure(&mut window, &settings, &cc.egui_ctx, what_it_cost);
+            crate::usage::configure_measurement(&mut window, &cc.egui_ctx, measuring);
             Ok(Box::new(window))
         }),
     )
