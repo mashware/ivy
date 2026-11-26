@@ -1,4 +1,214 @@
+#![cfg(test)]
+
 use super::*;
+
+#[cfg(windows)]
+#[test]
+fn fresh_launch_mouse_recipe_submits_literal_selection() {
+    fn draw(
+        ctx: &egui::Context,
+        guide: &mut Guide,
+        size: egui::Vec2,
+        time: &mut f64,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        *time += 1.0 / 60.0;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                time: Some(*time),
+                events,
+                ..Default::default()
+            },
+            |ui| show(guide, ui.ctx(), &crate::theme::Theme::default()),
+        );
+        output.textures_delta.clear();
+        output
+    }
+    fn settle(
+        ctx: &egui::Context,
+        guide: &mut Guide,
+        size: egui::Vec2,
+        time: &mut f64,
+        frames: usize,
+    ) -> egui::FullOutput {
+        for _ in 1..frames {
+            draw(ctx, guide, size, time, vec![]).drop_without_applying_deltas();
+        }
+        draw(ctx, guide, size, time, vec![])
+    }
+    fn visible_rect(output: &egui::FullOutput, label: &str) -> Option<Rect> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                let rect = Rect::from_min_size(text.pos, text.galley.size());
+                shape
+                    .clip_rect
+                    .contains(rect.center())
+                    .then(|| rect.intersect(shape.clip_rect))
+            }
+            _ => None,
+        })
+    }
+    let recipe: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../packaging/windows/installed-proof/launcher-mouse.json"
+    )))
+    .unwrap();
+    let viewport = recipe["viewport"].as_array().unwrap();
+    let size = egui::vec2(
+        viewport[0].as_f64().unwrap() as f32,
+        viewport[1].as_f64().unwrap() as f32,
+    );
+    let ctx = egui::Context::default();
+    crate::fonts::install_bundled(&ctx);
+    let mut guide = Guide {
+        open: true,
+        ..Default::default()
+    };
+    let mut time = 0.0;
+    let mut output = settle(&ctx, &mut guide, size, &mut time, 24);
+    let executable = r"C:\Program Files\OpenCode installation with spaces\opencode.exe";
+    let directory = r"C:\work\project with spaces\long directory to exercise wrapped previews\another directory with spaces\final project";
+    for action in recipe["actions"].as_array().unwrap() {
+        let target = action["target"].as_str().unwrap();
+        let field = target.ends_with("executable") || target == "Working directory";
+        match action["kind"].as_str().unwrap() {
+            "scroll" => {
+                let at = egui::pos2(
+                    action["at"][0].as_f64().unwrap() as f32,
+                    action["at"][1].as_f64().unwrap() as f32,
+                );
+                draw(
+                    &ctx,
+                    &mut guide,
+                    size,
+                    &mut time,
+                    vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Line,
+                            phase: egui::TouchPhase::Move,
+                            delta: egui::vec2(0.0, action["lines"].as_f64().unwrap() as f32),
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+                .drop_without_applying_deltas();
+                output = settle(&ctx, &mut guide, size, &mut time, 24);
+                assert!(
+                    visible_rect(&output, target).is_some(),
+                    "native launcher mouse recipe: scroll must reveal {target}"
+                );
+            }
+            "click" => {
+                let at = egui::pos2(
+                    action["at"][0].as_f64().unwrap() as f32,
+                    action["at"][1].as_f64().unwrap() as f32,
+                );
+                let label = visible_rect(&output, target);
+                assert!(
+                    label.is_some_and(|rect| field || rect.contains(at)),
+                    "native launcher mouse recipe: click must hit visible {target} at {at:?}"
+                );
+                for pressed in [true, false] {
+                    draw(
+                        &ctx,
+                        &mut guide,
+                        size,
+                        &mut time,
+                        vec![
+                            egui::Event::PointerMoved(at),
+                            egui::Event::PointerButton {
+                                pos: at,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    )
+                    .drop_without_applying_deltas();
+                }
+                output = settle(&ctx, &mut guide, size, &mut time, 24);
+                if field {
+                    let focused = ctx
+                        .memory(|memory| memory.focused())
+                        .and_then(|id| ctx.read_response(id));
+                    assert!(
+                        focused.is_some_and(|response| response.rect.contains(at)),
+                        "native launcher mouse recipe: click must focus {target}"
+                    );
+                }
+            }
+            "text" => {
+                assert!(
+                    visible_rect(&output, target).is_some(),
+                    "native launcher mouse recipe: {target} must be visible before typing"
+                );
+                let value = match action["value"].as_str().unwrap() {
+                    "executable" => executable,
+                    "directory" => directory,
+                    value => panic!("native launcher mouse recipe: unknown text value {value}"),
+                };
+                let event = |pressed| egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                };
+                draw(
+                    &ctx,
+                    &mut guide,
+                    size,
+                    &mut time,
+                    vec![
+                        egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                        event(true),
+                        event(false),
+                    ],
+                )
+                .drop_without_applying_deltas();
+                draw(
+                    &ctx,
+                    &mut guide,
+                    size,
+                    &mut time,
+                    vec![
+                        egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                        egui::Event::Text(value.into()),
+                    ],
+                )
+                .drop_without_applying_deltas();
+                output = settle(&ctx, &mut guide, size, &mut time, 18);
+            }
+            kind => panic!("native launcher mouse recipe: unknown action {kind}"),
+        }
+        assert!(
+            guide.open,
+            "native launcher mouse recipe: action closed the guide"
+        );
+    }
+    output.drop_without_applying_deltas();
+    let request = guide
+        .fresh
+        .request
+        .take()
+        .expect("native launcher mouse recipe: controls must submit the literal selection");
+    assert_eq!(
+        request.client,
+        crate::launch::fresh::Client::OpenCode,
+        "native launcher mouse recipe: client selection"
+    );
+    assert_eq!(
+        request.images,
+        [String::new(), String::new(), executable.into()],
+        "native launcher mouse recipe: executable text"
+    );
+    assert_eq!(
+        request.directory, directory,
+        "native launcher mouse recipe: directory text"
+    );
+}
 
 fn frame(ctx: &egui::Context, guide: &mut Guide, events: Vec<egui::Event>) -> egui::FullOutput {
     let mut output = ctx.run_ui(
@@ -344,6 +554,7 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
         (egui::vec2(960.0, 640.0), false),
     ] {
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         ctx.all_styles_mut(|style| {
             style.animation_time = 0.0;
             style.scroll_animation = egui::style::ScrollAnimation::none();

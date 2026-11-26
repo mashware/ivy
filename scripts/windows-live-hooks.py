@@ -13,6 +13,7 @@ EVIDENCE = ROOT / "target" / "windows-live-hooks"
 TARGET = EVIDENCE / "cargo-target"
 APP_TESTS = (
     "chrome::connection::tests::fresh_launch_fields_and_button_are_reachable_in_a_short_modal",
+    "chrome::connection::tests::fresh_launch_mouse_recipe_submits_literal_selection",
     "control::channel::windows_live_hooks::windows_live_hook_real_bridge_and_helper_clear_wait",
     "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane",
     "control::channel::windows_live_hooks::windows_fresh_native_loader_failure_is_painted_without_fallback",

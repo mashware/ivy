@@ -20,6 +20,7 @@ FRESH = "control::channel::windows_live_hooks::windows_fresh_launch_worker_insta
 CAPABILITY = "control::channel::windows_live_hooks::windows_fresh_codex_without_local_capability_is_painted_without_authority"
 ACCOUNTING = "chrome::connection::tests::fresh_console_opening_is_subtracted_once_from_the_frame"
 LAUNCHER = "chrome::connection::tests::fresh_launch_fields_and_button_are_reachable_in_a_short_modal"
+MOUSE = "chrome::connection::tests::fresh_launch_mouse_recipe_submits_literal_selection"
 IMAGE = "foreground::windows::fresh_tests::fresh_root_rejects_wrong_image_foreign_root_and_console_close"
 IDENTITY = "foreground::windows::fresh_tests::fresh_registration_rechecks_captured_root_identity_and_sequence"
 SEQUENCE = "foreground::windows::chain::tests::later_reused_parent_is_unknown_despite_earlier_wall_clock_birth"
@@ -27,6 +28,9 @@ CWD = "tests::windows_exact_cwd_removed_after_validation_fails_instead_of_using_
 
 # label, source, unique before, replacement, package, exact test, assertion witness
 CASES = (
+    ("fresh-launcher-mouse-target", "packaging/windows/installed-proof/launcher-mouse.json",
+     "        303,\n        441\n", "        -100,\n        441\n",
+     "app", MOUSE, "native launcher mouse recipe:"),
     ("fresh-launcher-expanded-by-default", "crates/app/src/chrome/connection/fresh.rs",
      ".default_open(false)", ".default_open(true)",
      "app", LAUNCHER, "native launcher keyboard workflow:"),

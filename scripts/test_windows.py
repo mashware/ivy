@@ -38,6 +38,100 @@ MUTATION_SPEC = importlib.util.spec_from_file_location(
 MUTATIONS = importlib.util.module_from_spec(MUTATION_SPEC)
 MUTATION_SPEC.loader.exec_module(MUTATIONS)
 
+LAUNCHER_SPEC = importlib.util.spec_from_file_location(
+    'windows_installed_launcher', SCRIPTS.parent / 'packaging/windows/live-hooks-gui.py')
+LAUNCHER = importlib.util.module_from_spec(LAUNCHER_SPEC)
+LAUNCHER_SPEC.loader.exec_module(LAUNCHER)
+
+
+class WindowsInstalledLauncherTests(unittest.TestCase):
+    def test_signed_wheel_input_reaches_both_scroll_anchors(self):
+        offset = 0
+
+        def send(count, pointer, _size):
+            nonlocal offset
+            events = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.gui.Input))
+            for index in range(count):
+                mouse = events[index].u.mouse
+                if events[index].type == 0 and mouse.flags & 0x0800:
+                    lines = ctypes.c_int32(mouse.data).value / 120
+                    offset = min(800, max(0, offset - lines * 40))
+            return count
+
+        api = SimpleNamespace(ClientToScreen=lambda *_: 1, SetCursorPos=lambda *_: 1,
+                              SendInput=send)
+        with patch.object(LAUNCHER.gui, 'U', api, create=True), \
+                patch.object(LAUNCHER.time, 'sleep'):
+            LAUNCHER.wheel(1, 480, 400, -100)
+            self.assertEqual(offset, 800, 'negative native wheel input must expose the bottom')
+            LAUNCHER.wheel(1, 480, 400, 100)
+            self.assertEqual(offset, 0, 'positive native wheel input must expose the top')
+
+    def test_text_action_replaces_existing_input_with_literal_utf16(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            value = str(Path(temporary, "client $() 'quoted' 🧪.exe"))
+        field = bytearray('previous value'.encode('utf-16-le'))
+        control = False
+        selected = False
+
+        def send(count, pointer, size):
+            nonlocal control, selected
+            self.assertEqual(size, ctypes.sizeof(LAUNCHER.gui.Input))
+            events = ctypes.cast(pointer, ctypes.POINTER(LAUNCHER.gui.Input))
+            for index in range(count):
+                keyboard = events[index].u.keyboard
+                if keyboard.key == 0x11:
+                    control = keyboard.flags != 2
+                elif keyboard.key == 0x41 and keyboard.flags == 0 and control:
+                    selected = True
+                elif keyboard.flags == 4:
+                    if selected:
+                        field.clear()
+                        selected = False
+                    field.extend(int(keyboard.scan).to_bytes(2, 'little'))
+            return count
+
+        with patch.object(LAUNCHER.gui, 'U', SimpleNamespace(SendInput=send), create=True), \
+                patch.object(LAUNCHER.time, 'sleep'):
+            LAUNCHER.launcher_action(1, {'kind': 'text', 'value': 'executable'},
+                                     {'executable': value})
+        self.assertEqual(field.decode('utf-16-le'), value,
+                         'launcher text must replace the old field without evaluating its contents')
+
+    def witness(self, records, *, require_bridge=True):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary, 'opencode.exe')
+            normalized = []
+            for record in records:
+                entry = {key: value for key, value in record.items() if key != 'client'}
+                if record.get('client'):
+                    entry['ExecutablePath'] = str(executable)
+                normalized.append(entry)
+            result = SimpleNamespace(stdout=json.dumps(normalized))
+            with patch.object(LAUNCHER.subprocess, 'run', return_value=result):
+                return LAUNCHER.process_tree(1, executable, Path(temporary), 'processes',
+                                             require_bridge=require_bridge)
+
+    def test_pre_prompt_process_gate_rejects_missing_and_foreign_clients(self):
+        for records in [[], [
+            {'ProcessId': 2, 'ParentProcessId': 99, 'client': True},
+            {'ProcessId': 99, 'ParentProcessId': 0},
+        ]]:
+            with self.subTest(records=records), self.assertRaisesRegex(
+                    RuntimeError, 'expected one OpenCode descendant of Ivy, found 0'):
+                self.witness(records, require_bridge=False)
+
+    def test_bridge_is_optional_only_for_the_pre_prompt_gate(self):
+        records = [
+            {'ProcessId': 1, 'ParentProcessId': 0},
+            {'ProcessId': 2, 'ParentProcessId': 1, 'client': True},
+        ]
+        self.assertEqual(self.witness([record.copy() for record in records], require_bridge=False), 2)
+        with self.assertRaisesRegex(RuntimeError, 'expected one live MCP bridge'):
+            self.witness([record.copy() for record in records])
+        records.append({'ProcessId': 3, 'ParentProcessId': 2, 'ExecutablePath': 'panel-mcp.exe'})
+        self.assertEqual(self.witness(records), 2)
+
 
 @unittest.skipUnless(shutil.which('rustc'), 'Rust compiler unavailable for real libtest fixture')
 class WindowsLiveHookDriverTests(unittest.TestCase):

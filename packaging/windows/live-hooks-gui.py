@@ -48,12 +48,6 @@ def press(vk):
     key(vk, False)
 
 
-def tabs(count):
-    for _ in range(count):
-        press(0x09)
-        time.sleep(.2)
-
-
 def text_only(value):
     events = []
     raw = value.encode('utf-16-le')
@@ -84,14 +78,45 @@ def click(hwnd, x, y):
     time.sleep(.4)
 
 
+def wheel(hwnd, x, y, lines):
+    point = wintypes.POINT(int(x), int(y))
+    if not gui.U.ClientToScreen(hwnd, ctypes.byref(point)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not gui.U.SetCursorPos(point.x, point.y):
+        raise ctypes.WinError(ctypes.get_last_error())
+    event = gui.Input()
+    event.type = 0
+    event.u.mouse = gui.MouseInput(0, 0, int(lines) * 120, 0x0800, 0, 0)
+    if gui.U.SendInput(1, ctypes.byref(event), ctypes.sizeof(event)) != 1:
+        raise ctypes.WinError(ctypes.get_last_error())
+    time.sleep(.4)
+
+
+def launcher_action(hwnd, action, values):
+    kind = action['kind']
+    if kind == 'click':
+        click(hwnd, *action['at'])
+    elif kind == 'scroll':
+        wheel(hwnd, *action['at'], action['lines'])
+    elif kind == 'text':
+        key(0x11)
+        press(0x41)
+        key(0x11, False)
+        text_only(values[action['value']])
+        time.sleep(.3)
+    else:
+        raise ValueError(f'unknown launcher action: {kind}')
+
+
 def screenshot(hwnd, evidence, name):
     gui.failure_screenshot(hwnd, evidence / (name + '.png'))
 
 
-def process_tree(app_pid, opencode, evidence, name):
+def process_tree(app_pid, opencode, evidence, name, *, require_bridge=True):
     script = 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress'
     raw = subprocess.run(['powershell.exe', '-NoProfile', '-Command', script], check=True,
-                         capture_output=True, text=True, timeout=20).stdout
+                         capture_output=True, text=True, timeout=20,
+                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
     processes = json.loads(raw)
     by_pid = {entry['ProcessId']: entry for entry in processes}
     def descendant(pid, ancestor):
@@ -111,7 +136,7 @@ def process_tree(app_pid, opencode, evidence, name):
     descendants = [entry for entry in processes if descendant(entry['ProcessId'], root)]
     bridges = [entry for entry in descendants if (entry.get('ExecutablePath') or '').lower().endswith('panel-mcp.exe')]
     (evidence / (name + '.json')).write_text(json.dumps({'ivy_pid': app_pid, 'root': roots[0], 'descendants': descendants}, indent=2), encoding='utf-8')
-    if len(bridges) != 1:
+    if require_bridge and len(bridges) != 1:
         raise RuntimeError(f'expected one live MCP bridge under OpenCode, found {len(bridges)}')
     return root
 
@@ -121,6 +146,7 @@ def main():
         raise RuntimeError('requires disposable Windows CI')
     ivy, opencode, evidence = (Path(value).resolve() for value in sys.argv[1:4])
     evidence.mkdir(parents=True, exist_ok=True)
+    recipe = json.loads((HERE / 'installed-proof' / 'launcher-mouse.json').read_text(encoding='utf-8'))
     gui.U.SetProcessDPIAware()
     gui.U.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
     gui.U.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
@@ -193,8 +219,8 @@ def main():
                 raise ctypes.WinError(ctypes.get_last_error())
             width, height = rect.right, rect.bottom
             (evidence / 'window.json').write_text(json.dumps({'pid': app.pid, 'width': width, 'height': height}), encoding='utf-8')
-            if width < 900 or height < 600:
-                raise RuntimeError('unexpected window geometry')
+            if [width, height] != recipe['viewport']:
+                raise RuntimeError('unexpected window geometry for the native launcher recipe')
             stage = 'original shell'
             marker = root / 'original-ready'
             gui.type_command(f'echo {nonce} > "{marker}"')
@@ -203,28 +229,17 @@ def main():
             stage = 'connect dialog'
             click(hwnd, width - 159, 20)
             screenshot(hwnd, evidence, '02-connect')
-            stage = 'expand fresh launcher'
-            tabs(4)
-            press(0x20)
-            time.sleep(.4)
-            screenshot(hwnd, evidence, '02-launcher')
-            stage = 'select OpenCode and enter paths'
-            tabs(3)
-            press(0x20)
-            time.sleep(.3)
-            tabs(3)
-            text_only(str(opencode))
-            time.sleep(.3)
-            tabs(1)
-            key(0x11); press(0x41); key(0x11, False)
-            text_only(str(work))
-            time.sleep(.3)
-            tabs(1)
-            screenshot(hwnd, evidence, '03-preview')
+            for action in recipe['actions']:
+                stage = f"launcher: {action['target']}"
+                launcher_action(hwnd, action, {'executable': str(opencode), 'directory': str(work)})
+                if capture := action.get('capture'):
+                    screenshot(hwnd, evidence, capture)
             stage = 'open fresh console'
-            press(13)
             time.sleep(12)
+            launched_pid = process_tree(app.pid, opencode, evidence, 'processes-launched', require_bridge=False)
             screenshot(hwnd, evidence, '04-client')
+            gui.U.SetForegroundWindow(hwnd)
+            wait_for(lambda: gui.U.GetForegroundWindow() == hwnd, 10, 'proof input focus', app)
             stage = 'proof prompt'
             text_only(responder.PROMPT + nonce)
             press(13)
@@ -233,7 +248,7 @@ def main():
                 raise RuntimeError('MCP publication did not meet strict success predicate')
             shutil.copyfile(proof / 'gate-ready.json', evidence / 'gate-ready.json')
             root_pid = process_tree(app.pid, opencode, evidence, 'processes-before')
-            if json.loads((proof / 'gate-ready.json').read_text(encoding='utf-8')).get('pid') != root_pid:
+            if root_pid != launched_pid or json.loads((proof / 'gate-ready.json').read_text(encoding='utf-8')).get('pid') != root_pid:
                 raise RuntimeError('hook did not run in the selected OpenCode root')
             screenshot(hwnd, evidence, '05-active-wait')
             # The initial tab remains at the left of the newly created tab.

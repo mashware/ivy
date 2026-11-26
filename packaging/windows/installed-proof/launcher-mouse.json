@@ -1,0 +1,96 @@
+{
+  "viewport": [
+    960,
+    640
+  ],
+  "actions": [
+    {
+      "kind": "scroll",
+      "lines": -100,
+      "at": [
+        480,
+        400
+      ],
+      "target": "Open a new agent console"
+    },
+    {
+      "kind": "click",
+      "at": [
+        303,
+        441
+      ],
+      "target": "Open a new agent console"
+    },
+    {
+      "kind": "scroll",
+      "lines": -3,
+      "at": [
+        480,
+        400
+      ],
+      "target": "OpenCode"
+    },
+    {
+      "kind": "click",
+      "at": [
+        461,
+        413
+      ],
+      "target": "OpenCode"
+    },
+    {
+      "kind": "scroll",
+      "lines": -100,
+      "at": [
+        480,
+        400
+      ],
+      "target": "OpenCode executable",
+      "capture": "02-launcher"
+    },
+    {
+      "kind": "click",
+      "at": [
+        480,
+        259
+      ],
+      "target": "OpenCode executable"
+    },
+    {
+      "kind": "text",
+      "value": "executable",
+      "target": "OpenCode executable"
+    },
+    {
+      "kind": "click",
+      "at": [
+        480,
+        319
+      ],
+      "target": "Working directory"
+    },
+    {
+      "kind": "text",
+      "value": "directory",
+      "target": "Working directory"
+    },
+    {
+      "kind": "scroll",
+      "lines": -100,
+      "at": [
+        480,
+        400
+      ],
+      "target": "Open agent console",
+      "capture": "03-preview"
+    },
+    {
+      "kind": "click",
+      "at": [
+        299,
+        441
+      ],
+      "target": "Open agent console"
+    }
+  ]
+}
