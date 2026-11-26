@@ -16,6 +16,7 @@ APP_TESTS = (
     "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane",
     "control::channel::windows_live_hooks::windows_fresh_native_loader_failure_is_painted_without_fallback",
     "control::channel::windows_live_hooks::windows_fresh_codex_without_local_capability_is_painted_without_authority",
+    "chrome::connection::tests::fresh_console_opening_is_subtracted_once_from_the_frame",
 )
 TERM_TESTS = (
     "tests::windows_exact_cwd_reaches_the_child",

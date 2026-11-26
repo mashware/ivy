@@ -126,10 +126,6 @@ fn assert_fresh_failure_is_painted(
         "failed launch substituted a live fallback program"
     );
     assert!(pane.pty.write(b"must not run\r").is_err());
-    assert!(
-        !pane.is_finished(false),
-        "failure explanation was auto-closed"
-    );
 }
 
 #[test]

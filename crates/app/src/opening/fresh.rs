@@ -5,12 +5,10 @@ pub(crate) fn create(
     ctx: &egui::Context,
     selection: crate::launch::fresh::Selection,
 ) -> Result<(), String> {
-    let before = Instant::now();
     let reads = window.control.read_activity();
     let panel = match PanelDir::create() {
         Ok(panel) => Some(panel),
         Err(error) => {
-            window.timed_separately += before.elapsed();
             return Err(format!(
                 "The agent console's panel could not be created: {error}"
             ));
@@ -44,13 +42,11 @@ pub(crate) fn create(
     });
     window.next_name += 1;
     window.next_pane_name += 1;
-    let result = match opened {
+    match opened {
         Ok(tab) => {
             window.bring_to_front(Ok(tab), ctx);
             Ok(())
         }
         Err(error) => Err(format!("The agent console could not be opened: {error}")),
-    };
-    window.timed_separately += before.elapsed();
-    result
+    }
 }

@@ -275,3 +275,70 @@ fn the_last_step_asks_the_person_to_check_the_client_themselves() {
     ));
     assert!(prompt.contains("ask me to open this client's MCP server list myself"));
 }
+
+#[cfg(windows)]
+#[test]
+fn fresh_console_opening_is_subtracted_once_from_the_frame() {
+    use std::time::Duration;
+
+    let ctx = egui::Context::default();
+    let missing = std::env::temp_dir().join(format!(
+        "ivy-accounting-no-shell-{}.exe",
+        std::process::id()
+    ));
+    assert!(!missing.exists());
+    crate::launch::TEST_SPAWN_PROGRAM
+        .with(|program| *program.borrow_mut() = Some(missing.to_string_lossy().into_owned()));
+    let opened = Window::opening(
+        &ctx,
+        crate::OpenWith::Factory {
+            tabs: 1,
+            layout: crate::OpeningLayout {
+                columns: 1,
+                rows: 1,
+            },
+        },
+        "unused-factory-program",
+        None,
+        crate::session::Persistence::at(None),
+    );
+    crate::launch::TEST_SPAWN_PROGRAM.with(|program| program.borrow_mut().take());
+    let mut window = opened.unwrap();
+    window.chrome.enable();
+    window.chrome.guide.open = true;
+    window.chrome.guide.fresh.request = Some(Default::default());
+    window.timed_separately = Duration::ZERO;
+    window.mirror_this_frame = Duration::ZERO;
+    window.chrome.frame = Duration::ZERO;
+    let _ = window.chrome.take_cost();
+    let frame = eframe::Frame::_new_kittest();
+    ctx.run_ui(Default::default(), |ui| {
+        begin_pass(&mut window, ui, &frame);
+    })
+    .drop_without_applying_deltas();
+    assert_eq!(
+        window.tabs.len(),
+        2,
+        "the queued fresh console was not opened"
+    );
+    let chrome_cost = window.chrome.frame;
+    assert!(!chrome_cost.is_zero());
+    window.active_mut().panes_mut()[0]
+        .timings
+        .record_round(crate::measure::Spans::of_a_round(
+            Some(Instant::now()),
+            Instant::now(),
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+        ));
+    let mirror = window.mirror_this_frame;
+    let framework = Duration::from_millis(7);
+    // Deriving this total from timed_separately would incorporate the duplicate being tested.
+    window.close_the_frame(chrome_cost + mirror + framework);
+    assert_eq!(
+        window.rest_of_frame.mean(),
+        framework,
+        "fresh console opening was subtracted twice from the frame"
+    );
+}

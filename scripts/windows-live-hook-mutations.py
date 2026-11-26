@@ -18,6 +18,7 @@ TARGET = ROOT / "target" / "windows-live-hooks" / "cargo-target"
 LIVE = "control::channel::windows_live_hooks::windows_live_hook_real_bridge_and_helper_clear_wait"
 FRESH = "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane"
 CAPABILITY = "control::channel::windows_live_hooks::windows_fresh_codex_without_local_capability_is_painted_without_authority"
+ACCOUNTING = "chrome::connection::tests::fresh_console_opening_is_subtracted_once_from_the_frame"
 IMAGE = "foreground::windows::fresh_tests::fresh_root_rejects_wrong_image_foreign_root_and_console_close"
 IDENTITY = "foreground::windows::fresh_tests::fresh_registration_rechecks_captured_root_identity_and_sequence"
 SEQUENCE = "foreground::windows::chain::tests::later_reused_parent_is_unknown_despite_earlier_wall_clock_birth"
@@ -25,6 +26,10 @@ CWD = "tests::windows_exact_cwd_removed_after_validation_fails_instead_of_using_
 
 # label, source, unique before, replacement, package, exact test, assertion witness
 CASES = (
+    ("fresh-opening-double-accounting", "crates/app/src/opening/fresh.rs",
+     "window.bring_to_front(Ok(tab), ctx);",
+     "let before = Instant::now(); window.bring_to_front(Ok(tab), ctx); window.timed_separately += before.elapsed();",
+     "app", ACCOUNTING, "fresh console opening was subtracted twice from the frame"),
     ("codex-local-capability", "crates/app/src/launch/fresh.rs",
      "if selection.client == Client::Codex\n",
      "if false && selection.client == Client::Codex\n",
