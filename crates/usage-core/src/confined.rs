@@ -200,7 +200,9 @@ mod native {
 
     #[cfg(target_os = "macos")]
     fn open_source(root: BorrowedFd<'_>, path: &Path) -> io::Result<File> {
-        open_at(root, path.as_os_str(), FILE_FLAGS | libc::O_NOFOLLOW_ANY)
+        // Darwin rejects O_NOFOLLOW and O_NOFOLLOW_ANY together.
+        let flags = (FILE_FLAGS & !libc::O_NOFOLLOW) | libc::O_NOFOLLOW_ANY;
+        open_at(root, path.as_os_str(), flags)
     }
 
     pub(crate) fn same_file(left: &File, right: &File) -> io::Result<bool> {
