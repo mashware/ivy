@@ -76,6 +76,11 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/launch/fallback.rs",
+        include_str!("../src/launch/fallback.rs"),
+        1,
+    ),
+    (
         "src/launch/fresh.rs",
         include_str!("../src/launch/fresh.rs"),
         0,

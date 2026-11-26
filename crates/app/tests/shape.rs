@@ -48,6 +48,10 @@ use std::path::Path;
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     (
+        "src/launch/fallback.rs",
+        include_str!("../src/launch/fallback.rs"),
+    ),
+    (
         "src/launch/fresh.rs",
         include_str!("../src/launch/fresh.rs"),
     ),

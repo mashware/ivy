@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 #[cfg(any(target_os = "linux", windows, test))]
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+mod fallback;
 #[cfg(windows)]
 pub(crate) mod fresh;
 use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
@@ -201,7 +202,7 @@ impl Process {
                 .collect();
             let directory = request.directory.map(Path::to_owned);
             let size = request.size;
-            let fallback = request.fallback;
+            let allow_fallback = request.fallback;
             let lease = quota.as_ref().map(crate::usage::QuotaStartup::lease);
             let (mut process, output) = start_worker(wake, reads, move || {
                 if let Some(startup) = &quota
@@ -221,7 +222,7 @@ impl Process {
                     .and_then(|(_, value)| value.as_ref())
                     .map(|v| v.to_string_lossy())
                     .unwrap_or_else(|| "console".into());
-                let spawn = |program, args: &[&str]| match scope_launcher.as_deref() {
+                let spawn = |program: &str, args: &[&str]| match scope_launcher.as_deref() {
                     Some(launcher) => Pty::spawn_with_launcher_in(
                         launcher,
                         &identity,
@@ -235,18 +236,7 @@ impl Process {
                         Pty::spawn_with_env_in(program, args, size, &borrowed, directory.as_deref())
                     }
                 };
-                let result = match spawn(&program, &args) {
-                    Err(error)
-                        if fallback && program != crate::shell_integration::fallback_shell() =>
-                    {
-                        let fallback = crate::shell_integration::fallback_shell();
-                        crate::pty_output::say(&format!(
-                            "'{program}' could not be launched ({error}); opening {fallback}"
-                        ));
-                        spawn(fallback, &[])
-                    }
-                    result => result,
-                };
+                let result = fallback::spawn(&program, &args, allow_fallback, spawn);
                 if let Some(startup) = quota {
                     match &result {
                         Ok((pty, _)) => startup.bind(pty),
@@ -273,20 +263,8 @@ impl Process {
                     })
                 })
         };
-        let (pty, output) = match spawn(request.program, request.args) {
-            Err(error)
-                if request.fallback
-                    && request.program != crate::shell_integration::fallback_shell() =>
-            {
-                let fallback = crate::shell_integration::fallback_shell();
-                crate::pty_output::say(&format!(
-                    "'{}' could not be launched ({error}); opening {fallback}",
-                    request.program,
-                ));
-                spawn(fallback, &[])?
-            }
-            result => result?,
-        };
+        let (pty, output) =
+            fallback::spawn(request.program, request.args, request.fallback, spawn)?;
         Ok((pty.into(), output))
     }
 

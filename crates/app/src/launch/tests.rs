@@ -36,6 +36,64 @@ fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
 }
 
 crate::windows_unix_omission!(
+    ordinary_fallback_discards_failed_arguments_and_uses_requested_directory,
+    "unix-only: executes a POSIX shell command through the ordinary fallback"
+);
+#[cfg(unix)]
+#[test]
+fn ordinary_fallback_discards_failed_arguments_and_uses_requested_directory() {
+    let root = panel_contract::PanelDir::create().unwrap();
+    let directory = root.path().join("requested-cwd");
+    std::fs::create_dir(&directory).unwrap();
+    let missing = root.path().join("missing-program");
+    assert!(missing.is_absolute());
+    assert!(!missing.exists());
+    let env = [
+        ("ENV", None),
+        ("BASH_ENV", None),
+        ("HOME", Some(directory.as_os_str())),
+        ("HISTFILE", Some(OsStr::new("/dev/null"))),
+    ];
+    let start = |fallback| {
+        Process::start(
+            std::sync::Arc::new(|| {}),
+            Default::default(),
+            Request {
+                program: missing.to_str().unwrap(),
+                args: &["--not-a-shell-option", "-c", "exit 91"],
+                size: Size::default(),
+                env: &env,
+                directory: Some(&directory),
+                fallback,
+            },
+        )
+    };
+    assert!(
+        start(false).is_err(),
+        "a missing program must report an error when fallback is disabled"
+    );
+    let (mut process, _output) = start(true).expect("ordinary fallback must return a usable shell");
+    process
+        .write(b"printf 'ordinary fallback child\\n' > fallback-marker\nexit\n")
+        .unwrap();
+    let marker = directory.join("fallback-marker");
+    let expected = "ordinary fallback child\n";
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while std::fs::read_to_string(&marker).ok().as_deref() != Some(expected)
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        std::fs::read_to_string(&marker).ok().as_deref(),
+        Some(expected),
+        "ordinary fallback must execute the literal command in the requested directory"
+    );
+    drop(process);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+crate::windows_unix_omission!(
     native_capability_reply_keeps_its_place_in_buffered_startup,
     "unix-only: runs /bin/sh in raw PTY mode to capture startup replies"
 );

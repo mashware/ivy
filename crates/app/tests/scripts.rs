@@ -75,6 +75,10 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/launch/fallback.rs",
+        include_str!("../src/launch/fallback.rs"),
+    ),
+    (
         "app/src/launch/fresh.rs",
         include_str!("../src/launch/fresh.rs"),
     ),

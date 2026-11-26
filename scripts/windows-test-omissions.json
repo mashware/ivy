@@ -373,6 +373,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "launch::tests::ordinary_fallback_discards_failed_arguments_and_uses_requested_directory",
+    "reason": "unix-only: executes a POSIX shell command through the ordinary fallback"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "launch::tests::pending_input_and_latest_geometry_reach_the_real_program_in_order",
     "reason": "unix-only: runs /bin/sh and stty to verify queued input and PTY geometry"
   },

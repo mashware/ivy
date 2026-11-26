@@ -60,6 +60,7 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "
 /// A crate whose every file ends up here is **not** thereby ready for [`FINISHED_CRATES`]: that list
 /// is the stronger claim, and this one cannot add up to it.
 const GLOSSARY_CLEAN_FILES: &[&str] = &[
+    "app/src/launch/fallback.rs",
     "app/src/launch/fresh.rs",
     "app/src/opening/fresh.rs",
     "app/src/chrome/connection/fresh.rs",
@@ -416,6 +417,7 @@ const GLOSSARY_PENDING_FILES: &[&str] = &[
 /// What *can* be enforced here is a **file** name, and [`no_retired_file_name_is_still_cited`] reads
 /// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
+    ("app/src/launch/fallback.rs", "app"),
     ("app/src/launch/fresh.rs", "app"),
     ("app/src/opening/fresh.rs", "app"),
     ("app/src/chrome/connection/fresh.rs", "app"),
