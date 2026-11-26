@@ -76,9 +76,28 @@ jobs:
       - name: Prove native live hook through real helpers
         shell: pwsh
         run: python scripts/windows-live-hooks.py
+      - name: Prove native live hook regressions with mutations
+        shell: pwsh
+        run: python scripts/windows-live-hook-mutations.py
+      - name: Keep native live-hook evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-live-hook-evidence
+          path: |
+            target/windows-live-hooks/*.log
+            target/windows-live-hook-mutations/
+          if-no-files-found: warn
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24.14.1'
+      - name: Test installed-client proof fixtures
+        shell: pwsh
+        run: |
+          python -m unittest discover -s packaging/windows/installed-proof -p test_responder.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test packaging/windows/installed-proof/hook.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the actual OpenCode adapter and helper lifecycle
         shell: pwsh
         run: |
@@ -588,13 +607,23 @@ jobs:
             throw "Expected one 64-bit opengl32.dll in the Mesa archive, found $($Found.Count)"
           }
           "MESA_X64=$($Found[0].DirectoryName)" >> $env:GITHUB_ENV
+      - name: Fetch pinned official OpenCode for installed-client proof
+        shell: pwsh
+        run: |
+          $Archive = Join-Path $env:RUNNER_TEMP 'opencode-1.18.31.zip'
+          Invoke-WebRequest 'https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-windows-x64.zip' -OutFile $Archive
+          if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne '0ECD7FFC7F26390CE7799E7BCD409E4F11C410144308A6A5B0FCDCE63D871006') { throw 'OpenCode archive hash mismatch' }
+          Expand-Archive $Archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'opencode-proof')
+          $Found = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'opencode-proof') -Recurse -Filter opencode.exe)
+          if ($Found.Count -ne 1) { throw 'Expected exactly one native OpenCode executable' }
+          "OPENCODE_PROOF_EXE=$($Found[0].FullName)" >> $env:GITHUB_ENV
       - name: Check installed payload, launch, replacement and removal
         shell: pwsh
         env:
           IVY_DISPOSABLE_RUNNER: 'yes'
         run: |
           $Installer = (Get-ChildItem dist/*-setup.exe).FullName
-          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -ConptyDir target/conpty -SoftwareOpenGL $env:MESA_X64
+          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -ConptyDir target/conpty -SoftwareOpenGL $env:MESA_X64 -OpenCode $env:OPENCODE_PROOF_EXE
       - name: Upload Windows launch evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

@@ -1,32 +1,82 @@
 #!/usr/bin/env python3
-"""Build the real helpers and require the named native hook witness to execute."""
+"""Run named native Windows hook and exact-directory witnesses."""
+import os
+from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
-NAMES = [
+ROOT = Path(__file__).resolve().parent.parent
+EVIDENCE = ROOT / "target" / "windows-live-hooks"
+TARGET = EVIDENCE / "cargo-target"
+APP_TESTS = (
     "control::channel::windows_live_hooks::windows_live_hook_real_bridge_and_helper_clear_wait",
     "control::channel::windows_live_hooks::windows_fresh_launch_worker_installs_hook_authority_in_its_actual_pane",
-]
+)
+TERM_TESTS = (
+    "tests::windows_exact_cwd_reaches_the_child",
+    "tests::windows_exact_cwd_removed_after_validation_fails_instead_of_using_home",
+)
+VENDOR_TESTS = (
+    "cmdbuilder::tests::required_cwd_is_exact_and_legacy_methods_reset_it",
+    "cmdbuilder::tests::legacy_serialized_builder_defaults_to_non_required_cwd",
+)
 
 
-def run(args):
-    result = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    print(result.stdout, end="", flush=True)
-    if result.returncode:
-        raise SystemExit(result.returncode)
-    return result.stdout
+def execute(label, args, *, env=None, timeout=900):
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(args, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, timeout=timeout, check=False)
+    output = result.stdout.decode("utf-8", errors="replace")
+    (EVIDENCE / f"{label}.log").write_text(output, encoding="utf-8")
+    print(output, end="", flush=True)
+    return result.returncode, output
+
+
+def require_pass(name, code, output):
+    escaped = re.escape(name)
+    if (code != 0 or not re.search(r"(?m)^running 1 test$", output)
+            or not re.search(rf"(?m)^test {escaped} \.\.\. ok$", output)
+            or not re.search(r"(?m)^test result: ok\. 1 passed; 0 failed;", output)):
+        raise SystemExit(f"named witness did not execute and pass exactly once: {name}")
+
+
+def named(label, package, name, env):
+    command = ["cargo", "test", "--locked", "-p", package, "--lib", "--", name,
+               "--exact", "--nocapture", "--test-threads=1"]
+    require_pass(name, *execute(label, command, env=env))
 
 
 def main():
     if sys.platform != "win32":
-        raise SystemExit("native Windows is required for the live hook witness")
-    run(["cargo", "build", "--locked", "-p", "panel-control", "--bins"])
-    for name in NAMES:
-        output = run(["cargo", "test", "--locked", "-p", "app", "--lib", "--", name,
-                      "--exact", "--nocapture", "--test-threads=1"])
-        if f"test {name} ... ok" not in output:
-            raise SystemExit(f"named native witness did not run and pass: {name}")
-    print("PASS native live hook witness")
+        raise SystemExit("native Windows is required for the live hook witnesses")
+    env = os.environ.copy()
+    env["CARGO_TARGET_DIR"] = str(TARGET)
+    code, _ = execute("build-helpers", ["cargo", "build", "--locked", "-p",
+                                        "panel-control", "--bins"], env=env)
+    if code:
+        raise SystemExit("real helper build failed")
+    for index, name in enumerate(APP_TESTS, 1):
+        named(f"app-{index}", "app", name, env)
+    for index, name in enumerate(TERM_TESTS, 1):
+        named(f"term-{index}", "term-core", name, env)
+
+    # Cargo may update this copy's lock for its serde_json dev-dependency only.
+    # Never write the checked-in vendor lock or vendor/target.
+    with tempfile.TemporaryDirectory(prefix="ivy-portable-pty-tests-") as temp:
+        copy = Path(temp) / "portable-pty"
+        shutil.copytree(ROOT / "vendor" / "portable-pty", copy,
+                        ignore=shutil.ignore_patterns("target", ".git"))
+        vendor_env = env.copy()
+        vendor_env["CARGO_TARGET_DIR"] = str(EVIDENCE / "vendor-target")
+        for index, name in enumerate(VENDOR_TESTS, 1):
+            command = ["cargo", "test", "--manifest-path", str(copy / "Cargo.toml"),
+                       "--features", "serde_support", "--lib", "--", name, "--exact",
+                       "--nocapture", "--test-threads=1"]
+            require_pass(name, *execute(f"vendor-{index}", command, env=vendor_env))
+    print("PASS all 6 named native live hook and cwd witnesses", flush=True)
 
 
 if __name__ == "__main__":

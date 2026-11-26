@@ -4,7 +4,8 @@ param([Parameter(Mandatory=$true)][string]$Installer,
       # Hosted runners have no GPU and Windows' own OpenGL is 1.1, below what the painter needs, so
       # the launch trials put a software OpenGL beside the installed executable and take it away
       # before the replacement and uninstall checks.
-      [string]$SoftwareOpenGL = '')
+      [string]$SoftwareOpenGL = '',
+      [string]$OpenCode = '')
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:IVY_DISPOSABLE_RUNNER -ne 'yes') {
     throw 'Installation checks require a disposable GitHub Windows runner.'
@@ -103,6 +104,16 @@ if ($Info.ProductName -ne 'Ivy' -or $Info.FileDescription -ne 'Ivy' -or
 }
 python (Join-Path $PSScriptRoot 'gui-check.py') $Installed
 if ($LASTEXITCODE -ne 0) { throw 'Installed GUI witness failed' }
+if ($OpenCode) {
+    $OpenCode = (Resolve-Path $OpenCode).Path
+    $ProofEvidence = Join-Path $Evidence 'installed-opencode'
+    New-Item -ItemType Directory $ProofEvidence -Force | Out-Null
+    @{ executable = $OpenCode; sha256 = (Get-FileHash $OpenCode -Algorithm SHA256).Hash;
+       archive_sha256 = '0ecd7ffc7f26390ce7799e7bcd409e4f11c410144308a6a5b0fcdce63d871006' } |
+       ConvertTo-Json | Set-Content (Join-Path $ProofEvidence 'client.json')
+    python (Join-Path $PSScriptRoot 'live-hooks-gui.py') $Installed $OpenCode $ProofEvidence
+    if ($LASTEXITCODE -ne 0) { throw 'Installed OpenCode desktop proof failed' }
+}
 
 # A separate trial keeps the established startup deadline unchanged. Each publication has an ack;
 # screenshots are sampled after acknowledgements and require review of the expected panel captions.
