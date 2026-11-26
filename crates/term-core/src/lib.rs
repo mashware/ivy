@@ -1523,13 +1523,11 @@ impl Drop for Pty {
                 }
             }
         }
-        // **The reader is waited for with a deadline, and abandoned if it does not come.** Killing
-        // the child closes *the child's* end of the pseudoterminal and nothing else: anything the
-        // program launched that outlived it —a `sleep &`, a development server— inherited those same
-        // descriptors, so while it lives there is no end of file, and this thread is parked inside
-        // `read` where the stop flag above cannot reach it. It used to be joined without a deadline,
-        // and this destructor runs **inside the interface pass**, so the whole window stayed frozen
-        // with no repaint and no keyboard, for as long as that program lived.
+        // **D32 bounds a read the operating system has not ended.** On Linux, a survivor holding
+        // the slave can keep `read` parked after the direct child dies, beyond the stop flag's reach.
+        // An unbounded join froze the interface for that survivor's lifetime. Darwin can instead
+        // revoke the controlling terminal when its session leader exits; the deadline must protect
+        // a blocked reader without requiring either platform's terminal lifecycle.
         //
         // **Signalling the process group would not be enough**, which is worth writing down because
         // it is the obvious idea and because the weaker claim —that it would do nothing— is false. A
@@ -2391,6 +2389,124 @@ mod tests {
         );
     }
 
+    const FIXTURE_MODE: &str = "IVY_TERM_CORE_TEST_FIXTURE";
+    #[cfg(unix)]
+    const FIXTURE_SAVE_PATH: &str = "IVY_TERM_CORE_TEST_SAVE_PATH";
+    const FIXTURE_ARGS: [&str; 4] = [
+        "--exact",
+        "tests::pty_subprocess_fixture",
+        "--nocapture",
+        "--test-threads=1",
+    ];
+
+    fn spawn_fixture(mode: &str, env: &[(&str, Option<&OsStr>)]) -> (Pty, Receiver<Vec<u8>>) {
+        let executable = std::env::current_exe().expect("locate the test executable");
+        let mut environment = env.to_vec();
+        environment.push((FIXTURE_MODE, Some(OsStr::new(mode))));
+        Pty::spawn_with_env(
+            executable
+                .to_str()
+                .expect("test executable path is Unicode"),
+            &FIXTURE_ARGS,
+            Size::default(),
+            &environment,
+        )
+        .expect("launch the test fixture")
+    }
+
+    // Run as an ordinary no-op in the suite, or as a child selected by FIXTURE_ARGS. Using the test
+    // executable avoids a shell initializing TERM and avoids depending on the setsid utility.
+    #[test]
+    fn pty_subprocess_fixture() {
+        let Ok(mode) = std::env::var(FIXTURE_MODE) else {
+            return;
+        };
+        match mode.as_str() {
+            "environment" => match std::env::var_os("TERM") {
+                None => println!("removed"),
+                Some(value) => println!("TERM={value:?}"),
+            },
+            #[cfg(unix)]
+            "save-on-hangup" => {
+                static HUNG_UP: AtomicBool = AtomicBool::new(false);
+                extern "C" fn notice_hangup(_: libc::c_int) {
+                    HUNG_UP.store(true, Ordering::Relaxed);
+                }
+                let path = std::env::var_os(FIXTURE_SAVE_PATH).expect("the save destination");
+                let mut saved = std::fs::File::create(path).expect("open the save destination");
+                // A process-wide handler also covers libtest's other thread. Unblocking this
+                // thread avoids depending on whatever signal mask the harness inherited.
+                unsafe {
+                    let mut action: libc::sigaction = std::mem::zeroed();
+                    action.sa_sigaction = notice_hangup as *const () as usize;
+                    action.sa_flags = libc::SA_RESTART;
+                    assert_eq!(libc::sigemptyset(&mut action.sa_mask), 0);
+                    assert_eq!(
+                        libc::sigaction(libc::SIGHUP, &action, std::ptr::null_mut()),
+                        0
+                    );
+                    let mut mask: libc::sigset_t = std::mem::zeroed();
+                    assert_eq!(libc::sigemptyset(&mut mask), 0);
+                    assert_eq!(libc::sigaddset(&mut mask, libc::SIGHUP), 0);
+                    assert_eq!(
+                        libc::pthread_sigmask(libc::SIG_UNBLOCK, &mask, std::ptr::null_mut()),
+                        0
+                    );
+                }
+                println!("saving");
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !HUNG_UP.load(Ordering::Relaxed) {
+                    assert!(Instant::now() < deadline, "the hang-up never arrived");
+                    thread::sleep(Duration::from_millis(1));
+                }
+                saved
+                    .write_all(b"done")
+                    .expect("finish saving after the hang-up");
+            }
+            #[cfg(unix)]
+            "survivor-parent" => {
+                use std::os::unix::process::CommandExt;
+                // Echo would wake the reader on the writer destructor's final newline and hide
+                // the abandonment path. Configure the inherited slave before launching its holder.
+                let mut attributes = std::mem::MaybeUninit::<libc::termios>::uninit();
+                unsafe {
+                    assert_eq!(
+                        libc::tcgetattr(libc::STDIN_FILENO, attributes.as_mut_ptr()),
+                        0
+                    );
+                    let mut attributes = attributes.assume_init();
+                    attributes.c_lflag &= !(libc::ECHO | libc::ECHONL);
+                    assert_eq!(
+                        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &attributes),
+                        0
+                    );
+                }
+                let mut holder = std::process::Command::new(std::env::current_exe().unwrap());
+                holder
+                    .args(FIXTURE_ARGS)
+                    .env(FIXTURE_MODE, "survivor-holder");
+                // After fork only the async-signal-safe session operation runs before exec.
+                unsafe {
+                    holder.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+                let mut holder = holder.spawn().expect("launch detached slave holder");
+                holder.wait().expect("reap detached slave holder");
+            }
+            #[cfg(unix)]
+            "survivor-holder" => {
+                assert_eq!(unsafe { libc::getsid(0) }, unsafe { libc::getpid() });
+                println!("holder-pid={} held", std::process::id());
+                thread::sleep(Duration::from_secs(5));
+            }
+            other => panic!("unknown PTY fixture mode: {other}"),
+        }
+    }
+
     /// **Removing is not not-setting**, and this is the difference that upholds that a console without a
     /// directory does not keep the identity inherited from the application that launched it.
     ///
@@ -2399,13 +2515,7 @@ mod tests {
     /// whoever runs it to have anything in particular.
     #[test]
     fn with_none_by_value_the_variable_is_removed_even_though_the_crate_sets_it() {
-        let (program, args) = shell_invocation(
-            "printf %s \"${TERM-removed}\"",
-            "if ($null -eq $env:TERM) { Write-Output ('re' + 'moved') } else { Write-Output $env:TERM }",
-        );
-        let (mut pty, channel) =
-            Pty::spawn_with_env(program, &args, Size::default(), &[("TERM", None)])
-                .expect("launch sh");
+        let (mut pty, channel) = spawn_fixture("environment", &[("TERM", None)]);
 
         let output = output_through(&mut pty, &channel, "removed");
 
@@ -3380,8 +3490,8 @@ mod tests {
     /// `read` on a descriptor cloned from the master, and the `stop` flag the destructor raises is
     /// only ever consulted **after** a `read` returns — so it cannot reach a thread parked inside
     /// one. Killing the child closes *the child's* end of the pseudoterminal and nothing else:
-    /// anything the program launched that outlives it inherited those same descriptors, so while
-    /// that survivor lives there is no end of file, the `read` never returns and neither did the
+    /// anything the program launched that outlives it inherited those same descriptors. On Linux,
+    /// while that survivor lives there is no end of file, the `read` never returns and neither did the
     /// `join`. Measured: a `Drop` that had still not returned after eight seconds. And this
     /// destructor runs inside the interface pass, so the whole window stayed frozen — no repaint, no
     /// keyboard — for as long as that program lived.
@@ -3389,14 +3499,11 @@ mod tests {
     /// **Two conditions at once are what make it reproduce, and either one missing hides it
     /// completely.**
     ///
-    /// The first is the survivor, which is why the shell here launches one that **announces itself**
-    /// — see [`HELD`]. It holds the slave end open, and by making a session of its own it is exactly
-    /// what a signal to the child, or to the child's group, does not reach. **The brace group around
-    /// it is load-bearing.** Written as `stty -echo && … & exec sleep 5`, the `&` backgrounds the
-    /// *whole* `&&` list: `stty` would run in a subshell while the main shell was already `exec`ing,
-    /// the echo would never go off, and this test would quietly exercise the easy case while claiming
-    /// the hard one. That mistake was made and measured while the example beside this crate was
-    /// being written.
+    /// The first is the survivor: a second instance of the test executable inherits the slave,
+    /// creates its own session with `setsid(2)`, and announces itself — see [`HELD`]. The parent
+    /// configures the slave before spawning the holder, so a marker from that holder proves both
+    /// setup operations succeeded. The operating-system call avoids requiring `setsid(1)`, which
+    /// macOS does not supply. A signal to the immediate child or its group cannot reach the holder.
     ///
     /// The second is the echo being off. On drop, `portable-pty`'s own master writer puts a `\n` and
     /// the terminal's EOF character into the pseudoterminal; while the line discipline echoes, that
@@ -3405,10 +3512,9 @@ mod tests {
     /// back — which is the state a real console's program is in, because turning the echo off is the
     /// first thing `vim`, `htop` or a TUI agent does.
     ///
-    /// **The `stty` sits before the survivor in the same `&&` chain, so the marker proves the mode
-    /// changed too**: it cannot arrive unless `stty` exited 0. That is not decoration — a test over a
-    /// terminal that never set the mode it needs is satisfied by the kernel instead of by its
-    /// subject, and would pass in hundredths of a second over a live bug.
+    /// **The echo setup sits before the survivor is spawned**, and a failed setup aborts that
+    /// subprocess before it can launch the holder. A test over a terminal that never set the mode
+    /// it needs is satisfied by the kernel instead of by its subject.
     ///
     /// **The channel is drained to empty and its receiver is kept alive.** Both are escape routes the
     /// reader has that are not the pseudoterminal: a delivery that fails and a wait for room both end
@@ -3418,7 +3524,7 @@ mod tests {
     ///
     /// **Which parts actually make this test bind was mutated rather than argued**, because a
     /// scenario that prevents the defect by itself is how this bug survived four attempts. Each row
-    /// is one deliberate break, run against a tree with the deadline in `Drop` reverted to the
+    /// records a deliberate break of the original shell fixture, run with the deadline in `Drop` reverted to the
     /// unbounded `join`:
     ///
     /// | Mutation | Result on the broken tree |
@@ -3442,6 +3548,11 @@ mod tests {
     /// The drop itself runs on a thread of its own, answering through a channel, for the same reason
     /// `drain_until_closed` carries a deadline: on a build with the bug a direct `join` would never
     /// return and would take the suite down with it, publishing the hang as an eternal green.
+    ///
+    /// **Darwin revokes the controlling terminal when its session leader exits**, even if another
+    /// session inherited the slave: Apple's XNU session-leader exit revokes every slave descriptor.
+    /// That lifecycle must end the reading cleanly; the independent blocked-reader test below pins
+    /// the abandonment deadline on every platform without requiring Linux's terminal semantics.
     #[cfg(unix)]
     #[test]
     fn closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal() {
@@ -3459,28 +3570,26 @@ mod tests {
         const CLOSE_DEADLINE: Duration = Duration::from_secs(2);
         /// What the **survivor** prints once it is up.
         ///
-        /// **It is the survivor's own and not the shell's, and that is the difference between
-        /// assuming the premise and proving it.** `{ … & }` is a backgrounded list: it exits 0
-        /// whatever happens inside it, so a missing `setsid` — every macOS, and F2.7 is next — would
-        /// let the `&&` chain reach the `exec` with nobody holding the slave end, and this test would
-        /// pass on a build that hangs, measuring the easy case. Seeing this marker come out of the
-        /// master proves the survivor exists *and* that it can write through the descriptor it
-        /// inherited, which is the whole premise. And it is printed last in the chain, so it also
-        /// proves the `stty` before it exited 0.
+        /// **It is the holder's own**, after its new session exists and the parent disabled echo.
+        /// Seeing it come out of the master proves the holder exists and can write through the
+        /// inherited slave descriptor; a parent's marker would only prove it attempted the spawn.
         const HELD: &str = "held";
-        /// How long the shell and its survivor live. Long enough that neither ends inside the
-        /// deadline above — otherwise the close would finish for a reason that is not the fix.
-        const SECONDS_ALIVE: u32 = 5;
-
-        let script = format!(
-            "stty -echo && {{ setsid sh -c 'printf {HELD}; sleep {SECONDS_ALIVE}' & }} && exec sleep {SECONDS_ALIVE}"
-        );
-        let (mut pty, output) =
-            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let (mut pty, output) = spawn_fixture("survivor-parent", &[]);
 
         // A marker somebody prints, never a `sleep`: what makes the bug reproduce is the state, and a
         // fixed wait would time the close against a shell that had not got there yet.
-        wait_for_marker(&mut pty, &output, HELD);
+        let announced = collect_output(&output, HELD, false, DEADLINE, |reply| pty.write(reply));
+        let announced = String::from_utf8_lossy(&announced);
+        let holder_pid: libc::pid_t = announced
+            .split_once("holder-pid=")
+            .expect("the holder announced its own identity")
+            .1
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .expect("the holder's process ID");
+        let reader_ending = Arc::clone(&pty.ending);
 
         // And then drained until the program goes quiet, so the channel is **empty** when the close
         // happens. See the doc comment: a full channel parks the reader somewhere the stop flag
@@ -3511,7 +3620,7 @@ mod tests {
             }
         };
 
-        // **And a floor, which is what makes this test about the deadline rather than about closing
+        // **On Linux a floor makes this test about the deadline rather than about closing
         // in general.** Anything under it means the close came back *without* spending the abandon
         // deadline, and in this shape there is only one way that happens: the reader was woken by
         // something — the echo left on by accident, a survivor that was never there — so the row is
@@ -3519,18 +3628,101 @@ mod tests {
         // library's 50 ms step: with the echo on it returned in 0.10 s, and with no survivor in
         // 0.05 s — and on the day of D55, with that step gone, in 1.20–1.37 ms both. The bound is the constant itself, so a future
         // delivery that makes abandoning cheaper moves it instead of going red.
+        #[cfg(not(target_os = "macos"))]
         assert!(
             took >= READER_GIVE_UP,
             "the close came back in {took:?}, under the {READER_GIVE_UP:?} it has to spend when a \
              holder survives: something woke the reader, so this is not the case this test is named \
              after"
         );
+        assert_eq!(
+            unsafe { libc::kill(holder_pid, 0) },
+            0,
+            "the detached holder ended before the close returned"
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            reader_ending.get(),
+            Some(&Ending::EndedWell),
+            "Darwin's terminal revocation did not end reading cleanly after {took:?}"
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(reader_ending.get(), None, "the held reader was not blocked");
 
         // Immediate — the close already answered. On the failing path above the thread is left
         // behind on purpose: it is inside the very wait this test is about.
         let _ = closing.join();
         // The receiver is only released here, after the close. Dropping it any earlier is the
         // disguise the doc comment describes.
+        drop(output);
+    }
+
+    #[test]
+    fn closing_abandons_a_reader_blocked_in_read_on_every_platform() {
+        struct AnnouncedRead {
+            reader: std::io::PipeReader,
+            entered: std::sync::mpsc::Sender<()>,
+        }
+        impl Read for AnnouncedRead {
+            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+                self.entered.send(()).expect("announce the blocking read");
+                self.reader.read(bytes)
+            }
+        }
+
+        let (mut pty, output) = spawn_fixture("environment", &[("TERM", None)]);
+        wait_for_marker(&mut pty, &output, "removed");
+        assert_eq!(
+            pty.reader_ended.recv_timeout(DEADLINE),
+            Err(RecvTimeoutError::Disconnected),
+            "the real console's reader did not finish before the blocking fixture was installed"
+        );
+        pty.reader.take().unwrap().join().unwrap();
+        drop(output);
+
+        // Keep a genuine OS read blocked independently of PTY revocation, process death, and echo.
+        // Retaining the pipe writer until after the close assertions also releases the fixture on
+        // panic, so restoring an unbounded join fails this test without leaking its parked thread.
+        let (reader, held_writer) = std::io::pipe().expect("create the blocking source");
+        let (entered, reading) = channel();
+        let (ended, reader_ended) = channel::<()>();
+        let (finished, reader_finished) = channel();
+        let (delivery, output) = sync_channel(1);
+        let stop = Arc::clone(&pty.stop);
+        let ending = Arc::new(OnceLock::new());
+        pty.ending = Arc::clone(&ending);
+        pty.reader_ended = reader_ended;
+        pty.reader = Some(thread::spawn(move || {
+            let _ended = ended;
+            feed_and_record(AnnouncedRead { reader, entered }, &delivery, &stop, &ending);
+            let _ = finished.send(());
+        }));
+        reading
+            .recv_timeout(DEADLINE)
+            .expect("the reader entered its read");
+
+        let (done, closed) = channel();
+        let closing = thread::spawn(move || {
+            let started = Instant::now();
+            drop(pty);
+            let _ = done.send(started.elapsed());
+        });
+        let took = closed.recv_timeout(Duration::from_secs(2)).expect(
+            "closing waited for a blocked reader instead of abandoning it within two seconds",
+        );
+        assert!(
+            took >= READER_GIVE_UP,
+            "the close returned in {took:?} without spending the {READER_GIVE_UP:?} reader deadline"
+        );
+        assert_eq!(
+            reader_finished.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        );
+        closing.join().unwrap();
+        drop(held_writer);
+        reader_finished
+            .recv_timeout(DEADLINE)
+            .expect("the released reader ended");
         drop(output);
     }
 
@@ -3669,7 +3861,9 @@ mod tests {
     /// **The other half: a program still gets its grace after the hang-up.** Killing outright on
     /// close would pass the test above too, and it would take away the time a program that catches
     /// the hang-up has to save its state. So a program that ignores the hang-up must be killed, and
-    /// **not before [`HANGUP_GRACE`]**: the floor is what tells a grace apart from an immediate kill.
+    /// **not before a literal 200 ms**: taking the bound from [`HANGUP_GRACE`] let a 50 ms mutation
+    /// move both sides together and pass. Observe the actual signals: a total close can include
+    /// work after SIGKILL and disguise an early kill. The separate catching test pins state saving.
     ///
     /// `trap '' HUP` sets the disposition to ignored, and an ignored signal survives `exec`, so it is
     /// `sleep` itself that ignores it. The marker comes after the `trap` in the same `&&` chain, so it
@@ -3680,15 +3874,53 @@ mod tests {
     #[test]
     fn a_program_that_ignores_the_hang_up_is_killed_after_its_grace() {
         const MARKER: &str = "deaf";
+        const PROMISED_GRACE: Duration = Duration::from_millis(200);
+        static SIGNALS: std::sync::Mutex<Vec<(libc::pid_t, libc::c_int, Instant)>> =
+            std::sync::Mutex::new(Vec::new());
+
+        fn observe_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
+            let before = Instant::now();
+            let result = send_signal(pid, number);
+            // Exclude time inside either syscall: the promised interval must fit after HUP
+            // completed and before KILL began, regardless of scheduling around those calls.
+            let observed = if number == libc::SIGHUP {
+                Instant::now()
+            } else {
+                before
+            };
+            if result.is_ok() {
+                SIGNALS.lock().unwrap().push((pid, number, observed));
+            }
+            result
+        }
 
         let script = format!("trap '' HUP && printf {MARKER} && exec sleep 5");
-        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let pid = pty
+            .child
+            .as_ref()
+            .and_then(|child| child.process_id())
+            .and_then(|pid| libc::pid_t::try_from(pid).ok())
+            .expect("the child has a valid process ID");
+        pty.send_signal = observe_signal;
         let took = time_the_close(pty, output, MARKER);
 
+        let signals = SIGNALS.lock().unwrap();
+        let sent = |number| {
+            signals
+                .iter()
+                .find(|event| event.0 == pid && event.1 == number)
+                .map(|event| event.2)
+                .unwrap_or_else(|| panic!("the child did not receive signal {number}: {signals:?}"))
+        };
+        let grace = sent(libc::SIGKILL)
+            .checked_duration_since(sent(libc::SIGHUP))
+            .expect("the kill preceded the hang-up");
         assert!(
-            took >= HANGUP_GRACE,
-            "a program that ignores the hang-up was gone after {took:?}, before the \
-             {HANGUP_GRACE:?} of grace it is owed: it was killed outright"
+            grace >= PROMISED_GRACE,
+            "SIGKILL followed SIGHUP by {grace:?}, before the {PROMISED_GRACE:?} owed to the child; \
+             the total close took {took:?}"
         );
     }
 
@@ -3696,44 +3928,35 @@ mod tests {
         a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed,
         "unix-only: requires Unix process signaling"
     );
-    /// **A program that catches the hang-up to save its state gets to finish saving, as long as the
-    /// save fits in the library's grace.** The test above measures its floor against
-    /// [`HANGUP_GRACE`] itself, so shortening the constant moves the floor with it and nothing goes
-    /// red — measured: a 50 ms grace passed the whole suite. This one states the grace from the
-    /// program's side instead, with a save that takes a literal 100 ms: comfortably inside the
-    /// library's 200 ms, and past anything shorter than it by enough that a loaded machine is not
-    /// what decides it.
+    /// **A program that catches the hang-up gets to save its state.** This and the ignoring test
+    /// split two obligations: the independently measured 200 ms grace, and a real save caused by
+    /// the signal. Killing immediately must fail this save even if the configured grace is correct.
     ///
-    /// The program's trap runs only once its foreground `sleep` returns, which is why that sleep is
-    /// ten milliseconds and not the whole wait. The save goes to a file, not to the console: the
-    /// reader is being stopped while it happens, so bytes on the pseudoterminal prove nothing. The
-    /// file's path reaches the script as `$0`, never spliced into it, so a temporary directory with a
-    /// space in its name is still the file the assertion reads.
+    /// An extra 100 ms sleep made success depend on the child's scheduling inside a 200 ms host
+    /// deadline. Native macOS failures did not identify which internal stage missed that window;
+    /// the duration belongs in the independent floor rather than in this fixture's workload.
+    /// The native handler and already-open destination avoid shell dispatch and subprocess startup.
+    /// The save goes to a file, since reading the console stops during close; its path travels as
+    /// an environment value, and the write only happens after the actual signal is observed.
     #[cfg(unix)]
     #[test]
     fn a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed() {
         const MARKER: &str = "saving";
 
         let saved = std::env::temp_dir().join(format!("term-core-hang-up-{}", std::process::id()));
-        let saved_path = saved.to_str().expect("a temporary path that is text");
         let _ = std::fs::remove_file(&saved);
-        let script = format!(
-            "trap 'sleep 0.1 && printf done > \"$0\" && exit 0' HUP && printf {MARKER} && \
-             while :; do sleep 0.01; done"
+        let (pty, output) = spawn_fixture(
+            "save-on-hangup",
+            &[(FIXTURE_SAVE_PATH, Some(saved.as_os_str()))],
         );
-        let (pty, output) =
-            Pty::spawn("sh", &["-c", &script, saved_path], Size::default()).expect("launch sh");
-        // What the close cost is deliberately not asserted: the save alone takes some 110 ms of a
-        // 200 ms grace, and a ceiling with less than two-fold headroom on a loaded machine would fail
-        // for reasons that are not the grace.
         time_the_close(pty, output, MARKER);
 
-        let finished = std::fs::read_to_string(&saved).is_ok_and(|body| body == "done");
+        let saved_body = std::fs::read_to_string(&saved);
         let _ = std::fs::remove_file(&saved);
         assert!(
-            finished,
-            "a program that needed 100 ms after the hang-up to save its state was killed before it \
-             finished: the grace it is owed is shorter than the library's 200 ms"
+            saved_body.as_ref().is_ok_and(|body| body == "done"),
+            "a program that caught the hang-up did not finish saving before the close returned: \
+             save result={saved_body:?}"
         );
     }
 
