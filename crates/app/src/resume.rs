@@ -410,6 +410,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_last_of_mixed_enters_and_interrupts_decides_what_stays_at_the_prompt() {
+        for before in [false, true] {
+            for (bytes, after) in [
+                (&b"a\rb\x03"[..], false),
+                (&b"a\x03b\r"[..], false),
+                (&b"\r\x03tail"[..], true),
+                (&b"\x03\rtail"[..], true),
+            ] {
+                assert_eq!(typed_after(before, bytes), after, "{before} then {bytes:?}");
+            }
+        }
+    }
+
     /// The person's keys and pastes move the record; a mouse report never does, and a fresh shell
     /// started over a failed client starts with an empty prompt.
     #[cfg(unix)]

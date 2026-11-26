@@ -4064,6 +4064,176 @@ mod tests {
         late_draft("annotated-draft-late-anyway", false);
     }
 
+    // Unix PTY fixture: the receiver enters raw mode through stty.
+    #[cfg(unix)]
+    #[test]
+    fn type_without_enter_after_a_late_draft_reuses_the_copy_and_keeps_the_next_send_waiting() {
+        let received = term_core::received::Received::new("annotated-draft-late-without");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        type_draft(&mut window, &received, b"late");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        let copied = std::fs::read(&copy).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(window.image.send.confirming());
+        let without = place_of(&mut window, &ctx, "Type without Enter");
+        press(&mut window, &ctx, without);
+        until_written(&mut window, &ctx);
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [&b"late"[..], line.as_bytes(), &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "the written-copy answer submitted the draft or failed to type its line"
+        );
+        assert_eq!(std::fs::read(&copy).unwrap(), copied, "the copy changed");
+        assert!(line.contains(&copy.display().to_string()));
+        assert!(marks_of(&window).is_empty());
+        marks_mut(&mut window).general = "one more note".into();
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window.image.send.confirming(),
+            "the unsent line was forgotten"
+        );
+        let _ = std::fs::remove_file(copy);
+    }
+
+    // Unix PTY fixture: the receiver enters raw mode through stty.
+    #[cfg(unix)]
+    #[test]
+    fn send_after_the_persons_enter_does_not_ask_about_the_submitted_draft() {
+        let received = term_core::received::Received::new("annotated-draft-entered");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        type_draft(&mut window, &received, b"abc\r");
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            !window.image.send.confirming(),
+            "the submitted draft was asked about"
+        );
+        until_written(&mut window, &ctx);
+        let expected = [&b"abc\r"[..], line.as_bytes()].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected
+        );
+        painted(&mut window, &ctx, vec![]);
+        let submitted = [&expected[..], b"\r"].concat();
+        assert_eq!(
+            received.wait_for(submitted.len(), Duration::from_secs(5)),
+            submitted
+        );
+        assert!(marks_of(&window).is_empty());
+        let _ = std::fs::remove_file(dir.join("annotated-1.png"));
+    }
+
+    // Unix PTY fixture: printf emits actual program output and stty enables raw input.
+    #[cfg(unix)]
+    #[test]
+    fn program_output_and_terminal_replies_neither_create_nor_clear_a_draft_for_send() {
+        for reply in [false, true] {
+            for draft in [false, true] {
+                let received = term_core::received::Received::new("annotated-output-not-draft");
+                let folder = Folder::new();
+                let path = folder.0.join("shot.png");
+                write_png(&path, 640, 400);
+                let emitted = match (reply, draft) {
+                    (true, _) => "\\033[5n",
+                    (false, true) => "FROM PROGRAM\\r",
+                    (false, false) => "FROM PROGRAM",
+                };
+                let script = received.script(&format!("stty raw -echo && printf '{emitted}'"));
+                let mut window = crate::tests::window_of_tabs([["sleep 30", &script]]);
+                let ctx = crate::ui::icons::installed_for_tests(1.0);
+                received.wait_until_ready(Duration::from_secs(5));
+                let mut prefix = Vec::new();
+                if draft {
+                    crate::resume::write(window.active_mut().panes_mut()[1], b"abc").unwrap();
+                    prefix.extend_from_slice(b"abc");
+                    assert_eq!(received.wait_for(3, Duration::from_secs(5)), prefix);
+                }
+                if reply {
+                    prefix.extend_from_slice(b"\x1b[0n");
+                }
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    let pane = &mut window.active_mut().panes_mut()[1];
+                    pane.pump(Default::default());
+                    let arrived = if reply {
+                        received.so_far() == prefix
+                    } else {
+                        pane.screen.to_text().contains("FROM PROGRAM")
+                    };
+                    if arrived {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "output/reply never arrived");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let name = window.active().panes()[1].name;
+                crate::viewer::open_diff_for_pane(&mut window, name);
+                crate::viewer::open_image_target(&mut window, name, path).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(30);
+                while image_rect(&painted(&mut window, &ctx, vec![])).is_none() {
+                    assert!(Instant::now() < deadline, "image never opened");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let dir = crate::PanelDir::create().unwrap();
+                let copy = dir.path().join("annotated-1.png");
+                origin_pane(&mut window).panel = Some(dir);
+                marks_mut(&mut window).general = "check this output".into();
+                let line = click_send(&mut window, &ctx);
+                let shapes = painted(&mut window, &ctx, vec![]);
+                if draft {
+                    assert!(
+                        text_rect(&shapes, |t| t == question(&window)).is_some(),
+                        "the draft's question is not painted after reply={reply}"
+                    );
+                    for answer in ["Send anyway", "Type without Enter", "Cancel"] {
+                        place_of(&mut window, &ctx, answer);
+                    }
+                    assert!(!copy.exists(), "output cleared the draft and started Send");
+                    origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+                    prefix.extend_from_slice(SENTINEL);
+                    assert_eq!(
+                        received.wait_for(prefix.len(), Duration::from_secs(5)),
+                        prefix
+                    );
+                } else {
+                    assert!(!window.image.send.confirming(), "output created a draft");
+                    until_written(&mut window, &ctx);
+                    prefix.extend_from_slice(line.as_bytes());
+                    assert_eq!(
+                        received.wait_for(prefix.len(), Duration::from_secs(5)),
+                        prefix
+                    );
+                    painted(&mut window, &ctx, vec![]);
+                    prefix.push(b'\r');
+                    assert_eq!(
+                        received.wait_for(prefix.len(), Duration::from_secs(5)),
+                        prefix
+                    );
+                    assert!(copy.exists());
+                    assert!(marks_of(&window).is_empty());
+                    let _ = std::fs::remove_file(copy);
+                }
+            }
+        }
+    }
+
     #[cfg(unix)]
     fn late_draft(label: &str, cancelled: bool) {
         let received = term_core::received::Received::new(label);
