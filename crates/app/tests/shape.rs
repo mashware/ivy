@@ -358,6 +358,18 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/markdown.rs"),
     ),
     (
+        "src/viewer/markdown/selection.rs",
+        include_str!("../src/viewer/markdown/selection.rs"),
+    ),
+    (
+        "src/viewer/markdown/selection_tests.rs",
+        include_str!("../src/viewer/markdown/selection_tests.rs"),
+    ),
+    (
+        "src/viewer/selection_scroll.rs",
+        include_str!("../src/viewer/selection_scroll.rs"),
+    ),
+    (
         "src/viewer/tests.rs",
         include_str!("../src/viewer/tests.rs"),
     ),
@@ -709,7 +721,39 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/startup.rs", include_str!("../src/startup.rs")),
     ("src/usage.rs", include_str!("../src/usage.rs")),
+    (
+        "src/usage/allowances.rs",
+        include_str!("../src/usage/allowances.rs"),
+    ),
+    (
+        "src/usage/allowances/native.rs",
+        include_str!("../src/usage/allowances/native.rs"),
+    ),
+    (
+        "src/usage/allowances/wire.rs",
+        include_str!("../src/usage/allowances/wire.rs"),
+    ),
+    (
+        "src/usage/codex_controls.rs",
+        include_str!("../src/usage/codex_controls.rs"),
+    ),
     ("src/usage/paint.rs", include_str!("../src/usage/paint.rs")),
+    (
+        "src/usage/quota_broker.rs",
+        include_str!("../src/usage/quota_broker.rs"),
+    ),
+    (
+        "src/usage/quota_broker/tests.rs",
+        include_str!("../src/usage/quota_broker/tests.rs"),
+    ),
+    (
+        "src/usage/quota_setup.rs",
+        include_str!("../src/usage/quota_setup.rs"),
+    ),
+    (
+        "src/usage/quota_view.rs",
+        include_str!("../src/usage/quota_view.rs"),
+    ),
     ("src/restoration.rs", include_str!("../src/restoration.rs")),
     (
         "src/session/ownership.rs",

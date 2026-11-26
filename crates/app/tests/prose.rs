@@ -523,6 +523,21 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/markdown/selection.rs",
+        include_str!("../src/viewer/markdown/selection.rs"),
+        0,
+    ),
+    (
+        "src/viewer/markdown/selection_tests.rs",
+        include_str!("../src/viewer/markdown/selection_tests.rs"),
+        0,
+    ),
+    (
+        "src/viewer/selection_scroll.rs",
+        include_str!("../src/viewer/selection_scroll.rs"),
+        0,
+    ),
+    (
         "src/viewer/tests.rs",
         include_str!("../src/viewer/tests.rs"),
         0,
@@ -1003,6 +1018,46 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/startup.rs", include_str!("../src/startup.rs"), 51),
     ("src/usage.rs", include_str!("../src/usage.rs"), 1),
+    (
+        "src/usage/codex_controls.rs",
+        include_str!("../src/usage/codex_controls.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_broker.rs",
+        include_str!("../src/usage/quota_broker.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_broker/tests.rs",
+        include_str!("../src/usage/quota_broker/tests.rs"),
+        0,
+    ),
+    (
+        "src/usage/quota_setup.rs",
+        include_str!("../src/usage/quota_setup.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_view.rs",
+        include_str!("../src/usage/quota_view.rs"),
+        0,
+    ),
+    (
+        "src/usage/allowances.rs",
+        include_str!("../src/usage/allowances.rs"),
+        0,
+    ),
+    (
+        "src/usage/allowances/native.rs",
+        include_str!("../src/usage/allowances/native.rs"),
+        8,
+    ),
+    (
+        "src/usage/allowances/wire.rs",
+        include_str!("../src/usage/allowances/wire.rs"),
+        2,
+    ),
     (
         "src/usage/paint.rs",
         include_str!("../src/usage/paint.rs"),

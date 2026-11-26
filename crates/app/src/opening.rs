@@ -17,7 +17,7 @@ use eframe::egui;
 #[cfg(windows)]
 pub(crate) mod fresh;
 mod pane;
-use pane::assemble_pane;
+use pane::{LaunchOptions, assemble_pane, launch_configured};
 
 #[cfg(test)]
 #[cfg(unix)]
@@ -620,51 +620,42 @@ fn launch(
     fallback: bool,
     integration: Option<shell_integration::Prepared>,
 ) -> term_core::Result<Pane> {
-    let Launch {
-        program,
-        args,
-        directory,
-        path,
-    } = program;
-    let args = integration
-        .as_ref()
-        .map_or(args, |prepared| prepared.args());
-    let mut identity = crate::panel::pane::launch_identity(panel.as_ref());
-    let helper = crate::resume::helper_path();
-    identity.push((
-        "IVY_SESSION_HELPER",
-        helper.as_deref().map(std::path::Path::as_os_str),
-    ));
-    if let Some(path) = path {
-        identity.push(("PATH", Some(path)));
-    }
-    if let Some(prepared) = &integration {
-        identity.extend(prepared.env());
-    }
-    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let launch_waker = ctx.clone();
-    let (pty, output) = crate::launch::Process::start(
-        std::sync::Arc::new(move || launch_waker.request_repaint()),
-        reads.clone(),
-        crate::launch::Request {
-            program,
-            args: &borrowed,
-            size: INITIAL_GRID,
-            env: &identity,
-            directory,
-            fallback,
-        },
-    )?;
-
-    Ok(assemble_pane(
+    launch_configured(
         ctx,
+        program,
+        panel,
         name,
         reads,
+        LaunchOptions {
+            fallback,
+            integration,
+            #[cfg(target_os = "linux")]
+            quota: None,
+        },
+    )
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn launch_claude_quota(
+    ctx: &egui::Context,
+    program: Launch<'_>,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    quota: crate::usage::QuotaStartup,
+) -> term_core::Result<Pane> {
+    launch_configured(
+        ctx,
+        program,
         panel,
-        integration,
-        pty,
-        output,
-    ))
+        name,
+        reads,
+        LaunchOptions {
+            fallback: false,
+            integration: None,
+            quota: Some(quota),
+        },
+    )
 }
 
 fn failed_window(

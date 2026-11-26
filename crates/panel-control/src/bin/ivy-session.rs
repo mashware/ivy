@@ -3,11 +3,21 @@
 use panel_control::session::{self, Client, Request};
 use std::io::{Read, Write};
 
+#[path = "ivy-session/quota_statusline.rs"]
+mod quota_statusline;
 #[path = "ivy-session/signals.rs"]
 mod signals;
 
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "quota-statusline") {
+        if args.len() > 2 {
+            std::process::exit(2);
+        }
+        std::process::exit(quota_statusline::run(
+            args.get(1).map(|arg| arg.as_os_str()),
+        ));
+    }
     if args.as_slice() == [std::ffi::OsString::from("signals")] {
         if let Err(failure) = signals::run(std::io::stdin().lock(), std::io::stdout().lock()) {
             eprintln!("ivy-session signals: {failure}");

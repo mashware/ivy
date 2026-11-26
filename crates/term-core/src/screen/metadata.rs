@@ -11,6 +11,7 @@ pub(super) struct Metadata {
     pub(super) program: Option<super::ProgramSnapshot>,
     pub(super) program_generation: u64,
     pub(super) query: bool,
+    pub(super) query_offset: Option<usize>,
     pub(super) enabled_claude: bool,
     pub(super) enabled_codex: bool,
 }
@@ -37,6 +38,7 @@ impl Metadata {
         self.generation
     }
     pub(super) fn advance(&mut self, bytes: &[u8]) {
+        self.query_offset = None;
         let mut index = 0;
         while index < bytes.len() {
             if matches!(self.state, State::Ground) {
@@ -65,6 +67,7 @@ impl Metadata {
                     b'c' => {
                         self.program = None;
                         self.query = false;
+                        self.query_offset = None;
                         self.program_generation = self.program_generation.wrapping_add(1);
                         self.path = None;
                         self.reported = false;
@@ -75,7 +78,7 @@ impl Metadata {
                 },
                 State::Osc => match b {
                     7 => {
-                        self.finish();
+                        self.finish(index);
                         State::Ground
                     }
                     0x1b => State::OscEscape,
@@ -93,7 +96,7 @@ impl Metadata {
                 },
                 State::OscEscape => {
                     if b == b'\\' {
-                        self.finish();
+                        self.finish(index);
                         State::Ground
                     } else {
                         self.data.clear();
@@ -127,10 +130,11 @@ impl Metadata {
             };
         }
     }
-    fn finish(&mut self) {
+    fn finish(&mut self, offset: usize) {
         if let Some(payload) = self.data.strip_prefix(b"7501;") {
             if payload == b"?" {
                 self.query = true;
+                self.query_offset.get_or_insert(offset);
             } else if let Some(value) = parse_program(payload) {
                 if let Some(snapshot) = value {
                     let enabled = match snapshot.client {

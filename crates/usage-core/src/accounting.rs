@@ -1,10 +1,32 @@
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(i64)]
+pub enum Provider {
+    #[default]
+    Claude,
+    Codex,
+}
+
+impl Provider {
+    pub(crate) fn from_row(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<Self> {
+        match row.get::<_, i64>(index)? {
+            0 => Ok(Self::Claude),
+            1 => Ok(Self::Codex),
+            _ => Err(rusqlite::Error::IntegralValueOutOfRange(
+                index,
+                row.get(index)?,
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Counts {
     pub uncached_input: Option<i64>,
     pub cache_read: Option<i64>,
     pub cache_write: Option<i64>,
     pub cache_write_1h: Option<i64>,
     pub output: Option<i64>,
+    pub reasoning_output: Option<i64>,
     pub flags: i64,
 }
 
@@ -53,6 +75,7 @@ impl Counts {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Observation {
+    pub provider: Provider,
     pub event_key: [u8; 32],
     pub source_key: [u8; 32],
     pub evidence_key: [u8; 32],
@@ -83,6 +106,7 @@ impl TryFrom<i64> for Resolution {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Canonical {
+    pub provider: Provider,
     pub at_ms: Option<i64>,
     pub model: Option<String>,
     pub counts: Counts,
@@ -91,6 +115,7 @@ pub(crate) struct Canonical {
 
 #[derive(Default)]
 pub(crate) struct Reducer {
+    provider: Provider,
     counts: Option<Counts>,
     flags: i64,
     model: Option<String>,
@@ -101,19 +126,54 @@ pub(crate) struct Reducer {
 
 impl Reducer {
     pub(crate) fn push_sorted(&mut self, observation: Observation) {
-        let current = observation.counts.ordered();
-        if let Some(previous) = self.counts {
-            let previous = previous.ordered();
-            debug_assert!(previous <= current);
-            // In lexicographic order a component-wise chain exists exactly when all
-            // adjacent tuples are ordered component-wise. A later common maximum
-            // cannot hide an earlier pair of contradictory snapshots.
-            self.conflicted |= previous
-                .into_iter()
-                .zip(current)
-                .any(|(old, new)| old > new);
+        if self.counts.is_some() && self.provider != observation.provider {
+            self.conflicted = true;
+            return;
         }
-        self.counts = Some(observation.counts);
+        self.provider = observation.provider;
+        if self.provider == Provider::Codex {
+            if let Some(counts) = &mut self.counts {
+                let next = observation.counts;
+                for (known, new) in [
+                    (&mut counts.uncached_input, next.uncached_input),
+                    (&mut counts.cache_read, next.cache_read),
+                    (&mut counts.cache_write, next.cache_write),
+                    (&mut counts.cache_write_1h, next.cache_write_1h),
+                    (&mut counts.output, next.output),
+                    (&mut counts.reasoning_output, next.reasoning_output),
+                ] {
+                    match (*known, new) {
+                        (Some(a), Some(b)) => self.conflicted |= a != b,
+                        (None, Some(b)) => *known = Some(b),
+                        _ => {}
+                    }
+                }
+                self.conflicted |= counts
+                    .reasoning_output
+                    .zip(counts.output)
+                    .is_some_and(|(subset, total)| subset > total);
+            } else {
+                self.counts = Some(observation.counts);
+            }
+            self.conflicted |= self
+                .at_ms
+                .zip(observation.at_ms)
+                .is_some_and(|(a, b)| a != b);
+        } else {
+            let current = observation.counts.ordered();
+            if let Some(previous) = self.counts {
+                let previous = previous.ordered();
+                debug_assert!(previous <= current);
+                // In lexicographic order a component-wise chain exists exactly when all
+                // adjacent tuples are ordered component-wise. A later common maximum
+                // cannot hide an earlier pair of contradictory snapshots.
+                self.conflicted |= previous
+                    .into_iter()
+                    .zip(current)
+                    .any(|(old, new)| old > new);
+            }
+            self.counts = Some(observation.counts);
+        }
         self.flags |= observation.counts.flags;
 
         if let Some(model_key) = observation.model_key {
@@ -138,6 +198,7 @@ impl Reducer {
         };
         counts.flags |= self.flags;
         Some(Canonical {
+            provider: self.provider,
             at_ms: self.at_ms,
             model: if self.conflicted { None } else { self.model },
             counts,
@@ -152,6 +213,7 @@ mod tests {
 
     fn observation(input: i64, output: i64, at_ms: i64) -> Observation {
         Observation {
+            provider: Provider::Claude,
             event_key: [1; 32],
             source_key: [2; 32],
             evidence_key: [3; 32],

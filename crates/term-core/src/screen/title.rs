@@ -12,11 +12,24 @@ pub(super) struct Listener {
 
 // Program output is an automatic producer, unlike keystrokes. Bound its temporary replies too.
 const REPLY_LIMIT: usize = 16 * 1024;
+const CAPABILITY_REPLY: &[u8] = b"\x1b]7501;?\x07";
 
 #[derive(Default)]
 pub(super) struct ReplyBatch {
     pub(super) bytes: Vec<u8>,
     pub(super) error: Option<&'static str>,
+    ordinary_bytes: usize,
+}
+
+impl ReplyBatch {
+    fn append(&mut self, bytes: &[u8]) {
+        if bytes.len() > REPLY_LIMIT.saturating_sub(self.ordinary_bytes) {
+            self.error = Some("too many terminal query replies in one output batch");
+        } else if self.error.is_none() {
+            self.bytes.extend_from_slice(bytes);
+            self.ordinary_bytes += bytes.len();
+        }
+    }
 }
 
 impl Listener {
@@ -30,6 +43,16 @@ impl Listener {
             .expect("terminal reply slot poisoned")
             .take()
             .expect("terminal reply collection was started")
+    }
+
+    pub(super) fn reply_to_program_query(&self) {
+        let mut slot = self.replies.lock().expect("terminal reply slot poisoned");
+        let batch = slot
+            .as_mut()
+            .expect("terminal reply collection was started");
+        if batch.error.is_none() {
+            batch.bytes.extend_from_slice(CAPABILITY_REPLY);
+        }
     }
 
     pub(super) fn take(&self) -> Option<Option<String>> {
@@ -48,10 +71,8 @@ impl EventListener for Listener {
                 if let Some(batch) = slot.as_mut() {
                     if !safe_reply(&text) {
                         batch.error = Some("terminal engine generated an unsupported query reply");
-                    } else if text.len() > REPLY_LIMIT.saturating_sub(batch.bytes.len()) {
-                        batch.error = Some("too many terminal query replies in one output batch");
-                    } else if batch.error.is_none() {
-                        batch.bytes.extend_from_slice(text.as_bytes());
+                    } else {
+                        batch.append(text.as_bytes());
                     }
                 }
                 return;
@@ -308,5 +329,50 @@ mod tests {
         assert_eq!(first.terminal_title(), Some("First"));
         assert_eq!(second.terminal_title(), Some("Second"));
         assert_eq!(screen().terminal_title(), None);
+    }
+
+    #[test]
+    fn capability_reply_stays_between_device_attribute_replies_across_read_boundaries() {
+        let query = b"\x1b[c\x1b]7501;?\x1b\\\x1b[c";
+        for split in 0..=query.len() {
+            let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
+            let mut replies = Vec::new();
+            for chunk in [&query[..split], &query[split..]] {
+                screen
+                    .advance_with_client_replies(chunk, true, |bytes| {
+                        replies.extend_from_slice(bytes);
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            assert_eq!(replies, b"\x1b[?6c\x1b]7501;?\x07\x1b[?6c", "split {split}");
+            assert!(!screen.take_program_query(), "split {split}");
+        }
+    }
+
+    #[test]
+    fn the_capability_reply_preserves_the_ordinary_reply_ceiling() {
+        let probe = b"\x1b]7501;?\x07";
+        let ordinary = b"\x1b[0n";
+        let queries = b"\x1b[5n".repeat(REPLY_LIMIT / ordinary.len());
+        let bytes = [probe.as_slice(), &queries].concat();
+        let mut expected = CAPABILITY_REPLY.to_vec();
+        expected.extend(ordinary.repeat(REPLY_LIMIT / ordinary.len()));
+        let mut screen = screen();
+        let mut actual = Vec::new();
+        screen
+            .advance_with_client_replies(&bytes, true, |reply| {
+                actual.extend_from_slice(reply);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(actual, expected);
+        assert!(
+            screen
+                .advance_with_client_replies(&[bytes.as_slice(), b"\x1b[5n"].concat(), true, |_| {
+                    panic!("the ordinary reply limit no longer holds")
+                })
+                .is_err()
+        );
     }
 }

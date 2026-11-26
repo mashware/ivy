@@ -41,6 +41,7 @@ fn observation(
     }
 
     Observation {
+        provider: Provider::Claude,
         event_key: key_bytes(key),
         source_key: source,
         evidence_key: key_bytes(evidence),
@@ -62,13 +63,16 @@ fn publish(ledger: &mut Ledger, fingerprint: Key) {
     while !ledger.reconcile_slice().unwrap() {}
     ledger
         .publish(Checkpoint {
+            provider: Provider::Claude,
             root_key: [8; 32],
             fingerprint: Some(fingerprint),
             prefix_bytes: 1000,
             coverage: 0,
         })
         .unwrap();
-    ledger.mark_refresh_success(42).unwrap();
+    ledger
+        .mark_provider_refresh_success(Provider::Claude, 42)
+        .unwrap();
 }
 
 fn read(ledger: &mut Ledger) -> Vec<(Resolution, Option<i128>)> {
@@ -217,6 +221,7 @@ fn failed_commit_against_pinned_reader_does_not_publish() {
     let pinned_meta = info(&pinned).unwrap();
     assert_eq!(pinned_meta.published_epoch, 1);
     let new_checkpoint = Checkpoint {
+        provider: Provider::Claude,
         root_key: [8; 32],
         fingerprint: Some([2; 32]),
         prefix_bytes: 2000,
@@ -231,7 +236,9 @@ fn failed_commit_against_pinned_reader_does_not_publish() {
     assert_eq!(read(&mut reader), [(Resolution::Resolved, Some(160))]);
     writer.publish(new_checkpoint).unwrap();
     assert_eq!(writer.info().unwrap().last_success_at_ms, Some(42));
-    writer.mark_refresh_success(43).unwrap();
+    writer
+        .mark_provider_refresh_success(Provider::Claude, 43)
+        .unwrap();
     assert_eq!(writer.info().unwrap().last_success_at_ms, Some(43));
     assert_eq!(read(&mut reader), [(Resolution::Resolved, Some(180))]);
 }
@@ -265,7 +272,7 @@ fn cancellation_and_undated_coverage_preserve_snapshot_identity() {
         )
         .unwrap();
     assert_eq!(coverage.meta.published_epoch, 1);
-    assert_eq!(coverage.source_count, 1);
+    assert_eq!(coverage.for_provider(Provider::Claude).source_count, 1);
     assert!(coverage.undated);
 }
 
@@ -330,4 +337,110 @@ fn no_spill_delete_journal_stays_inside_its_original_page_envelope() {
         })
         .unwrap();
     assert_eq!(output, 20);
+}
+
+#[test]
+fn upgrade_preserves_claude_and_reconciles_codex_reasoning_independently() {
+    let fixture = Fixture::new();
+    let path = fixture.path();
+    let mut writer = Ledger::open_writer(&path).unwrap();
+    let claude_source = [1; 32];
+    let codex_source = [2; 32];
+
+    writer.begin(claude_source).unwrap();
+    writer
+        .stage(&[observation(1, claude_source, 1, Some(100), 20)])
+        .unwrap();
+    assert!(matches!(writer.upgrade_for_codex(), Err(Error::Invalid)));
+    publish(&mut writer, [3; 32]);
+    assert_eq!(checked_version(&writer.connection).unwrap(), 1);
+
+    let mut reader = Ledger::open_reader(&path).unwrap();
+    assert_eq!(read(&mut reader), [(Resolution::Resolved, Some(160))]);
+    writer.upgrade_for_codex().unwrap();
+    assert_eq!(checked_version(&writer.connection).unwrap(), 2);
+
+    let mut missing = observation(2, codex_source, 1, Some(70), 20);
+    missing.provider = Provider::Codex;
+    missing.counts.cache_write = Some(0);
+    let mut known = missing.clone();
+    known.evidence_key = [6; 32];
+    known.counts.reasoning_output = Some(5);
+    writer.begin(codex_source).unwrap();
+    writer.stage(&[known, missing.clone()]).unwrap();
+    while !writer.reconcile_slice().unwrap() {}
+    writer
+        .publish(Checkpoint {
+            provider: Provider::Codex,
+            root_key: [8; 32],
+            fingerprint: Some([4; 32]),
+            prefix_bytes: 1000,
+            coverage: 2,
+        })
+        .unwrap();
+    writer
+        .mark_provider_refresh_success(Provider::Codex, 99)
+        .unwrap();
+    assert_eq!(
+        writer.checkpoint(codex_source).unwrap().unwrap().provider,
+        Provider::Codex
+    );
+
+    let mut contribution = None;
+    let coverage = reader
+        .visit(
+            0,
+            2000,
+            Arc::new(AtomicBool::new(false)),
+            |row| {
+                if row.provider == Provider::Codex {
+                    contribution = Some(row);
+                }
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+    let contribution = contribution.unwrap();
+    assert_eq!(contribution.counts.reasoning_output, Some(5));
+    assert_eq!(contribution.counts.known_tokens(), Some(120));
+    assert_eq!(coverage.for_provider(Provider::Claude).source_flags, 0);
+    assert_eq!(coverage.for_provider(Provider::Codex).source_flags, 2);
+    assert_eq!(coverage.meta.last_success_at_ms, Some(42));
+    assert_eq!(coverage.meta.codex_last_success_at_ms, Some(99));
+
+    missing.evidence_key = [7; 32];
+    missing.counts.reasoning_output = Some(4);
+    writer.begin(codex_source).unwrap();
+    writer.stage(&[missing]).unwrap();
+    while !writer.reconcile_slice().unwrap() {}
+    writer
+        .publish(Checkpoint {
+            provider: Provider::Codex,
+            root_key: [8; 32],
+            fingerprint: Some([5; 32]),
+            prefix_bytes: 1000,
+            coverage: 2,
+        })
+        .unwrap();
+    let mut states = Vec::new();
+    reader
+        .visit(
+            0,
+            2000,
+            Arc::new(AtomicBool::new(false)),
+            |row| {
+                states.push((row.provider, row.resolution, row.counts.known_tokens()));
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(
+        states,
+        [
+            (Provider::Claude, Resolution::Resolved, Some(160)),
+            (Provider::Codex, Resolution::Conflicted, None)
+        ]
+    );
 }

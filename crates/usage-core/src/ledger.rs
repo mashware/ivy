@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 
-use crate::accounting::{Canonical, Counts, Observation, Reducer, Resolution};
+use crate::accounting::{Canonical, Counts, Observation, Provider, Reducer, Resolution};
 
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 const PARSER_VERSION: i64 = 1;
 const PAGE_SIZE: u64 = 4096;
 const MAX_PAGES: u64 = 49_152;
@@ -85,10 +85,12 @@ pub(crate) struct Meta {
     pub(crate) identity_salt: Key,
     pub(crate) published_epoch: i64,
     pub(crate) last_success_at_ms: Option<i64>,
+    pub(crate) codex_last_success_at_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Checkpoint {
+    pub(crate) provider: Provider,
     pub(crate) root_key: Key,
     pub(crate) fingerprint: Option<Key>,
     pub(crate) prefix_bytes: u64,
@@ -99,12 +101,26 @@ pub(crate) struct Checkpoint {
 pub(crate) struct Coverage {
     pub(crate) meta: Meta,
     pub(crate) source_flags: i64,
+    pub(crate) undated: bool,
+    providers: [ProviderCoverage; 2],
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ProviderCoverage {
+    pub(crate) source_flags: i64,
     pub(crate) source_count: u64,
     pub(crate) undated: bool,
 }
 
+impl Coverage {
+    pub(crate) fn for_provider(&self, provider: Provider) -> ProviderCoverage {
+        self.providers[provider as usize]
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Contribution {
+    pub(crate) provider: Provider,
     pub(crate) at_ms: i64,
     pub(crate) model: Option<String>,
     pub(crate) counts: Counts,
@@ -232,19 +248,40 @@ impl Ledger {
         Ok(())
     }
 
+    /// Called by the collector owner after recovering any staged epoch.
+    pub(crate) fn upgrade_for_codex(&mut self) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        if checked_version(&transaction)? == VERSION {
+            return Ok(());
+        }
+        if candidate(&transaction)?.is_some() {
+            return Err(Error::Invalid);
+        }
+        transaction.execute_batch(include_str!("migrate_v2.sql"))?;
+        transaction.commit()?;
+        self.connection.flush_prepared_statement_cache();
+        Ok(())
+    }
+
     pub(crate) fn info(&self) -> Result<Meta> {
         info(&self.connection)
     }
 
     pub(crate) fn checkpoint(&self, source_key: Key) -> Result<Option<Checkpoint>> {
+        let provider = if is_v2(&self.connection)? {
+            "provider"
+        } else {
+            "0"
+        };
         Ok(self
             .connection
             .query_row(
-                "SELECT root_key, published_fingerprint, published_prefix_bytes, coverage
-                 FROM usage_sources WHERE source_key=?1",
+                &format!("SELECT root_key, published_fingerprint, published_prefix_bytes, coverage, {provider}
+                 FROM usage_sources WHERE source_key=?1"),
                 [source_key],
                 |row| {
                     Ok(Checkpoint {
+                        provider: Provider::from_row(row, 4)?,
                         root_key: row.get(0)?,
                         fingerprint: row.get(1)?,
                         prefix_bytes: row.get(2)?,
@@ -304,20 +341,30 @@ impl Ledger {
         }
         let transaction = self.connection.transaction()?;
         let candidate = candidate(&transaction)?.ok_or(Error::Invalid)?;
+        let v2 = is_v2(&transaction)?;
+        if !v2 && checkpoint.provider != Provider::Claude {
+            return Err(Error::Invalid);
+        }
+        let (columns, values, update) = if v2 {
+            (", provider", ", ?6", ", provider=excluded.provider")
+        } else {
+            ("", "", "")
+        };
         transaction.execute(
-            "INSERT INTO usage_sources
-             (source_key, root_key, published_fingerprint, published_prefix_bytes, coverage)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            &format!("INSERT INTO usage_sources
+             (source_key, root_key, published_fingerprint, published_prefix_bytes, coverage{columns})
+             VALUES (?1, ?2, ?3, ?4, ?5{values})
              ON CONFLICT(source_key) DO UPDATE SET root_key=excluded.root_key,
                published_fingerprint=excluded.published_fingerprint,
-               published_prefix_bytes=excluded.published_prefix_bytes, coverage=excluded.coverage",
-            params![
+               published_prefix_bytes=excluded.published_prefix_bytes, coverage=excluded.coverage{update}"),
+            &params![
                 candidate.source,
                 checkpoint.root_key,
                 checkpoint.fingerprint,
                 checkpoint.prefix_bytes,
                 checkpoint.coverage,
-            ],
+                checkpoint.provider as i64,
+            ][..if v2 { 6 } else { 5 }],
         )?;
         transaction.execute(
             "UPDATE usage_meta SET published_epoch=?1, preparing_source_key=NULL WHERE singleton=1",
@@ -328,10 +375,21 @@ impl Ledger {
         Ok(())
     }
 
-    pub(crate) fn mark_refresh_success(&mut self, timestamp_ms: i64) -> Result<()> {
+    pub(crate) fn mark_provider_refresh_success(
+        &mut self,
+        provider: Provider,
+        timestamp_ms: i64,
+    ) -> Result<()> {
+        let column = match provider {
+            Provider::Claude => "last_success_at_ms",
+            Provider::Codex if is_v2(&self.connection)? => "codex_last_success_at_ms",
+            Provider::Codex => return Err(Error::Invalid),
+        };
         if self.connection.execute(
-            "UPDATE usage_meta SET last_success_at_ms=?1
-             WHERE singleton=1 AND preparing_source_key IS NULL",
+            &format!(
+                "UPDATE usage_meta SET {column}=?1
+             WHERE singleton=1 AND preparing_source_key IS NULL"
+            ),
             [timestamp_ms],
         )? != 1
         {
@@ -430,7 +488,7 @@ fn pragma_number(connection: &Connection, name: &str) -> Result<u64> {
 fn checked_version(connection: &Connection) -> Result<i64> {
     let version = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
-        0 | VERSION => Ok(version),
+        0 | 1 | VERSION => Ok(version),
         n if n > VERSION => Err(Error::FutureVersion),
         _ => Err(Error::Invalid),
     }
@@ -459,10 +517,21 @@ fn validate_existing(connection: &Connection) -> Result<()> {
     }
 }
 
+fn is_v2(connection: &Connection) -> Result<bool> {
+    Ok(checked_version(connection)? == VERSION)
+}
+
 fn info(connection: &Connection) -> Result<Meta> {
+    let codex = if is_v2(connection)? {
+        "codex_last_success_at_ms"
+    } else {
+        "NULL"
+    };
     Ok(connection.query_row(
-        "SELECT store_id, identity_salt, published_epoch, last_success_at_ms
-         FROM usage_meta WHERE singleton=1",
+        &format!(
+            "SELECT store_id, identity_salt, published_epoch, last_success_at_ms, {codex}
+         FROM usage_meta WHERE singleton=1"
+        ),
         [],
         |row| {
             Ok(Meta {
@@ -470,6 +539,7 @@ fn info(connection: &Connection) -> Result<Meta> {
                 identity_salt: row.get(1)?,
                 published_epoch: row.get(2)?,
                 last_success_at_ms: row.get(3)?,
+                codex_last_success_at_ms: row.get(4)?,
             })
         },
     )?)
@@ -506,15 +576,33 @@ fn stage_batch(
         "INSERT INTO usage_keys(event_key, first_epoch) VALUES (?1, ?2)
          ON CONFLICT(event_key) DO NOTHING",
     )?;
-    let mut insert_observation = transaction.prepare_cached(
+    let v2 = is_v2(transaction)?;
+    let (columns, values) = if v2 {
+        (", provider, reasoning_output", ", ?14, ?15")
+    } else {
+        ("", "")
+    };
+    let mut insert_observation = transaction.prepare_cached(&format!(
         "INSERT INTO usage_observations (
             event_key, source_key, evidence_key, first_epoch, event_at_ms, model, model_key,
-            uncached_input, cache_read, cache_write, cache_write_1h, output, category_flags
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-         ON CONFLICT(event_key, source_key, evidence_key) DO NOTHING",
-    )?;
+            uncached_input, cache_read, cache_write, cache_write_1h, output, category_flags{columns}
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13{values})
+         ON CONFLICT(event_key, source_key, evidence_key) DO NOTHING"
+    ))?;
     for observation in observations {
-        if observation.source_key != candidate.source {
+        if observation.source_key != candidate.source
+            || !v2 && observation.provider != Provider::Claude
+            || observation
+                .counts
+                .reasoning_output
+                .is_some_and(|reasoning| {
+                    reasoning < 0
+                        || observation
+                            .counts
+                            .output
+                            .is_none_or(|output| reasoning > output)
+                })
+        {
             return Err(Error::Invalid);
         }
         if insert_key.execute(params![observation.event_key, candidate.epoch])? == 1 {
@@ -524,21 +612,25 @@ fn stage_batch(
             }
         }
         let counts = &observation.counts;
-        insert_observation.execute(params![
-            observation.event_key,
-            observation.source_key,
-            observation.evidence_key,
-            candidate.epoch,
-            observation.at_ms,
-            observation.model,
-            observation.model_key,
-            counts.uncached_input,
-            counts.cache_read,
-            counts.cache_write,
-            counts.cache_write_1h,
-            counts.output,
-            counts.flags,
-        ])?;
+        insert_observation.execute(
+            &params![
+                observation.event_key,
+                observation.source_key,
+                observation.evidence_key,
+                candidate.epoch,
+                observation.at_ms,
+                observation.model,
+                observation.model_key,
+                counts.uncached_input,
+                counts.cache_read,
+                counts.cache_write,
+                counts.cache_write_1h,
+                counts.output,
+                counts.flags,
+                observation.provider as i64,
+                counts.reasoning_output,
+            ][..if v2 { 15 } else { 13 }],
+        )?;
     }
     transaction.execute(
         "UPDATE usage_meta SET stable_event_count=?1 WHERE singleton=1",
@@ -552,6 +644,7 @@ fn reconcile_batch(
     epoch: i64,
     state: &mut Reconciliation,
 ) -> Result<()> {
+    let v2 = is_v2(transaction)?;
     let mut remaining = WRITE_BATCH;
     while remaining != 0 {
         let mut current = match state.event.take() {
@@ -568,7 +661,7 @@ fn reconcile_batch(
                 }
             }
         };
-        let consumed = read_revisions(transaction, epoch, &mut current, remaining)?;
+        let consumed = read_revisions(transaction, epoch, &mut current, remaining, v2)?;
         remaining -= consumed;
         if remaining == 0 {
             state.event = Some(current);
@@ -576,7 +669,7 @@ fn reconcile_batch(
         }
 
         let canonical = current.reducer.finish().ok_or(Error::Invalid)?;
-        stage_canonical(transaction, current.key, epoch, canonical)?;
+        stage_canonical(transaction, current.key, epoch, canonical, v2)?;
         state.after_event = Some(current.key);
     }
     Ok(())
@@ -612,11 +705,15 @@ const REVISION_COLUMNS: [&str; 5] = [
     "cache_write_1h",
     "output",
 ];
-const REVISION_SELECT: &str =
-    "SELECT id, source_key, evidence_key, event_at_ms, model, model_key, uncached_input,
-            cache_read, cache_write, cache_write_1h, output, category_flags
+fn revision_select(v2: bool) -> String {
+    let extra = provider_columns(v2);
+    format!(
+        "SELECT id, source_key, evidence_key, event_at_ms, model, model_key, uncached_input,
+            cache_read, cache_write, cache_write_1h, output, category_flags, {extra}
      FROM usage_observations INDEXED BY usage_observations_revision
-     WHERE event_key=? AND first_epoch<=?";
+     WHERE event_key=? AND first_epoch<=?"
+    )
+}
 const REVISION_ORDER: &str =
     " ORDER BY uncached_input, cache_read, cache_write, cache_write_1h, output, id LIMIT ?";
 
@@ -625,10 +722,11 @@ fn read_revisions(
     epoch: i64,
     current: &mut EventReduction,
     limit: usize,
+    v2: bool,
 ) -> Result<usize> {
+    let select = revision_select(v2);
     let Some(cursor) = current.cursor.take() else {
-        let mut statement =
-            transaction.prepare_cached(&format!("{REVISION_SELECT}{REVISION_ORDER}"))?;
+        let mut statement = transaction.prepare_cached(&format!("{select}{REVISION_ORDER}"))?;
         let mut rows = statement.query(params![current.key, epoch, limit])?;
         return reduce_rows(current, &mut rows);
     };
@@ -637,7 +735,7 @@ fn read_revisions(
     // index ranges from the longest equal prefix, including NULL -> non-NULL.
     let mut consumed = 0;
     for pivot in (0..=REVISION_COLUMNS.len()).rev() {
-        let mut sql = REVISION_SELECT.to_owned();
+        let mut sql = select.clone();
         let mut values: Vec<&dyn rusqlite::ToSql> = vec![&current.key, &epoch];
         for (index, column) in REVISION_COLUMNS.iter().take(pivot).enumerate() {
             sql.push_str(&format!(" AND {column} IS ?"));
@@ -670,7 +768,7 @@ fn read_revisions(
 fn reduce_rows(current: &mut EventReduction, rows: &mut rusqlite::Rows<'_>) -> Result<usize> {
     let mut consumed = 0;
     while let Some(row) = rows.next()? {
-        let counts = counts_from_row(row, 6)?;
+        let counts = counts_from_row(row, 6, 13)?;
         current.cursor = Some(RevisionCursor {
             tokens: [
                 counts.uncached_input,
@@ -682,6 +780,7 @@ fn reduce_rows(current: &mut EventReduction, rows: &mut rusqlite::Rows<'_>) -> R
             id: row.get(0)?,
         });
         current.reducer.push_sorted(Observation {
+            provider: Provider::from_row(row, 12)?,
             event_key: current.key,
             source_key: row.get(1)?,
             evidence_key: row.get(2)?,
@@ -700,6 +799,7 @@ fn stage_canonical(
     key: Key,
     epoch: i64,
     value: Canonical,
+    v2: bool,
 ) -> Result<()> {
     transaction
         .prepare_cached(
@@ -712,32 +812,45 @@ fn stage_canonical(
         )?
         .execute(params![key, epoch])?;
     let counts = value.counts;
+    let (columns, values, update) = if v2 {
+        (
+            ", provider, reasoning_output",
+            ", ?12, ?13",
+            ", provider=excluded.provider, reasoning_output=excluded.reasoning_output",
+        )
+    } else {
+        ("", "", "")
+    };
     transaction
-        .prepare_cached(
+        .prepare_cached(&format!(
             "INSERT INTO usage_canonical
             (event_key, from_epoch, event_at_ms, model, uncached_input, cache_read,
-             cache_write, cache_write_1h, output, category_flags, resolution)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             cache_write, cache_write_1h, output, category_flags, resolution{columns})
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11{values})
          ON CONFLICT(event_key, from_epoch) DO UPDATE SET
             event_at_ms=excluded.event_at_ms, model=excluded.model,
             uncached_input=excluded.uncached_input, cache_read=excluded.cache_read,
             cache_write=excluded.cache_write, cache_write_1h=excluded.cache_write_1h,
             output=excluded.output, category_flags=excluded.category_flags,
-            resolution=excluded.resolution",
-        )?
-        .execute(params![
-            key,
-            epoch,
-            value.at_ms,
-            value.model,
-            counts.uncached_input,
-            counts.cache_read,
-            counts.cache_write,
-            counts.cache_write_1h,
-            counts.output,
-            counts.flags,
-            value.resolution as i64,
-        ])?;
+            resolution=excluded.resolution{update}"
+        ))?
+        .execute(
+            &params![
+                key,
+                epoch,
+                value.at_ms,
+                value.model,
+                counts.uncached_input,
+                counts.cache_read,
+                counts.cache_write,
+                counts.cache_write_1h,
+                counts.output,
+                counts.flags,
+                value.resolution as i64,
+                value.provider as i64,
+                counts.reasoning_output,
+            ][..if v2 { 13 } else { 11 }],
+        )?;
     Ok(())
 }
 
@@ -785,6 +898,14 @@ struct VisitRange<'a> {
     cancel: &'a AtomicBool,
 }
 
+fn provider_columns(v2: bool) -> &'static str {
+    if v2 {
+        "provider, reasoning_output"
+    } else {
+        "0, NULL"
+    }
+}
+
 fn visit(
     connection: &mut Connection,
     range: VisitRange<'_>,
@@ -795,55 +916,68 @@ fn visit(
     let transaction = connection.transaction()?;
     let meta = info(&transaction)?;
     let epoch = meta.published_epoch;
+    let v2 = is_v2(&transaction)?;
+    let extra = provider_columns(v2);
     visit_contributions(
         &transaction,
-        "SELECT event_at_ms, model, uncached_input, cache_read, cache_write,
-                cache_write_1h, output, category_flags, resolution
+        &format!(
+            "SELECT event_at_ms, model, uncached_input, cache_read, cache_write,
+                cache_write_1h, output, category_flags, resolution, {extra}
          FROM usage_canonical INDEXED BY usage_canonical_day
          WHERE event_at_ms>=?1 AND event_at_ms<?2 AND from_epoch<=?3
            AND (until_epoch IS NULL OR until_epoch>?3)
-         ORDER BY event_at_ms, id",
+         ORDER BY event_at_ms, id"
+        ),
         &range,
         epoch,
         daily,
     )?;
     visit_contributions(
         &transaction,
-        "SELECT event_at_ms, model, uncached_input, cache_read, cache_write,
-                cache_write_1h, output, category_flags, resolution
+        &format!(
+            "SELECT event_at_ms, model, uncached_input, cache_read, cache_write,
+                cache_write_1h, output, category_flags, resolution, {extra}
          FROM usage_canonical INDEXED BY usage_canonical_model
          WHERE event_at_ms>=?1 AND event_at_ms<?2 AND from_epoch<=?3
            AND (until_epoch IS NULL OR until_epoch>?3)
-         ORDER BY model, event_at_ms, id",
+         ORDER BY model, event_at_ms, id"
+        ),
         &range,
         epoch,
         model,
     )?;
-    let undated = transaction.query_row(
-        "SELECT EXISTS(
-            SELECT id FROM usage_canonical INDEXED BY usage_canonical_day
-            WHERE event_at_ms IS NULL AND from_epoch<=?1 AND (until_epoch IS NULL OR until_epoch>?1)
-         )",
-        [epoch],
-        |row| row.get(0),
-    )?;
-    let (mut source_flags, mut source_count) = (0, 0);
+    let mut providers = [ProviderCoverage::default(); 2];
+    let provider = if v2 { "provider" } else { "0" };
     {
-        let mut statement =
-            transaction.prepare_cached("SELECT coverage FROM usage_sources ORDER BY source_key")?;
+        let mut statement = transaction.prepare_cached(&format!(
+            "SELECT {provider}, coverage FROM usage_sources ORDER BY source_key"
+        ))?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             check_deadline(range.cancel, range.deadline)?;
-            source_flags |= row.get::<_, i64>(0)?;
-            source_count += 1;
+            let coverage = &mut providers[Provider::from_row(row, 0)? as usize];
+            coverage.source_flags |= row.get::<_, i64>(1)?;
+            coverage.source_count += 1;
         }
     }
+    for (index, coverage) in providers.iter_mut().enumerate() {
+        coverage.undated = transaction.query_row(
+            &format!("SELECT EXISTS(
+                SELECT id FROM usage_canonical INDEXED BY usage_canonical_day
+                WHERE event_at_ms IS NULL AND from_epoch<=?1 AND (until_epoch IS NULL OR until_epoch>?1)
+                  AND {provider}=?2
+            )"),
+            params![epoch, index],
+            |row| row.get(0),
+        )?;
+    }
+    let [claude, codex] = providers;
     transaction.commit()?;
     Ok(Coverage {
         meta,
-        source_flags,
-        source_count,
-        undated,
+        source_flags: claude.source_flags | codex.source_flags,
+        undated: claude.undated || codex.undated,
+        providers,
     })
 }
 
@@ -862,20 +996,22 @@ fn visit_contributions(
         emit(Contribution {
             at_ms: row.get(0)?,
             model: row.get(1)?,
-            counts: counts_from_row(row, 2)?,
+            provider: Provider::from_row(row, 9)?,
+            counts: counts_from_row(row, 2, 10)?,
             resolution,
         })?;
     }
     Ok(())
 }
 
-fn counts_from_row(row: &Row<'_>, start: usize) -> rusqlite::Result<Counts> {
+fn counts_from_row(row: &Row<'_>, start: usize, reasoning: usize) -> rusqlite::Result<Counts> {
     Ok(Counts {
         uncached_input: row.get(start)?,
         cache_read: row.get(start + 1)?,
         cache_write: row.get(start + 2)?,
         cache_write_1h: row.get(start + 3)?,
         output: row.get(start + 4)?,
+        reasoning_output: row.get(reasoning)?,
         flags: row.get(start + 5)?,
     })
 }

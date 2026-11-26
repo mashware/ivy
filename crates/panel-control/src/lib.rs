@@ -52,6 +52,7 @@ pub mod diagnostic_peer;
 pub mod endpoint;
 pub mod image;
 pub mod listener;
+pub mod quota;
 pub mod session;
 #[cfg(windows)]
 pub mod windows_services;

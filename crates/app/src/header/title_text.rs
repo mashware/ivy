@@ -1,4 +1,4 @@
-//! Paint title text with font-independent Unicode braille cells.
+//! Paint title text with font-independent braille and half-circle indicators.
 
 use eframe::egui::{self, Align2, Color32, FontId, Painter, Pos2, Vec2};
 
@@ -11,7 +11,14 @@ pub(crate) fn paint(
     font: FontId,
     color: Color32,
 ) -> Vec2 {
-    if !text.chars().any(is_braille) {
+    let half_circle = if text.starts_with("◐ ") {
+        Some(true)
+    } else if text.starts_with("◑ ") {
+        Some(false)
+    } else {
+        None
+    };
+    if half_circle.is_none() && !text.chars().any(is_braille) {
         return painter.text(position, anchor, text, font, color).size();
     }
 
@@ -23,12 +30,19 @@ pub(crate) fn paint(
     let height = reference.size().y;
     // A braille cell has two columns and four rows; its width scales with the font.
     let advance = font.size * 0.6;
+    let diameter = font.size * 0.7;
+    let circle_width = half_circle.map_or(0.0, |_| diameter);
+    let rest = if half_circle.is_some() {
+        &text['◐'.len_utf8()..]
+    } else {
+        text
+    };
     let mut parts = Vec::new();
-    let mut width = 0.0;
+    let mut width = circle_width;
     let mut start = 0;
-    for (index, c) in text.char_indices().filter(|(_, c)| is_braille(*c)) {
+    for (index, c) in rest.char_indices().filter(|(_, c)| is_braille(*c)) {
         if start < index {
-            let galley = painter.layout_no_wrap(text[start..index].to_owned(), font.clone(), color);
+            let galley = painter.layout_no_wrap(rest[start..index].to_owned(), font.clone(), color);
             width += galley.size().x;
             parts.push(Part::Text(galley));
         }
@@ -36,14 +50,18 @@ pub(crate) fn paint(
         width += advance;
         start = index + c.len_utf8();
     }
-    if start < text.len() {
-        let galley = painter.layout_no_wrap(text[start..].to_owned(), font, color);
+    if start < rest.len() {
+        let galley = painter.layout_no_wrap(rest[start..].to_owned(), font, color);
         width += galley.size().x;
         parts.push(Part::Text(galley));
     }
     let size = egui::vec2(width, height);
     let origin = anchor.anchor_size(position, size).min;
-    let mut x = origin.x;
+    if let Some(left_filled) = half_circle {
+        let center = origin + egui::vec2(diameter / 2.0, height / 2.0);
+        paint_half_circle(painter, center, diameter, left_filled, color);
+    }
+    let mut x = origin.x + circle_width;
     for part in parts {
         match part {
             Part::Text(galley) => {
@@ -74,6 +92,30 @@ pub(crate) fn paint(
     size
 }
 
+fn paint_half_circle(
+    painter: &Painter,
+    center: Pos2,
+    diameter: f32,
+    left_filled: bool,
+    color: Color32,
+) {
+    let stroke = egui::Stroke::new(diameter * 0.1, color);
+    let radius = (diameter - stroke.width) / 2.0;
+    let start = if left_filled { 0.5 } else { -0.5 };
+    let vertices = (0..=12)
+        .map(|step| {
+            let angle = (start + step as f32 / 12.0) * std::f32::consts::PI;
+            center + egui::vec2(angle.cos(), angle.sin()) * radius
+        })
+        .collect();
+    painter.add(egui::Shape::convex_polygon(
+        vertices,
+        color,
+        egui::Stroke::NONE,
+    ));
+    painter.circle_stroke(center, radius, stroke);
+}
+
 fn is_braille(c: char) -> bool {
     ('\u{2800}'..='\u{28ff}').contains(&c)
 }
@@ -84,6 +126,10 @@ mod tests {
     use egui::{Rect, epaint::Shape};
 
     fn scene(text: &str, clip: Rect) -> (Vec2, Vec<egui::epaint::ClippedShape>) {
+        scene_at_size(text, clip, 20.0)
+    }
+
+    fn scene_at_size(text: &str, clip: Rect, size: f32) -> (Vec2, Vec<egui::epaint::ClippedShape>) {
         let ctx = egui::Context::default();
         ctx.begin_pass(Default::default());
         let painter = ctx
@@ -94,12 +140,52 @@ mod tests {
             egui::pos2(10.0, 30.0),
             Align2::LEFT_CENTER,
             text,
-            FontId::proportional(20.0),
+            FontId::proportional(size),
             Color32::WHITE,
         );
         let mut output = ctx.end_pass();
         output.textures_delta.clear();
         (size, output.shapes)
+    }
+
+    #[test]
+    fn the_half_circle_frames_keep_the_outline_and_following_text_in_place() {
+        let clip = Rect::from_min_max(egui::pos2(0.0, 10.0), egui::pos2(80.0, 50.0));
+        for size in [8.0, 14.0, 24.0] {
+            let (left_size, left) = scene_at_size("◐ Title", clip, size);
+            let (right_size, right) = scene_at_size("◑ Title", clip, size);
+            assert_eq!(left_size, right_size);
+            assert!(
+                left.iter()
+                    .chain(&right)
+                    .all(|shape| shape.clip_rect == clip)
+            );
+            let parts = |shapes: &[egui::epaint::ClippedShape]| match shapes {
+                [fill, outline, title] => match (&fill.shape, &outline.shape, &title.shape) {
+                    (Shape::Path(fill), Shape::Circle(outline), Shape::Text(title)) => {
+                        assert_eq!(title.galley.job.text, " Title");
+                        let middle = fill.points[fill.points.len() / 2];
+                        (
+                            middle,
+                            outline.center,
+                            outline.radius,
+                            outline.stroke,
+                            title.pos,
+                        )
+                    }
+                    _ => panic!("expected a half fill, circular outline and title"),
+                },
+                _ => panic!("expected exactly three shapes"),
+            };
+            let (left_fill, left_center, left_radius, left_stroke, left_title) = parts(&left);
+            let (right_fill, right_center, right_radius, right_stroke, right_title) = parts(&right);
+            assert_eq!(left_center, right_center);
+            assert_eq!(left_radius, right_radius);
+            assert_eq!(left_stroke, right_stroke);
+            assert_eq!(left_title, right_title);
+            assert!((left_fill.x - (left_center.x - left_radius)).abs() < 0.001);
+            assert!((right_fill.x - (right_center.x + right_radius)).abs() < 0.001);
+        }
     }
 
     #[test]

@@ -286,6 +286,10 @@ impl Screen {
     pub fn advance(&mut self, bytes: &[u8]) {
         self.metadata.advance(bytes);
         self.parser.advance(&mut self.term, bytes);
+        self.update_title();
+    }
+
+    fn update_title(&mut self) {
         if let Some(update) = self.titles.take() {
             self.terminal_title = update;
         }
@@ -299,10 +303,33 @@ impl Screen {
     pub fn advance_with_replies(
         &mut self,
         bytes: &[u8],
+        write: impl FnMut(&[u8]) -> crate::Result<()>,
+    ) -> crate::Result<()> {
+        self.advance_with_client_replies(bytes, false, write)
+    }
+
+    /// Include at most one opted-in client capability response in the ordinary terminal reply
+    /// stream. The fixed response has a separate allowance from the ordinary 16 KiB ceiling.
+    pub fn advance_with_client_replies(
+        &mut self,
+        bytes: &[u8],
+        answer_capability: bool,
         mut write: impl FnMut(&[u8]) -> crate::Result<()>,
     ) -> crate::Result<()> {
         self.titles.begin_replies();
-        self.advance(bytes);
+        self.metadata.advance(bytes);
+        if answer_capability && let Some(offset) = self.metadata.query_offset {
+            let (before, after) = bytes.split_at(offset);
+            self.parser.advance(&mut self.term, before);
+            // Claude closes its capability negotiation on the following device-attributes
+            // response, even if the capability response arrives in the same write.
+            self.titles.reply_to_program_query();
+            self.metadata.query = false;
+            self.parser.advance(&mut self.term, after);
+        } else {
+            self.parser.advance(&mut self.term, bytes);
+        }
+        self.update_title();
         let batch = self.titles.end_replies();
         if let Some(error) = batch.error {
             return Err(error.into());

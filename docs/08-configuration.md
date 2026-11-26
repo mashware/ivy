@@ -998,3 +998,33 @@ controls. Named Show controls above the columns recover hidden groups even when 
 Maximize temporarily shows one group; Restore layout returns the previous widths and visibility.
 These choices are per project for the current app session. Show all temporarily bypasses them and
 keeps its flat roadmap order. No new configuration keys are introduced.
+
+## Claude subscription allowance snapshots
+
+Open **AI usage**, then select **Enable allowance reporting**. Choose a launch
+directory and preview the Claude Code statusline before launching it in an
+Ivy tab. Allowance consent applies to the current Ivy window and starts off
+in each new window. Local history has its own consent and uses its own data.
+
+A launch previews the existing command and supported statusline options. Its
+input, output and exit status stay with Claude Code. Ivy adds a private
+settings overlay for this launch. Claude continues to resolve the other
+statusline options. To change the original command,
+use an ordinary Claude launch or preview it again before a new Ivy launch.
+A custom statusline can hide some native Claude footer hints.
+
+The five-hour and seven-day rows are independent. A snapshot may show usage,
+a reset time, both or neither. A reset that has passed expires that window.
+The account remains unverified. Disabling reporting clears Ivy's readings
+and leaves the original command available to the running Claude launch.
+
+| Client and platform | Evidence |
+|---|---|
+| Claude Code 2.1.332 · Linux native executable · POSIX `/bin/sh` | Verified installed-client startup, settings precedence, the file overlay, original output and cancellation. The signed-in client emitted both windows after one response. Fixtures cover measured zero, expiry, disconnect and isolated producers. |
+| macOS, Windows and other client versions | Setup unavailable in this delivery. |
+
+The Linux receiver requires kernel peer process handles. Use this setup for
+an unmanaged Claude profile. The **Setting sources** section in Claude
+Code's `/status` shows any server-managed policy. A locally managed Claude
+installation or an unresolved project statusline leaves setup unavailable.
+Managed Claude policy keeps its native precedence. [Claude Code statusline](https://code.claude.com/docs/en/statusline)

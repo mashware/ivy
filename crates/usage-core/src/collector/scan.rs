@@ -62,6 +62,8 @@ pub(super) struct Resume {
 
 pub(super) struct Scan {
     relative: PathBuf,
+    provider: crate::Provider,
+    codex: crate::codex::Parser,
     root_key: [u8; 32],
     source_key: [u8; 32],
     salt: [u8; 32],
@@ -72,6 +74,8 @@ pub(super) struct Scan {
     target: u64,
     touched: u64,
     complete: u64,
+    verified_replay_bytes: u64,
+    replay_checked: bool,
     digest: Sha256,
     complete_hash: [u8; 32],
     line: Vec<u8>,
@@ -96,7 +100,13 @@ impl Scan {
         salt: [u8; 32],
         ledger: &Ledger,
         resume: Option<&Resume>,
+        provider: crate::Provider,
     ) -> Result<Self, Error> {
+        let root_key = if provider == crate::Provider::Codex {
+            key(&salt, b"codex-root", &root_key)
+        } else {
+            root_key
+        };
         let source_key = key(&salt, &root_key, relative.as_os_str().as_encoded_bytes());
         let old = ledger.checkpoint(source_key)?;
         let file = root.file(&relative)?;
@@ -113,6 +123,8 @@ impl Scan {
         };
         let mut scan = Self {
             relative,
+            provider,
+            codex: crate::codex::Parser::default(),
             root_key,
             source_key,
             salt,
@@ -130,6 +142,8 @@ impl Scan {
             target,
             touched: 0,
             complete: 0,
+            verified_replay_bytes: 0,
+            replay_checked: false,
             digest: Sha256::new(),
             complete_hash: Sha256::digest([]).into(),
             line: Vec::new(),
@@ -139,7 +153,8 @@ impl Scan {
             verified: None,
             verified_prefix: None,
         };
-        if let Some(saved) = resume
+        if provider == crate::Provider::Claude
+            && let Some(saved) = resume
             && let Some(old) = &scan.old
             && saved.key == scan.source_key
             && saved.stamp == stamp
@@ -189,6 +204,15 @@ impl Scan {
                             return Err(io::ErrorKind::InvalidData.into_io());
                         }
                         return Ok(Progress::Unchanged);
+                    }
+                    if self.provider == crate::Provider::Codex {
+                        reader.seek(io::SeekFrom::Start(0))?;
+                        self.verified_replay_bytes = old.prefix_bytes;
+                        self.touched = 0;
+                        self.complete = 0;
+                        self.complete_hash = Sha256::digest([]).into();
+                        self.digest = Sha256::new();
+                        self.flags = 0;
                     }
                     Phase::Records
                 } else {
@@ -319,13 +343,40 @@ impl Scan {
             rows_read += 1;
             self.complete = self.touched;
             self.complete_hash = self.digest.clone().finalize().into();
+            if self.verified_replay_bytes != 0
+                && !self.replay_checked
+                && self.complete >= self.verified_replay_bytes
+            {
+                if self.complete != self.verified_replay_bytes
+                    || self
+                        .old
+                        .as_ref()
+                        .and_then(|checkpoint| checkpoint.fingerprint)
+                        != Some(self.complete_hash)
+                {
+                    return Err(io::ErrorKind::InvalidData.into_io());
+                }
+                self.replay_checked = true;
+            }
             if self.oversized {
+                self.codex.invalidate_baseline();
                 self.flags |= UNRESOLVED;
             } else {
-                match claude::parse(&self.line, self.source_key, &self.salt) {
+                let record = match self.provider {
+                    crate::Provider::Claude => {
+                        claude::parse(&self.line, self.source_key, &self.salt)
+                    }
+                    crate::Provider::Codex => {
+                        self.codex.parse(&self.line, self.source_key, &self.salt)
+                    }
+                };
+                match record {
                     Record::Ignored => {}
                     Record::Unresolved => self.flags |= UNRESOLVED,
-                    Record::Observation(row) => rows.push(row),
+                    Record::Observation(row) if self.complete > self.verified_replay_bytes => {
+                        rows.push(row)
+                    }
+                    Record::Observation(_) => {}
                 }
             }
             self.oversized = false;
@@ -333,6 +384,10 @@ impl Scan {
             if self.complete >= self.target {
                 return Ok((true, rows));
             }
+        }
+        if self.touched == self.captured && self.verified_replay_bytes != 0 && !self.replay_checked
+        {
+            return Err(io::ErrorKind::InvalidData.into_io());
         }
         Ok((self.touched == self.captured, rows))
     }
@@ -361,6 +416,7 @@ impl Scan {
             return Err(io::ErrorKind::InvalidData.into_io());
         }
         ledger.publish(Checkpoint {
+            provider: self.provider,
             root_key: self.root_key,
             fingerprint: Some(self.complete_hash),
             prefix_bytes: self.complete,
@@ -439,8 +495,14 @@ mod tests {
     use super::*;
     use std::fs;
 
-    #[test]
-    fn verified_prefix_is_reused_only_for_the_same_unchanged_open_file() {
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch() -> Cleanup {
         let mut nonce = [0; 8];
         getrandom::fill(&mut nonce).unwrap();
         let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
@@ -448,13 +510,60 @@ mod tests {
             u64::from_le_bytes(nonce)
         ));
         fs::create_dir(&path).unwrap();
-        struct Cleanup(PathBuf);
-        impl Drop for Cleanup {
-            fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.0);
-            }
-        }
-        let _cleanup = Cleanup(path.clone());
+        Cleanup(path)
+    }
+
+    #[test]
+    fn codex_replay_rejects_a_rewrite_that_removes_the_verified_boundary() {
+        let scratch = scratch();
+        let path = &scratch.0;
+        let relative = PathBuf::from("rollout-test.jsonl");
+        let source = path.join(&relative);
+        let before = b"first\n";
+        fs::write(&source, b"first\nsecond\n").unwrap();
+        let root = Root::open(confined::bind(path.clone()).unwrap()).unwrap();
+        let salt = [7; 32];
+        let root_key = [9; 32];
+        let codex_root_key = key(&salt, b"codex-root", &root_key);
+        let source_key = key(
+            &salt,
+            &codex_root_key,
+            relative.as_os_str().as_encoded_bytes(),
+        );
+        let mut ledger = Ledger::open_writer(&path.join("ledger.sqlite3")).unwrap();
+        ledger.upgrade_for_codex().unwrap();
+        ledger.begin(source_key).unwrap();
+        assert!(ledger.reconcile_slice().unwrap());
+        ledger
+            .publish(Checkpoint {
+                provider: crate::Provider::Codex,
+                root_key: codex_root_key,
+                fingerprint: Some(Sha256::digest(before).into()),
+                prefix_bytes: before.len() as u64,
+                coverage: PREFIX_PENDING,
+            })
+            .unwrap();
+        let mut scan = Scan::new(
+            &root,
+            relative,
+            root_key,
+            salt,
+            &ledger,
+            None,
+            crate::Provider::Codex,
+        )
+        .unwrap();
+        assert!(matches!(scan.step(&root, &mut ledger), Ok(Progress::Work)));
+        fs::write(&source, b"first-second\n").unwrap();
+        assert!(
+            matches!(scan.step(&root, &mut ledger), Err(Error::Io(e)) if e.kind() == io::ErrorKind::InvalidData)
+        );
+    }
+
+    #[test]
+    fn verified_prefix_is_reused_only_for_the_same_unchanged_open_file() {
+        let scratch = scratch();
+        let path = scratch.0.clone();
         let relative = PathBuf::from("source.jsonl");
         let source = path.join(&relative);
         let before = b"first\n";
@@ -478,6 +587,7 @@ mod tests {
         assert!(ledger.reconcile_slice().unwrap());
         ledger
             .publish(Checkpoint {
+                provider: crate::Provider::Claude,
                 root_key,
                 fingerprint: Some(digest.finalize().into()),
                 prefix_bytes: before.len() as u64,
@@ -492,6 +602,7 @@ mod tests {
             salt,
             &ledger,
             Some(&resume),
+            crate::Provider::Claude,
         )
         .unwrap();
         assert_eq!(scan.touched, before.len() as u64);
@@ -504,13 +615,23 @@ mod tests {
             salt,
             &ledger,
             Some(&resume),
+            crate::Provider::Claude,
         )
         .unwrap();
         assert!(matches!(scan.phase, Some(Phase::OldPrefix { read: 0, .. })));
 
         fs::rename(&source, path.join("previous.jsonl")).unwrap();
         fs::write(&source, b"first\nsecond\n").unwrap();
-        let scan = Scan::new(&root, relative, root_key, salt, &ledger, Some(&resume)).unwrap();
+        let scan = Scan::new(
+            &root,
+            relative,
+            root_key,
+            salt,
+            &ledger,
+            Some(&resume),
+            crate::Provider::Claude,
+        )
+        .unwrap();
         assert!(matches!(scan.phase, Some(Phase::OldPrefix { read: 0, .. })));
     }
 }

@@ -9788,8 +9788,14 @@ complete eligible snapshot is required. Incomplete child/pending hydration canno
 No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
 
-Automatic capability replies reuse the existing PTY write queue only when it has no backlog;
-at most one reply is deferred. They cannot spend or clear the person's refused-input state.
+Automatic capability replies share the bounded terminal reply batch and the ordered PTY writer.
+Claude Code 2.1.332 ends negotiation when it receives the second primary device-attributes reply.
+If it receives that reply before the capability reply, it omits native declarations even when both
+responses arrive in a single write. The one fixed-size capability reply has its own allowance.
+Preserve query order, including when the terminator starts a new read. An already
+queued reply is allowed to finish ahead of this batch. At most one capability reply is deferred
+when the writer reaches its ceiling or has a standing input refusal. Inferred client identity was
+discarded because it would bypass the native opt-in and would leave the broken handshake in place.
 A fresh enabled native declaration can replace a disconnected TUI reporter; an untagged clear or
 capability probe cannot withdraw that reporter's unconfirmed wait. Transient signal channel queue-full/timeouts carry an explicit retryable flag and retry
 on the same connection; legacy tool replies keep their shape. Repeatedly reconnecting while a
@@ -10769,6 +10775,12 @@ the added fallback only supplies missing characters and survives every definitio
 Discarded: requiring a system font (machine-dependent coverage and discovery), adding another
 font asset (coverage already ships), and drawing or replacing the published symbol ourselves
 (the text font already contains it). This changes neither terminal font selection nor title text.
+
+**Half-circle animation, #276.** Claude Code 2.1.332 alternates U+25D0 and U+25D1 at the start of
+its title. At 14 points the bundled faces paint them at 9 × 10 and 13 × 13 pixels and shift the
+following text by four pixels. Draw those leading half-circle symbols with one circular outline,
+two opposite fills and one advance. Choosing a common font was discarded because its glyphs can
+still have different outlines or advances. Elsewhere the symbols keep the existing font fallback.
 
 **D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell within
 a hundredth of a point. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
@@ -12642,3 +12654,66 @@ rules at the pinned revision with its MIT notice. A ledger copy would double
 the needed staging space. A standalone append journal would need separate
 indexed replay and date queries. A per-console or Board view would imply a
 usage association the local logs cannot prove.
+
+## D128 — Claude allowance reporting is scoped to a previewed launch
+
+**Decision.** AI usage has a separate, window-local opt-in for Claude
+subscription snapshots.
+An explicit launch previews the effective prior statusline command and extends
+Claude Code only for that process. The original command is pinned to the
+preview for that launch. Claude keeps responsibility for the other statusline
+options. A person can use an ordinary launch to apply later command changes,
+or preview and launch again for allowance reporting.
+
+Each producer is bound to the app-owned launch and a verified local process
+scope. Its latest observation lives in memory and is labeled account unverified.
+Each window expires independently. Disabling immediately revokes receivers
+and clears their observations. Existing wrappers can still delegate the prior
+command while Claude runs.
+
+**Why.** The official statusline exposes optional window percentages and reset
+times, independent of both local usage history and account identity. Claude
+loads the private settings overlay only for this launch, leaving client files
+unchanged. A live root witness and per-launch endpoint enforce isolation without
+giving telemetry access to task panels or console input.
+
+**Discarded.** Editing a user settings file would affect standalone sessions
+and can race with Claude or the person's edits. An account cache would give
+current meaning to data that does not identify an account. A single viewer
+timer would wake Ivy when the AI usage screen is closed.
+
+## D129 — Codex allowances are account-bound observations
+
+**Decision.** AI usage offers an independent, default-off Codex allowance control. A manual refresh
+runs a fresh official Codex client with owned standard streams and closes it after the read. Ivy
+shows the verified account context and observation time. Closing the view or disabling allowance
+reads invalidates the result and cancels the request. Allowance observations are kept in memory.
+
+**Why.** The official client may retain its loaded login after another process changes accounts,
+and the rate-limit RPC can return buckets even when the response belongs to a different user.
+The admitted Linux x86_64 Codex CLI 0.167.2 path requires the same complete session, user and
+workspace identity before and after the request, the response workspace ID, and the client's
+account-and-user binding witness. The witness's boolean value is unrelated to identity. Its
+presence is the evidence. Disable plugins for this invocation and exclude reset-credit details
+to avoid observed unrelated reads. Auth and its lifecycle belong to the official client (D4).
+
+**Discarded.** No shared TUI connection, local history inference, account watching or credential-file
+access from Ivy. A single workspace ID cannot distinguish two users in that workspace. The pinned
+protocol semantics and native evidence initially cover Linux x86_64 and that release only.
+
+## D130 — Codex history joins local usage through separate consent
+
+**Decision.** AI usage can import explicitly selected Codex rollout folders.
+The existing private ledger is upgraded only when Codex is enabled and the
+worker owns the ledger. Existing Claude records keep their identity, totals
+and dates. The view compares providers and models over local calendar hours,
+days and months. Reasoning is displayed as a subset of output.
+
+**Why.** Copied rollout files can contain the same cumulative snapshots.
+Bounded replay reconstructs the baseline for a verified prefix, and the
+ledger keeps conflicting evidence partial. A single ledger and owner keep
+retention, clearing, resource limits and publication under one lifecycle.
+
+**Discarded.** Separate ledgers complicate clear and combined limits.
+A timestamp and token count cannot identify a Codex call by themselves.
+Direct account access is unnecessary for local history.

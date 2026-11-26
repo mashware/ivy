@@ -12,6 +12,7 @@ pub(crate) mod fresh;
 use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
+const PENDING_INPUT_CEILING: usize = 256 * 1024;
 type Spawned = (Pty, Receiver<Vec<u8>>);
 
 #[derive(Debug)]
@@ -77,6 +78,9 @@ pub fn enable(launcher: PathBuf) {
 }
 
 pub(crate) struct Process {
+    // Revoke quota publication before waiting for PTY teardown.
+    #[cfg(target_os = "linux")]
+    quota_lease: Option<crate::usage::QuotaLease>,
     live: Option<Pty>,
     #[cfg(windows)]
     invocation: Option<term_core::WindowsInvocation>,
@@ -120,6 +124,8 @@ impl From<Pty> for Process {
             startup_failure: None,
             delivery_failed: false,
             dismissed: false,
+            #[cfg(target_os = "linux")]
+            quota_lease: None,
         }
     }
 }
@@ -146,6 +152,8 @@ impl Process {
             startup_failure: None,
             delivery_failed: false,
             dismissed: false,
+            #[cfg(target_os = "linux")]
+            quota_lease: None,
         }
     }
 }
@@ -165,8 +173,25 @@ impl Process {
         reads: crate::control::ReadActivity,
         request: Request<'_>,
     ) -> term_core::Result<(Self, Receiver<Vec<u8>>)> {
+        Self::start_configured(
+            wake,
+            reads,
+            request,
+            #[cfg(target_os = "linux")]
+            None,
+        )
+    }
+
+    pub(crate) fn start_configured(
+        wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+        reads: crate::control::ReadActivity,
+        request: Request<'_>,
+        #[cfg(target_os = "linux")] quota: Option<crate::usage::QuotaStartup>,
+    ) -> term_core::Result<(Self, Receiver<Vec<u8>>)> {
         #[cfg(target_os = "linux")]
-        if let Some(launcher) = launcher() {
+        let scope_launcher = launcher();
+        #[cfg(target_os = "linux")]
+        if scope_launcher.is_some() || quota.is_some() {
             let program = request.program.to_owned();
             let args: Vec<String> = request.args.iter().map(|arg| (*arg).to_owned()).collect();
             let env: Vec<(String, Option<OsString>)> = request
@@ -177,7 +202,14 @@ impl Process {
             let directory = request.directory.map(Path::to_owned);
             let size = request.size;
             let fallback = request.fallback;
-            return start_worker(wake, reads, move || {
+            let lease = quota.as_ref().map(crate::usage::QuotaStartup::lease);
+            let (mut process, output) = start_worker(wake, reads, move || {
+                if let Some(startup) = &quota
+                    && let Err(error) = startup.verify()
+                {
+                    startup.fail();
+                    return Err(Box::new(error));
+                }
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
                 let borrowed: Vec<(&str, Option<&OsStr>)> = env
                     .iter()
@@ -189,18 +221,21 @@ impl Process {
                     .and_then(|(_, value)| value.as_ref())
                     .map(|v| v.to_string_lossy())
                     .unwrap_or_else(|| "console".into());
-                let spawn = |program, args: &[&str]| {
-                    Pty::spawn_with_launcher_in(
-                        &launcher,
+                let spawn = |program, args: &[&str]| match scope_launcher.as_deref() {
+                    Some(launcher) => Pty::spawn_with_launcher_in(
+                        launcher,
                         &identity,
                         program,
                         args,
                         size,
                         &borrowed,
                         directory.as_deref(),
-                    )
+                    ),
+                    None => {
+                        Pty::spawn_with_env_in(program, args, size, &borrowed, directory.as_deref())
+                    }
                 };
-                match spawn(&program, &args) {
+                let result = match spawn(&program, &args) {
                     Err(error)
                         if fallback && program != crate::shell_integration::fallback_shell() =>
                     {
@@ -211,8 +246,17 @@ impl Process {
                         spawn(fallback, &[])
                     }
                     result => result,
+                };
+                if let Some(startup) = quota {
+                    match &result {
+                        Ok((pty, _)) => startup.bind(pty),
+                        Err(_) => startup.fail(),
+                    }
                 }
-            });
+                result
+            })?;
+            process.quota_lease = lease;
+            return Ok((process, output));
         }
         let _ = (wake, reads);
         let spawn = |program: &str, args: &[&str]| {
@@ -266,6 +310,8 @@ impl Process {
             startup_failure: Some(error),
             delivery_failed: false,
             dismissed: false,
+            #[cfg(target_os = "linux")]
+            quota_lease: None,
         };
         (process, output)
     }
@@ -339,6 +385,15 @@ impl Process {
             refusals: self.refusals,
         })
     }
+    pub(crate) fn can_queue_reply(&self) -> bool {
+        self.live.as_ref().is_some_and(|live| {
+            if self.startup_pending() || !self.input.is_empty() {
+                !self.refused && self.input.len() < PENDING_INPUT_CEILING
+            } else {
+                live.can_queue_reply()
+            }
+        })
+    }
     pub(crate) fn resize(&mut self, size: Size) -> term_core::Result<()> {
         if !self.startup_pending()
             && let Some(live) = &mut self.live
@@ -358,7 +413,7 @@ impl Process {
             return Err("the console could not be started".into());
         }
         // Match D60: accept one paste whole, refuse subsequent input while the queue is full.
-        if self.input.len() >= 256 * 1024 {
+        if self.input.len() >= PENDING_INPUT_CEILING {
             self.refused = true;
             self.refusals += 1;
             return Err(
@@ -604,6 +659,8 @@ fn start_prepared_worker(
             startup_failure: None,
             delivery_failed: false,
             dismissed: false,
+            #[cfg(target_os = "linux")]
+            quota_lease: None,
         },
         output,
     ))

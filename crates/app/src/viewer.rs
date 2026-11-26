@@ -12,6 +12,7 @@ pub(crate) mod markdown;
 mod origin;
 mod palette;
 mod review;
+mod selection_scroll;
 mod view;
 
 use crate::sidebar::Tool;

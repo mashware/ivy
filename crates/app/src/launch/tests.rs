@@ -28,9 +28,70 @@ fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
             startup_failure: None,
             delivery_failed: false,
             dismissed: false,
+            #[cfg(target_os = "linux")]
+            quota_lease: None,
         },
         sender,
     )
+}
+
+crate::windows_unix_omission!(
+    native_capability_reply_keeps_its_place_in_buffered_startup,
+    "unix-only: runs /bin/sh in raw PTY mode to capture startup replies"
+);
+#[cfg(unix)]
+#[test]
+fn native_capability_reply_keeps_its_place_in_buffered_startup() {
+    let (process, complete) = pending();
+    let expected = b"\x1b]7501;?\x07\x1b[?6c";
+    let script = format!(
+        "stty raw -echo && printf READY && dd bs=1 count={} 2>/dev/null | od -An -tu1",
+        expected.len()
+    );
+    let (pty, received) = Pty::spawn("/bin/sh", &["-c", &script], Size::default()).unwrap();
+    let mut ready = Vec::new();
+    while ready.len() < b"READY".len() {
+        ready.extend(received.recv_timeout(Duration::from_secs(2)).unwrap());
+    }
+    assert_eq!(ready, b"READY");
+    complete
+        .send(Ok(Ready {
+            spawned: (pty, received),
+            startup: b"\x1b]7501;?\x07\x1b[c".to_vec(),
+        }))
+        .unwrap();
+    let mut pane = crate::Pane::with_panel(
+        &Default::default(),
+        crate::shell_integration::fallback_shell(),
+        &[],
+        None,
+        0,
+    )
+    .unwrap();
+    pane.pty = process;
+    let enabled = crate::agent_signals::Enabled {
+        claude: true,
+        ..Default::default()
+    };
+    pane.pump(enabled);
+    finish_input(&mut pane);
+    let mut reply = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !reply.contains(&b'\n') {
+        pane.pump(enabled);
+        reply.extend_from_slice(&pane.received);
+        assert!(
+            Instant::now() < deadline,
+            "startup replies did not reach the client"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let reply: Vec<u8> = std::str::from_utf8(&reply)
+        .unwrap()
+        .split_whitespace()
+        .map(|byte| byte.parse().unwrap())
+        .collect();
+    assert_eq!(reply, expected);
 }
 
 crate::windows_unix_omission!(

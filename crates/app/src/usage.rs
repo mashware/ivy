@@ -6,10 +6,21 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use usage_core::{DateRange, Service, Snapshot, Status};
+use usage_core::{DateRange, Granularity, Provider, Service, Snapshot, Status};
 
+mod allowances;
+mod codex_controls;
 mod paint;
 use paint::paint_summary;
+
+#[cfg(target_os = "linux")]
+mod quota_broker;
+#[cfg(target_os = "linux")]
+mod quota_setup;
+#[cfg(target_os = "linux")]
+mod quota_view;
+#[cfg(target_os = "linux")]
+pub(crate) use quota_view::{Lease as QuotaLease, Startup as QuotaStartup};
 
 #[derive(Default)]
 pub(crate) struct View {
@@ -19,14 +30,22 @@ pub(crate) struct View {
     focus: Option<egui::Id>,
     service: Option<Service>,
     snapshot: Option<Snapshot>,
+    allowances: allowances::AllowanceView,
     roots: Vec<PathBuf>,
     new_root: String,
+    codex: codex_controls::Controls,
+    provider: Option<Provider>,
+    model_filter: String,
+    applied_model: Option<String>,
+    granularity: Granularity,
     confirm_clear: bool,
     hide_result: bool,
     period: Period,
     requested_range: Option<DateRange>,
     timing: Timing,
     measured: Option<Measurement>,
+    #[cfg(target_os = "linux")]
+    quota: quota_view::QuotaView,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -73,6 +92,22 @@ fn local_boundary(day: NaiveDate, zone: &impl TimeZone) -> Option<i64> {
     })
 }
 
+fn snapshot_has_partial_codex(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_some_and(|snapshot| snapshot.codex_enabled && snapshot.status == Status::Partial)
+}
+
+fn request_comparison(view: &mut View) {
+    if let (Some(service), Some(range)) = (&view.service, view.period.range()) {
+        view.requested_range = Some(range);
+        service.request_comparison(
+            range,
+            view.provider,
+            view.applied_model.clone(),
+            view.granularity,
+        );
+    }
+}
+
 impl View {
     #[cfg(test)]
     pub(crate) fn open_for_test(&mut self) {
@@ -85,7 +120,10 @@ impl View {
 
     fn close(&mut self, ctx: &egui::Context) {
         self.open = false;
+        self.allowances.close();
         self.confirm_clear = false;
+        #[cfg(target_os = "linux")]
+        self.quota.close();
         ctx.memory_mut(|memory| {
             memory.stop_text_input();
             if let Some(id) = self.focus.take() {
@@ -95,15 +133,12 @@ impl View {
         ctx.request_repaint();
     }
 
-    fn request(&mut self) {
-        if let (Some(service), Some(range)) = (&self.service, self.period.range()) {
-            self.requested_range = Some(range);
-            service.request(range);
-        }
-    }
-
     fn snapshot_matches_range(&self, snapshot: &Snapshot) -> bool {
-        self.requested_range.is_some() && self.requested_range == snapshot.range
+        self.requested_range.is_some()
+            && self.requested_range == snapshot.range
+            && self.provider == snapshot.provider
+            && self.applied_model == snapshot.model_filter
+            && self.granularity == snapshot.granularity
     }
 
     fn install_snapshot(&mut self) {
@@ -129,9 +164,11 @@ impl View {
             .as_ref()
             .is_some_and(|s| s.status == Status::WaitingToClear);
 
+        if let Some(snapshot) = &self.snapshot {
+            ui.label(status_label(snapshot.status));
+        }
         ui.strong("Claude Code · Local, unassigned history");
         if let Some(s) = &self.snapshot {
-            ui.label(status_label(s.status));
             if let Some(success) = s
                 .last_success_at_ms
                 .and_then(chrono::DateTime::from_timestamp_millis)
@@ -223,9 +260,18 @@ impl View {
                 service.enable(std::mem::take(&mut self.roots));
             }
         }
+        let codex_enabled = self.codex.paint(
+            ui,
+            service,
+            self.snapshot.as_ref(),
+            !waiting && supported && !clearing && !incompatible,
+        );
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(enabled && !clearing, egui::Button::new("Stop collection"))
+                .add_enabled(
+                    (enabled || codex_enabled) && !clearing,
+                    egui::Button::new("Stop collection for all providers"),
+                )
                 .clicked()
             {
                 service.stop();
@@ -233,7 +279,9 @@ impl View {
             let has_history = self.snapshot.as_ref().is_some_and(|s| {
                 s.has_history
                     || s.enabled
+                    || s.codex_enabled
                     || !s.roots.is_empty()
+                    || !s.codex_roots.is_empty()
                     || matches!(s.status, Status::Error | Status::Incompatible)
             });
             if ui
@@ -259,23 +307,70 @@ impl View {
                 }
             });
         }
+        if snapshot_has_partial_codex(self.snapshot.as_ref()) {
+            ui.small("Codex coverage can be incomplete. Compressed rollouts and unverified fork history are skipped.");
+        }
         ui.separator();
         let old_period = self.period;
         ui.horizontal_wrapped(|ui| {
             for (period, label) in Period::OPTIONS {
-                ui.selectable_value(&mut self.period, period, label);
+                if self.granularity != Granularity::Hour || period == Period::Week {
+                    ui.selectable_value(&mut self.period, period, label);
+                }
             }
         });
-        if old_period != self.period {
+        let old_provider = self.provider;
+        let old_granularity = self.granularity;
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.provider, None, "All providers");
+            ui.selectable_value(&mut self.provider, Some(Provider::Claude), "Claude Code");
+            ui.selectable_value(&mut self.provider, Some(Provider::Codex), "Codex");
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.granularity, Granularity::Hour, "Hourly");
+            ui.selectable_value(&mut self.granularity, Granularity::Day, "Daily");
+            ui.selectable_value(&mut self.granularity, Granularity::Month, "Monthly");
+        });
+        let mut model_changed = false;
+        ui.horizontal(|ui| {
+            let input = ui.add(
+                egui::TextEdit::singleline(&mut self.model_filter)
+                    .hint_text("Model name")
+                    .char_limit(128),
+            );
+            if ui.button("Filter model").clicked()
+                || (input.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+            {
+                let model = self.model_filter.trim();
+                let next = (!model.is_empty()).then(|| model.to_owned());
+                model_changed = self.applied_model != next;
+                self.applied_model = next;
+            }
+            if self.applied_model.is_some() && ui.button("Clear model filter").clicked() {
+                self.model_filter.clear();
+                self.applied_model = None;
+                model_changed = true;
+            }
+        });
+        if self.granularity == Granularity::Hour {
+            self.period = Period::Week;
+        }
+        if old_period != self.period
+            || old_provider != self.provider
+            || old_granularity != self.granularity
+            || model_changed
+        {
             self.hide_result = true;
-            self.request();
+            request_comparison(self);
             return;
         }
         if !self.hide_result
             && !clearing
             && let Some(snapshot) = &self.snapshot
             && self.snapshot_matches_range(snapshot)
-            && (snapshot.has_history || snapshot.last_success_at_ms.is_some())
+            && (snapshot.has_history
+                || snapshot.last_success_at_ms.is_some()
+                || snapshot.codex_last_success_at_ms.is_some())
         {
             paint_summary(ui, snapshot);
         }
@@ -302,6 +397,7 @@ fn status_label(status: Status) -> &'static str {
 enum Measurement {
     Open,
     Closed,
+    Allowances,
 }
 
 pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, measuring: bool) {
@@ -311,6 +407,7 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     let mode = match std::env::var("MEASURE_USAGE").ok().as_deref() {
         Some("open") => Measurement::Open,
         Some("closed") => Measurement::Closed,
+        Some("allowances") => Measurement::Allowances,
         _ => return,
     };
     let Some(root) = std::env::var_os("MEASURE_USAGE_ROOT").map(PathBuf::from) else {
@@ -324,8 +421,11 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     service.enable(vec![root]);
     window.usage.service = Some(service);
     window.usage.measured = Some(mode);
-    window.usage.open = matches!(mode, Measurement::Open);
-    window.usage.request();
+    window.usage.open = matches!(mode, Measurement::Open | Measurement::Allowances);
+    if matches!(mode, Measurement::Allowances) {
+        window.usage.allowances.prepare_measurement();
+    }
+    request_comparison(&mut window.usage);
 }
 
 pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
@@ -339,9 +439,11 @@ pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
     }
     view.focus = ctx.memory(|memory| memory.focused());
     view.open = true;
+    #[cfg(target_os = "linux")]
+    view.quota.open(ctx);
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.pointer.any_down());
-    view.request();
+    request_comparison(view);
     window.timed_separately += view.timing.record(0, started.elapsed());
     ctx.request_repaint();
 }
@@ -362,9 +464,10 @@ fn cache_directory() -> Option<PathBuf> {
 
 pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     let view = &mut window.usage;
-    if view.service.is_some() {
+    if view.service.is_some() || view.allowances.polling() {
         let started = Instant::now();
         view.install_snapshot();
+        view.allowances.poll();
         window.timed_separately += view.timing.record(0, started.elapsed());
     }
     let ctx = ui.ctx().clone();
@@ -372,8 +475,16 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
         return;
     }
     let started = Instant::now();
+    #[cfg(target_os = "linux")]
+    let mut launch = None;
     if view.open {
-        show(view, &ctx, &window.theme);
+        show(
+            view,
+            &ctx,
+            &window.theme,
+            #[cfg(target_os = "linux")]
+            &mut launch,
+        );
     }
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.focused && input.pointer.any_down());
@@ -392,15 +503,24 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     });
     ui.disable();
     window.timed_separately += view.timing.record(1, started.elapsed());
+    #[cfg(target_os = "linux")]
+    if let Some(launch) = launch {
+        quota_view::launch_in_window(window, &ctx, launch);
+    }
 }
 
-fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
+fn show(
+    view: &mut View,
+    ctx: &egui::Context,
+    theme: &Theme,
+    #[cfg(target_os = "linux")] launch: &mut Option<quota_view::Launch>,
+) {
     let now = chrono::Utc::now().timestamp_millis();
     if view
         .requested_range
         .is_some_and(|range| now >= range.end_ms)
     {
-        view.request();
+        request_comparison(view);
     }
     if let Some(range) = view.requested_range
         && let Ok(remaining) = u64::try_from(range.end_ms - now)
@@ -424,10 +544,23 @@ fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
                 .max_height((available.y - 150.0).max(40.0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
+                    #[cfg(target_os = "linux")]
+                    {
+                        *launch = view.quota.show(ui);
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    ui.small("Claude allowance unavailable · This platform has not been verified.");
+                    ui.separator();
+                    view.allowances.show(ui);
+                    ui.separator();
                     view.body(ui);
                 });
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        #[cfg(target_os = "linux")]
+        {
+            launch.take();
+        }
         view.close(ctx);
     }
 }
@@ -463,10 +596,16 @@ impl View {
         let mode = match self.measured {
             Some(Measurement::Open) => "open",
             Some(Measurement::Closed) => "closed",
+            Some(Measurement::Allowances) => "allowances",
             None => "none",
         };
         let tokens = self.snapshot.as_ref().map_or(0, |s| s.totals.tokens);
         writeln!(to, "usage measurement: {mode}, tokens={tokens}")?;
+        writeln!(
+            to,
+            "allowance fixture windows: {}",
+            self.allowances.measured_windows()
+        )?;
         for (index, name) in ["Usage snapshot", "Usage paint"].into_iter().enumerate() {
             let frames = self.timing.frames[index];
             let total = self.timing.totals[index];

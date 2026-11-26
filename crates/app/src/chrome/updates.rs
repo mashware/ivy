@@ -214,7 +214,7 @@ fn body(state: &mut Dialog, ui: &mut egui::Ui, desktop: &mut crate::links::Deskt
         state.source = source.to_owned();
     }
     if let Some(document) = &state.document {
-        document.show(ui);
+        document.show(ui, true);
     } else {
         ui.label("These release notes cannot be displayed. Open the release page to read them.");
     }
