@@ -12,6 +12,15 @@ mod codex_controls;
 mod paint;
 use paint::paint_summary;
 
+#[cfg(target_os = "linux")]
+mod quota_broker;
+#[cfg(target_os = "linux")]
+mod quota_setup;
+#[cfg(target_os = "linux")]
+mod quota_view;
+#[cfg(target_os = "linux")]
+pub(crate) use quota_view::{Lease as QuotaLease, Startup as QuotaStartup};
+
 #[derive(Default)]
 pub(crate) struct View {
     open: bool,
@@ -33,6 +42,8 @@ pub(crate) struct View {
     requested_range: Option<DateRange>,
     timing: Timing,
     measured: Option<Measurement>,
+    #[cfg(target_os = "linux")]
+    quota: quota_view::QuotaView,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -96,6 +107,8 @@ impl View {
     fn close(&mut self, ctx: &egui::Context) {
         self.open = false;
         self.confirm_clear = false;
+        #[cfg(target_os = "linux")]
+        self.quota.close();
         ctx.memory_mut(|memory| {
             memory.stop_text_input();
             if let Some(id) = self.focus.take() {
@@ -418,6 +431,8 @@ pub(crate) fn open(window: &mut Window, ctx: &egui::Context) {
     }
     view.focus = ctx.memory(|memory| memory.focused());
     view.open = true;
+    #[cfg(target_os = "linux")]
+    view.quota.open(ctx);
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.pointer.any_down());
     view.request();
@@ -451,8 +466,16 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
         return;
     }
     let started = Instant::now();
+    #[cfg(target_os = "linux")]
+    let mut launch = None;
     if view.open {
-        show(view, &ctx, &window.theme);
+        show(
+            view,
+            &ctx,
+            &window.theme,
+            #[cfg(target_os = "linux")]
+            &mut launch,
+        );
     }
     view.blocked_frame = Some(ctx.cumulative_frame_nr());
     view.awaiting_release = ctx.input(|input| input.focused && input.pointer.any_down());
@@ -471,9 +494,18 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     });
     ui.disable();
     window.timed_separately += view.timing.record(1, started.elapsed());
+    #[cfg(target_os = "linux")]
+    if let Some(launch) = launch {
+        quota_view::launch_in_window(window, &ctx, launch);
+    }
 }
 
-fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
+fn show(
+    view: &mut View,
+    ctx: &egui::Context,
+    theme: &Theme,
+    #[cfg(target_os = "linux")] launch: &mut Option<quota_view::Launch>,
+) {
     let now = chrono::Utc::now().timestamp_millis();
     if view
         .requested_range
@@ -503,10 +535,21 @@ fn show(view: &mut View, ctx: &egui::Context, theme: &Theme) {
                 .max_height((available.y - 150.0).max(40.0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
+                    #[cfg(target_os = "linux")]
+                    {
+                        *launch = view.quota.show(ui);
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    ui.small("Claude allowance unavailable · This platform has not been verified.");
+                    ui.separator();
                     view.body(ui);
                 });
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        #[cfg(target_os = "linux")]
+        {
+            launch.take();
+        }
         view.close(ctx);
     }
 }

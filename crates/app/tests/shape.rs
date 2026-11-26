@@ -342,6 +342,18 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/markdown.rs"),
     ),
     (
+        "src/viewer/markdown/selection.rs",
+        include_str!("../src/viewer/markdown/selection.rs"),
+    ),
+    (
+        "src/viewer/markdown/selection_tests.rs",
+        include_str!("../src/viewer/markdown/selection_tests.rs"),
+    ),
+    (
+        "src/viewer/selection_scroll.rs",
+        include_str!("../src/viewer/selection_scroll.rs"),
+    ),
+    (
         "src/viewer/tests.rs",
         include_str!("../src/viewer/tests.rs"),
     ),
@@ -698,6 +710,22 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/usage/codex_controls.rs"),
     ),
     ("src/usage/paint.rs", include_str!("../src/usage/paint.rs")),
+    (
+        "src/usage/quota_broker.rs",
+        include_str!("../src/usage/quota_broker.rs"),
+    ),
+    (
+        "src/usage/quota_broker/tests.rs",
+        include_str!("../src/usage/quota_broker/tests.rs"),
+    ),
+    (
+        "src/usage/quota_setup.rs",
+        include_str!("../src/usage/quota_setup.rs"),
+    ),
+    (
+        "src/usage/quota_view.rs",
+        include_str!("../src/usage/quota_view.rs"),
+    ),
     ("src/restoration.rs", include_str!("../src/restoration.rs")),
     (
         "src/session/ownership.rs",

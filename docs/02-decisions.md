@@ -12572,7 +12572,34 @@ the needed staging space. A standalone append journal would need separate
 indexed replay and date queries. A per-console or Board view would imply a
 usage association the local logs cannot prove.
 
-## D128 — Codex history joins local usage through separate consent
+## D128 — Claude allowance reporting is scoped to a previewed launch
+
+**Decision.** AI usage has a separate, window-local opt-in for Claude
+subscription snapshots.
+An explicit launch previews the effective prior statusline command and extends
+Claude Code only for that process. The original command is pinned to the
+preview for that launch. Claude keeps responsibility for the other statusline
+options. A person can use an ordinary launch to apply later command changes,
+or preview and launch again for allowance reporting.
+
+Each producer is bound to the app-owned launch and a verified local process
+scope. Its latest observation lives in memory and is labeled account unverified.
+Each window expires independently. Disabling immediately revokes receivers
+and clears their observations. Existing wrappers can still delegate the prior
+command while Claude runs.
+
+**Why.** The official statusline exposes optional window percentages and reset
+times, independent of both local usage history and account identity. Claude
+loads the private settings overlay only for this launch, leaving client files
+unchanged. A live root witness and per-launch endpoint enforce isolation without
+giving telemetry access to task panels or console input.
+
+**Discarded.** Editing a user settings file would affect standalone sessions
+and can race with Claude or the person's edits. An account cache would give
+current meaning to data that does not identify an account. A single viewer
+timer would wake Ivy when the AI usage screen is closed.
+
+## D129 — Codex history joins local usage through separate consent
 
 **Decision.** AI usage can import explicitly selected Codex rollout folders.
 The existing private ledger is upgraded only when Codex is enabled and the

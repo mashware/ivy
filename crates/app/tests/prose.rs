@@ -503,6 +503,21 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/markdown/selection.rs",
+        include_str!("../src/viewer/markdown/selection.rs"),
+        0,
+    ),
+    (
+        "src/viewer/markdown/selection_tests.rs",
+        include_str!("../src/viewer/markdown/selection_tests.rs"),
+        0,
+    ),
+    (
+        "src/viewer/selection_scroll.rs",
+        include_str!("../src/viewer/selection_scroll.rs"),
+        0,
+    ),
+    (
         "src/viewer/tests.rs",
         include_str!("../src/viewer/tests.rs"),
         0,
@@ -987,6 +1002,26 @@ const SOURCES: &[(&str, &str, usize)] = &[
         "src/usage/codex_controls.rs",
         include_str!("../src/usage/codex_controls.rs"),
         1,
+    ),
+    (
+        "src/usage/quota_broker.rs",
+        include_str!("../src/usage/quota_broker.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_broker/tests.rs",
+        include_str!("../src/usage/quota_broker/tests.rs"),
+        0,
+    ),
+    (
+        "src/usage/quota_setup.rs",
+        include_str!("../src/usage/quota_setup.rs"),
+        1,
+    ),
+    (
+        "src/usage/quota_view.rs",
+        include_str!("../src/usage/quota_view.rs"),
+        0,
     ),
     (
         "src/usage/paint.rs",

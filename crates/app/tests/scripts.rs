@@ -75,6 +75,42 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/usage/quota_broker.rs",
+        include_str!("../src/usage/quota_broker.rs"),
+    ),
+    (
+        "app/src/usage/quota_broker/tests.rs",
+        include_str!("../src/usage/quota_broker/tests.rs"),
+    ),
+    (
+        "app/src/usage/quota_setup.rs",
+        include_str!("../src/usage/quota_setup.rs"),
+    ),
+    (
+        "app/src/usage/quota_view.rs",
+        include_str!("../src/usage/quota_view.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/quota_statusline.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/quota_statusline.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/quota_statusline/cancellation.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/quota_statusline/cancellation.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-session/quota_statusline/linux.rs",
+        include_str!("../../panel-control/src/bin/ivy-session/quota_statusline/linux.rs"),
+    ),
+    (
+        "panel-control/src/quota.rs",
+        include_str!("../../panel-control/src/quota.rs"),
+    ),
+    (
+        "panel-control/tests/quota_statusline.rs",
+        include_str!("../../panel-control/tests/quota_statusline.rs"),
+    ),
+    (
         "panel-control/tests/codex_route_windows_privacy.rs",
         include_str!("../../panel-control/tests/codex_route_windows_privacy.rs"),
     ),
@@ -678,6 +714,18 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/viewer/markdown.rs",
         include_str!("../src/viewer/markdown.rs"),
+    ),
+    (
+        "app/src/viewer/markdown/selection.rs",
+        include_str!("../src/viewer/markdown/selection.rs"),
+    ),
+    (
+        "app/src/viewer/markdown/selection_tests.rs",
+        include_str!("../src/viewer/markdown/selection_tests.rs"),
+    ),
+    (
+        "app/src/viewer/selection_scroll.rs",
+        include_str!("../src/viewer/selection_scroll.rs"),
     ),
     (
         "app/src/viewer/tests.rs",

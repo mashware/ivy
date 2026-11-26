@@ -206,7 +206,7 @@ fn body_content(
         if let Some(document) = &loaded.markdown {
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(26, 22))
-                .show(ui, |ui| document.show(ui));
+                .show(ui, |ui| document.show(ui, state.keys));
         } else if let Some(document) = &loaded.code {
             let roles = crate::ui::style::roles(ui.ctx(), &theme);
             let palette = super::palette::Palette::of(&theme, &roles);

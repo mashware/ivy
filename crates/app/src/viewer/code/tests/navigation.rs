@@ -381,3 +381,69 @@ fn the_horizontal_scrollbar_handle_moves_the_painted_text_sideways() {
     let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
     assert!(copied.is_empty(), "scrollbar drag must not select text");
 }
+
+#[test]
+fn selection_scroll_plain_wheel_during_selection_advances() {
+    let document = CodeDocument::parse(Path::new("selection.txt"), &file(200));
+    let ctx = egui::Context::default();
+    let mut state = CodeState::default();
+    for _ in 0..5 {
+        frame(&ctx, &document, &mut state, vec![]);
+    }
+    let start = frame(&ctx, &document, &mut state, vec![])
+        .0
+        .into_iter()
+        .find(|(s, _, _)| s == "let x2 = 2;")
+        .unwrap()
+        .1
+        .left_center();
+    let to = start + egui::vec2(30., 0.);
+    for events in [
+        vec![egui::Event::PointerMoved(start)],
+        vec![pointer_button(start, true)],
+        vec![egui::Event::PointerMoved(to)],
+    ] {
+        frame(&ctx, &document, &mut state, events);
+    }
+    for _ in 0..12 {
+        frame(
+            &ctx,
+            &document,
+            &mut state,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0., -600.),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    assert!(
+        !frame(&ctx, &document, &mut state, vec![])
+            .0
+            .iter()
+            .any(|(s, _, _)| s == "let x2 = 2;"),
+        "the wheel did not move plain text during selection"
+    );
+    frame(&ctx, &document, &mut state, vec![pointer_button(to, false)]);
+    let initial = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]).1;
+    assert_eq!(initial.len(), 1);
+    assert!(initial[0].starts_with("let x2 = 2;\n"));
+    assert!(initial[0].lines().count() > 12);
+    for _ in 0..12 {
+        frame(
+            &ctx,
+            &document,
+            &mut state,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, 600.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    let (texts, after) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
+    assert!(texts.iter().any(|(s, _, _)| s == "let x2 = 2;"));
+    assert_eq!(after, initial, "plain text selection changed after release");
+}

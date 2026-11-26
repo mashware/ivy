@@ -26,6 +26,8 @@ fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
             startup_failure: None,
             delivery_failed: false,
             dismissed: false,
+            #[cfg(target_os = "linux")]
+            quota_lease: None,
         },
         sender,
     )
