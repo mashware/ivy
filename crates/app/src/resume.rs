@@ -359,7 +359,8 @@ pub(crate) fn write_button(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::R
     Ok(())
 }
 
-/// Writes `bytes`, starting a fresh shell over a failed client first, and records nothing: [`write`]
+/// Writes `bytes`, starting a fresh shell over a failed client first, and records nothing:
+/// [`write()]
 /// records them, a mouse report does not.
 fn put(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
     if pane.restoration.failed {
@@ -370,7 +371,7 @@ fn put(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
 
 /// Records that `bytes` reached the console on the person's behalf, for Send to ask before joining
 /// its line to a draft (#196). The rule for whoever adds a door: a write the app makes for the
-/// person calls this, or goes through [`write`], [`write_keys`] or [`write_button`]; the program's
+/// person calls this, or goes through [`write()`], [`write_keys`] or [`write_button`]; the program's
 /// output, the terminal's replies and mouse reports never do. A guess about a line editor, and its
 /// misses are accepted in D113: Shift+Enter is a `\r` here and counts as an Enter, Ctrl+J submits
 /// in a shell but does not count, and a line cleared with Ctrl+U or Esc still counts as typed.
