@@ -325,20 +325,23 @@ fn fresh_launch_fields_and_button_are_reachable_in_a_short_modal() {
         (egui::vec2(960.0, 640.0), false),
     ] {
         let ctx = egui::Context::default();
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        ctx.all_styles_mut(|style| {
+            style.animation_time = 0.0;
+            style.scroll_animation = egui::style::ScrollAnimation::none();
+        });
         let mut guide = Guide {
             open: true,
             ..Default::default()
         };
         let initial = draw(&ctx, &mut guide, size, vec![]);
-        assert!(visible(&initial, "No panels published yet").is_some());
-        assert!(visible(&initial, "Reconnect an existing Claude session").is_some());
         assert!(
             !painted(&initial)
                 .iter()
                 .any(|text| text == "Claude executable" || text == "OpenCode executable"),
             "fresh launch fields must start collapsed"
         );
+        assert!(visible(&initial, "No panels published yet").is_some());
+        assert!(visible(&initial, "Reconnect an existing Claude session").is_some());
         initial.drop_without_applying_deltas();
         // Real modal focus order: Close, section, three clients, three executable
         // fields, directory, launch. Focus must scroll controls into the clip.
