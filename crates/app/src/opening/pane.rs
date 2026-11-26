@@ -66,6 +66,7 @@ pub(super) fn assemble_pane(
         received: Vec::new(),
         keystrokes: Vec::new(),
         held: None,
+        typed: false,
         search: crate::search::OnThisConsole::default(),
         measured: INITIAL_GRID,
         timings: Timings::default(),

@@ -331,6 +331,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "keyboard::tests::a_clipboard_paste_and_a_held_paste_let_through_leave_a_draft_recorded",
+    "reason": "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "keyboard::tests::clicking_failed_recovery_does_not_discard_an_unanswered_held_paste",
     "reason": "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
   },

@@ -1959,6 +1959,32 @@ mod tests {
     }
 
     crate::windows_unix_omission!(
+        a_clipboard_paste_and_a_held_paste_let_through_leave_a_draft_recorded,
+        "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
+    );
+
+    /// Both pastes the person makes are typing at the prompt for Send to ask about (#196): the
+    /// clipboard's, and a held one they let through.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_clipboard_paste_and_a_held_paste_let_through_leave_a_draft_recorded() {
+        let boundary = the_longest_line_a_reader_keeps().unwrap();
+        let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
+        paste_into(&mut pane, "short");
+        assert!(pane.typed, "the clipboard paste left nothing recorded");
+        pane.typed = false;
+        let mut bytes = Vec::new();
+        pane.held = hold_from(&"x".repeat(boundary + 1), false, &mut bytes);
+        assert!(!pane.typed, "holding a paste wrote it");
+        pane.send_the_held_paste();
+        assert!(pane.held.is_none(), "the held paste was not sent");
+        assert!(
+            pane.typed,
+            "the held paste let through left nothing recorded"
+        );
+    }
+
+    crate::windows_unix_omission!(
         clicking_failed_recovery_does_not_discard_an_unanswered_held_paste,
         "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
     );

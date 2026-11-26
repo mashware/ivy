@@ -756,7 +756,12 @@ beside a marker's note and Clear take marks back. **Send to <console> and press 
 of the column, writes a copy of the image with the marks into that console's own folder
 (`PANEL_DIR`) under the first free name `annotated-<n>.png`, then types the line shown under the
 image into that console and presses Enter: the copy's path and the notes. In a plain shell that line
-runs as a command, so read it before sending. From the click on Send until the line is typed, the
+runs as a command, so read it before sending. If you typed something at that console since your
+last Enter, Send types nothing and asks first, since the line would be joined to what you typed:
+**Send anyway** sends as usual, **Type without Enter** writes the copy and the line but leaves Enter
+to you, and **Cancel** keeps everything as it was. It knows only what this terminal itself sent
+there, so Shift+Enter counts as an Enter, and a line you cleared with Ctrl+U or Esc still counts as
+typed. From the click on Send until the line is typed, the
 marks and notes cannot be changed, but **Cancel**, beside «Sending…» while the copy is written,
 takes the Send back: the marks and notes stay and can be changed again, nothing is typed, and the
 copy is removed once it is finished. Until then Send is greyed out and reads «Still finishing the

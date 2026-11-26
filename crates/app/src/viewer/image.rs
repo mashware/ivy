@@ -3972,6 +3972,7 @@ mod tests {
                 console: "test".into(),
                 path: PathBuf::from("/a/annotated-1.png"),
                 line: "x".into(),
+                answer: None,
             };
             // Nothing polls a viewer alone, so the Send stays asked.
             viewer.image.send.ask(request);
@@ -4025,6 +4026,7 @@ mod tests {
             console: "test".into(),
             path: PathBuf::from("/a/annotated-1.png"),
             line: "x".into(),
+            answer: None,
         });
         let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(700.0, 400.0));
         let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
@@ -5140,6 +5142,7 @@ mod tests {
             console: "test".into(),
             path: copy.clone(),
             line: "x".into(),
+            answer: None,
         });
         painted(&mut window, &ctx, vec![]);
         let notice = slot(&window).notice.clone().unwrap_or_default();
@@ -5275,6 +5278,723 @@ mod tests {
             SENTINEL,
             "something was typed before"
         );
+    }
+
+    /// The question Send asks about a draft at the image's console's prompt.
+    #[cfg(unix)]
+    fn question(window: &crate::Window) -> String {
+        let label = send::console_name(slot(window).origin().unwrap());
+        format!("Something is typed at {label}'s prompt; it will be sent with this line.")
+    }
+
+    /// Types `draft` into the image's console the way the person's keys reach it, and waits for it
+    /// to arrive, so what arrives after it is what Send wrote.
+    #[cfg(unix)]
+    fn type_draft(
+        window: &mut crate::Window,
+        received: &term_core::received::Received,
+        draft: &[u8],
+    ) {
+        crate::resume::write(origin_pane(window), draft).unwrap();
+        assert_eq!(
+            received.wait_for(draft.len(), Duration::from_secs(5)),
+            draft,
+            "the draft did not arrive"
+        );
+    }
+
+    /// Send on a console where the person typed since their last Enter writes nothing, neither
+    /// copy nor line, and asks; «Cancel» then writes nothing still and keeps the marks and notes.
+    #[cfg(unix)]
+    #[test]
+    fn send_over_a_draft_asks_and_writes_nothing_until_answered() {
+        let received = term_core::received::Received::new("annotated-draft-cancel");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        type_draft(&mut window, &received, b"abc");
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap()),
+            "{:?}",
+            slot(&window).notice
+        );
+        assert_eq!(slot(&window).notice, Some(question(&window)));
+        assert!(!dir.join("annotated-1.png").exists(), "a copy was written");
+        for answer in ["Send anyway", "Type without Enter", "Cancel"] {
+            place_of(&mut window, &ctx, answer);
+        }
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.sending(), "Cancel did not take the Send back");
+        assert_eq!(
+            slot(&window).notice.as_deref(),
+            Some("Send cancelled; nothing was sent.")
+        );
+        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        assert!(!dir.join("annotated-1.png").exists(), "a copy was written");
+        let mut expected = b"abc".to_vec();
+        expected.extend_from_slice(SENTINEL);
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "something was typed after the draft"
+        );
+    }
+
+    /// «Send anyway» sends as a Send with nothing typed does: the copy, the line after the draft,
+    /// and Enter on a later frame in a write of its own.
+    #[cfg(unix)]
+    #[test]
+    fn send_anyway_joins_the_line_to_the_draft_and_presses_enter() {
+        let received = term_core::received::Received::new("annotated-draft-anyway");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        type_draft(&mut window, &received, b"abc");
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let anyway = place_of(&mut window, &ctx, "Send anyway");
+        press(&mut window, &ctx, anyway);
+        until_written(&mut window, &ctx);
+        let typed = [&b"abc"[..], line.as_bytes()].concat();
+        assert_eq!(
+            received.wait_for(typed.len(), Duration::from_secs(5)),
+            typed
+        );
+        painted(&mut window, &ctx, vec![]);
+        let submitted = [&typed[..], b"\r"].concat();
+        assert_eq!(
+            received.wait_for(submitted.len(), Duration::from_secs(5)),
+            submitted
+        );
+        assert!(marks_of(&window).is_empty());
+        assert!(
+            !origin_pane(&mut window).typed,
+            "Enter left the draft recorded"
+        );
+        let _ = std::fs::remove_file(dir.join("annotated-1.png"));
+    }
+
+    /// «Type without Enter» writes the copy and the line with no Enter, ever, clears the marks, and
+    /// leaves the console recorded as typed: the line now sits at its prompt.
+    #[cfg(unix)]
+    #[test]
+    fn type_without_enter_writes_the_line_and_never_presses_enter() {
+        let received = term_core::received::Received::new("annotated-draft-without");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        type_draft(&mut window, &received, b"abc");
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let without = place_of(&mut window, &ctx, "Type without Enter");
+        press(&mut window, &ctx, without);
+        until_written(&mut window, &ctx);
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert!(!window.image.sending(), "an Enter is still owed");
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let typed = [&b"abc"[..], line.as_bytes(), &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(typed.len(), Duration::from_secs(5)),
+            typed,
+            "Enter was pressed, or the line did not go"
+        );
+        assert!(dir.join("annotated-1.png").exists(), "no copy for the line");
+        assert!(marks_of(&window).is_empty());
+        // The line now sits at the prompt: the next Send asks about it.
+        marks_mut(&mut window).tool = marks::Tool::Marker;
+        let at = image_view(&window, &ctx).center();
+        click(&mut window, &ctx, at);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap()),
+            "the line typed without Enter was not asked about"
+        );
+        let _ = std::fs::remove_file(dir.join("annotated-1.png"));
+    }
+
+    /// Typed into the console while the copy is written: nothing is typed when the copy is done,
+    /// and the question is asked with the copy already written. Cancel then removes that copy and
+    /// types nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_draft_typed_while_the_copy_is_written_is_asked_about_before_the_line() {
+        late_draft("annotated-draft-late-cancel", true);
+    }
+
+    // Unix PTY fixture: stty makes the receiver report the console's input byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn typing_in_the_copy_completion_frame_is_asked_about_before_the_line() {
+        let received = term_core::received::Received::new("annotated-completion-input");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        let at = origin_pane(&mut window)
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        press(&mut window, &ctx, at);
+        assert!(!window.viewer.keyboard, "the drawer still holds the keys");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![egui::Event::Text("late".into())]);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [&b"late"[..], &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "the screenshot line or Enter bypassed the same-frame draft question"
+        );
+        assert!(text_rect(&shapes, |t| t == question(&window)).is_some());
+        for answer in ["Send anyway", "Type without Enter", "Cancel"] {
+            place_of(&mut window, &ctx, answer);
+        }
+        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        assert!(copy.exists(), "the pending question lost its written copy");
+    }
+
+    // Unix PTY fixture: stty makes the receiver report the console's input byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn an_enter_already_owed_precedes_text_typed_in_the_next_frame() {
+        let received = term_core::received::Received::new("annotated-enter-before-input");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        let at = origin_pane(&mut window)
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        press(&mut window, &ctx, at);
+        assert!(!window.viewer.keyboard, "the drawer still holds the keys");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!line.is_empty());
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes(),
+            "the line was not delivered before the next frame"
+        );
+        painted(&mut window, &ctx, vec![egui::Event::Text("next".into())]);
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [line.as_bytes(), &b"\rnext"[..], &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "new console input arrived before the Enter already owed"
+        );
+        assert!(marks_of(&window).is_empty());
+        let _ = std::fs::remove_file(copy);
+    }
+
+    /// As above, and «Send anyway» types the line that names the copy already written.
+    #[cfg(unix)]
+    #[test]
+    fn send_anyway_after_a_late_draft_types_the_line_naming_the_written_copy() {
+        late_draft("annotated-draft-late-anyway", false);
+    }
+
+    // Unix PTY fixture: the receiver enters raw mode through stty.
+    #[cfg(unix)]
+    #[test]
+    fn type_without_enter_after_a_late_draft_reuses_the_copy_and_keeps_the_next_send_waiting() {
+        let received = term_core::received::Received::new("annotated-draft-late-without");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        type_draft(&mut window, &received, b"late");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        let copied = std::fs::read(&copy).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap())
+        );
+        let without = place_of(&mut window, &ctx, "Type without Enter");
+        press(&mut window, &ctx, without);
+        until_written(&mut window, &ctx);
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [&b"late"[..], line.as_bytes(), &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected,
+            "the written-copy answer submitted the draft or failed to type its line"
+        );
+        assert_eq!(std::fs::read(&copy).unwrap(), copied, "the copy changed");
+        assert!(line.contains(&copy.display().to_string()));
+        assert!(marks_of(&window).is_empty());
+        marks_mut(&mut window).general = "one more note".into();
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap()),
+            "the unsent line was forgotten"
+        );
+        let _ = std::fs::remove_file(copy);
+    }
+
+    // Unix PTY fixture: the receiver enters raw mode through stty.
+    #[cfg(unix)]
+    #[test]
+    fn send_after_the_persons_enter_does_not_ask_about_the_submitted_draft() {
+        let received = term_core::received::Received::new("annotated-draft-entered");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        type_draft(&mut window, &received, b"abc\r");
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            !window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap()),
+            "the submitted draft was asked about"
+        );
+        until_written(&mut window, &ctx);
+        let expected = [&b"abc\r"[..], line.as_bytes()].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected
+        );
+        painted(&mut window, &ctx, vec![]);
+        let submitted = [&expected[..], b"\r"].concat();
+        assert_eq!(
+            received.wait_for(submitted.len(), Duration::from_secs(5)),
+            submitted
+        );
+        assert!(marks_of(&window).is_empty());
+        let _ = std::fs::remove_file(dir.join("annotated-1.png"));
+    }
+
+    // Unix PTY fixture: printf emits actual program output and stty enables raw input.
+    #[cfg(unix)]
+    #[test]
+    fn program_output_and_terminal_replies_neither_create_nor_clear_a_draft_for_send() {
+        for reply in [false, true] {
+            for draft in [false, true] {
+                let received = term_core::received::Received::new("annotated-output-not-draft");
+                let folder = Folder::new();
+                let path = folder.0.join("shot.png");
+                write_png(&path, 640, 400);
+                let emitted = match (reply, draft) {
+                    (true, _) => "\\033[5n",
+                    (false, true) => "FROM PROGRAM\\r",
+                    (false, false) => "FROM PROGRAM",
+                };
+                let script = received.script(&format!("stty raw -echo && printf '{emitted}'"));
+                let mut window = crate::tests::window_of_tabs([["sleep 30", &script]]);
+                let ctx = crate::ui::icons::installed_for_tests(1.0);
+                received.wait_until_ready(Duration::from_secs(5));
+                let mut prefix = Vec::new();
+                if draft {
+                    crate::resume::write(window.active_mut().panes_mut()[1], b"abc").unwrap();
+                    prefix.extend_from_slice(b"abc");
+                    assert_eq!(received.wait_for(3, Duration::from_secs(5)), prefix);
+                }
+                if reply {
+                    prefix.extend_from_slice(b"\x1b[0n");
+                }
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    let pane = &mut window.active_mut().panes_mut()[1];
+                    pane.pump(Default::default());
+                    let arrived = if reply {
+                        received.so_far() == prefix
+                    } else {
+                        pane.screen.to_text().contains("FROM PROGRAM")
+                    };
+                    if arrived {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "output/reply never arrived");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let name = window.active().panes()[1].name;
+                crate::viewer::open_diff_for_pane(&mut window, name);
+                crate::viewer::open_image_target(&mut window, name, path).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(30);
+                while image_rect(&painted(&mut window, &ctx, vec![])).is_none() {
+                    assert!(Instant::now() < deadline, "image never opened");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let dir = crate::PanelDir::create().unwrap();
+                let copy = dir.path().join("annotated-1.png");
+                origin_pane(&mut window).panel = Some(dir);
+                marks_mut(&mut window).general = "check this output".into();
+                let line = click_send(&mut window, &ctx);
+                let shapes = painted(&mut window, &ctx, vec![]);
+                if draft {
+                    assert!(
+                        text_rect(&shapes, |t| t == question(&window)).is_some(),
+                        "the draft's question is not painted after reply={reply}"
+                    );
+                    for answer in ["Send anyway", "Type without Enter", "Cancel"] {
+                        place_of(&mut window, &ctx, answer);
+                    }
+                    assert!(!copy.exists(), "output cleared the draft and started Send");
+                    origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+                    prefix.extend_from_slice(SENTINEL);
+                    assert_eq!(
+                        received.wait_for(prefix.len(), Duration::from_secs(5)),
+                        prefix
+                    );
+                } else {
+                    assert!(
+                        !window
+                            .image
+                            .send
+                            .confirming(slot(&window).document().unwrap()),
+                        "output created a draft"
+                    );
+                    until_written(&mut window, &ctx);
+                    prefix.extend_from_slice(line.as_bytes());
+                    assert_eq!(
+                        received.wait_for(prefix.len(), Duration::from_secs(5)),
+                        prefix
+                    );
+                    painted(&mut window, &ctx, vec![]);
+                    prefix.push(b'\r');
+                    assert_eq!(
+                        received.wait_for(prefix.len(), Duration::from_secs(5)),
+                        prefix
+                    );
+                    assert!(copy.exists());
+                    assert!(marks_of(&window).is_empty());
+                    let _ = std::fs::remove_file(copy);
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn late_draft(label: &str, cancelled: bool) {
+        let received = term_core::received::Received::new(label);
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        type_draft(&mut window, &received, b"z");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap()),
+            "{:?}",
+            slot(&window).notice
+        );
+        assert_eq!(slot(&window).notice, Some(question(&window)));
+        assert!(copy.exists(), "the written copy went before an answer");
+        if cancelled {
+            let cancel = place_of(&mut window, &ctx, "Cancel");
+            press(&mut window, &ctx, cancel);
+            assert!(!window.image.sending());
+            assert!(!copy.exists(), "the cancelled copy stayed");
+            assert_eq!(
+                slot(&window).notice.as_deref(),
+                Some("Send cancelled; nothing was sent."),
+                "a copy already written was said to be still finishing"
+            );
+            assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+            // Only the draft arrived: the line was never typed.
+            origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+            let typed = [&b"z"[..], &SENTINEL[..]].concat();
+            assert_eq!(
+                received.wait_for(typed.len(), Duration::from_secs(5)),
+                typed
+            );
+        } else {
+            let anyway = place_of(&mut window, &ctx, "Send anyway");
+            press(&mut window, &ctx, anyway);
+            until_written(&mut window, &ctx);
+            let typed = [&b"z"[..], line.as_bytes()].concat();
+            assert_eq!(
+                received.wait_for(typed.len(), Duration::from_secs(5)),
+                typed
+            );
+            assert!(line.contains(&copy.display().to_string()));
+            let _ = std::fs::remove_file(&copy);
+        }
+    }
+
+    /// What was typed into another console is no draft at this one's prompt: Send goes straight
+    /// out, with no question.
+    #[cfg(unix)]
+    #[test]
+    fn a_draft_in_another_console_does_not_hold_the_send() {
+        let received = term_core::received::Received::new("annotated-draft-elsewhere");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        let origin = slot(&window).origin().unwrap().pane;
+        let other = window
+            .all_panes_mut()
+            .find(|pane| pane.name != origin)
+            .expect("the window has a second console");
+        crate::resume::write(other, b"elsewhere").unwrap();
+        let line = click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            !window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap()),
+            "{:?}",
+            slot(&window).notice
+        );
+        until_written(&mut window, &ctx);
+        assert_eq!(
+            received.wait_for(line.len(), Duration::from_secs(5)),
+            line.as_bytes()
+        );
+        let _ = std::fs::remove_file(dir.join("annotated-1.png"));
+    }
+
+    // Unix PTY fixture: the receiver enters raw mode through stty.
+    #[cfg(unix)]
+    #[test]
+    fn a_draft_question_stays_with_its_image_while_another_console_waits_for_it() {
+        let received = term_core::received::Received::new("annotated-question-follows");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        let origin = slot(&window).origin().unwrap().pane;
+        let label = send::console_name(slot(&window).origin().unwrap());
+        type_draft(&mut window, &received, b"abc");
+        click_send(&mut window, &ctx);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let own_question = question(&window);
+        assert!(text_rect(&shapes, |t| t == own_question).is_some());
+        let beside = window.active().panes()[0].name;
+        let other = folder.0.join("other.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, beside, &other);
+        marks_mut(&mut window).general = "the other console's note".into();
+        let waiting = format!("Waiting for the Send to {label}…");
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let (_, waiting_at) = text_rect(&shapes, |t| t == waiting)
+            .expect("the other image names the Send it waits for");
+        for forbidden in [
+            own_question.as_str(),
+            "Send anyway",
+            "Type without Enter",
+            "Cancel",
+        ] {
+            assert!(
+                text_rect(&shapes, |t| t == forbidden).is_none(),
+                "the other image painted {forbidden:?}"
+            );
+        }
+        press(&mut window, &ctx, waiting_at.center());
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(text_rect(&shapes, |t| t == waiting).is_some());
+        assert_eq!(marks_of(&window).general, "the other console's note");
+        let active = window.active;
+        window.tabs[active].focus = origin;
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            text_rect(&shapes, |t| t == own_question).is_some(),
+            "the question was answered or cancelled from the other image"
+        );
+        for answer in ["Send anyway", "Type without Enter", "Cancel"] {
+            place_of(&mut window, &ctx, answer);
+        }
+        assert_eq!(marks_of(&window).notes(), ["button clipped"]);
+        assert!(!dir.join("annotated-1.png").exists());
+        origin_pane(&mut window).pty.write(SENTINEL).unwrap();
+        let expected = [&b"abc"[..], &SENTINEL[..]].concat();
+        assert_eq!(
+            received.wait_for(expected.len(), Duration::from_secs(5)),
+            expected
+        );
+    }
+
+    /// Closing the image's console drops its question and removes its copy and folder; the
+    /// surviving console must not inherit the closed console's notice.
+    #[cfg(unix)]
+    #[test]
+    fn closing_the_console_drops_its_question_its_copy_and_its_folder() {
+        let received = term_core::received::Received::new("annotated-draft-console-closed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        type_draft(&mut window, &received, b"z");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap())
+        );
+        let closed_question = question(&window);
+        let name = slot(&window).origin().unwrap().pane;
+        window.close_a_pane_called(name, &ctx).unwrap();
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert!(!window.image.sending(), "the question outlived its console");
+        assert!(!copy.exists(), "the copy stayed");
+        assert!(!dir.exists(), "the closed console's folder stayed");
+        let left = window.active().focus;
+        let other = folder.0.join("surviving.png");
+        write_png(&other, 64, 32);
+        open_in(&mut window, &ctx, left, &other);
+        for reopen in [false, true] {
+            if reopen {
+                slot_mut(&mut window).clear();
+                open_in(&mut window, &ctx, left, &other);
+            }
+            let shapes = painted(&mut window, &ctx, vec![]);
+            assert!(
+                text_rect(&shapes, |word| word == closed_question
+                    || word.contains("origin console has closed"))
+                .is_none(),
+                "a closed console's question was said under another console's image"
+            );
+        }
+    }
+
+    /// The question's three answers are laid out whole, inside the drawer and under its toolbar,
+    /// with the notes still in view: beside the image, and under it in a narrow drawer, where the
+    /// column is only as tall as the room kept for what it holds.
+    #[test]
+    fn the_three_answers_are_laid_out_whole_beside_the_image_and_under_it() {
+        for (width, height) in [(700.0, 420.0), (300.0, 520.0)] {
+            let ctx = egui::Context::default();
+            let mut viewer = ready(image::RgbaImage::new(400, 300));
+            viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+            viewer.notice = Some(
+                "Something is typed at origin's prompt; it will be sent with this line.".into(),
+            );
+            viewer.image.send.question(send::Request {
+                document: viewer.document().unwrap(),
+                pane: 0,
+                console: "test".into(),
+                path: PathBuf::from("/a/annotated-1.png"),
+                line: "x".into(),
+                answer: None,
+            });
+            let view = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(width, height));
+            let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+            let mut row = Vec::new();
+            for wanted in [
+                "Send anyway",
+                "Type without Enter",
+                "Cancel",
+                "the header overlaps",
+            ] {
+                let (text, clip) = clipped_text(&shapes, |t| t == wanted)
+                    .unwrap_or_else(|| panic!("{wanted:?} is not painted at {width}×{height}"));
+                assert!(
+                    clip.contains_rect(text) && view.contains_rect(text),
+                    "{wanted:?} is cut at {width}×{height}: {text:?} in {clip:?}"
+                );
+                assert!(
+                    text.top() >= view.top() + tools::TOOLBAR,
+                    "{wanted:?} is over the toolbar at {width}×{height}"
+                );
+                row.push(text);
+            }
+            assert!(
+                !row[1].intersects(row[2]) && !row[0].intersects(row[1]),
+                "the answers overlap at {width}×{height}"
+            );
+        }
+    }
+
+    /// Closing the image while its question waits drops the Send, and the copy it had written is
+    /// removed as a cancelled one's is: the next image's Send is not held by a question nobody
+    /// can see.
+    #[cfg(unix)]
+    #[test]
+    fn closing_the_image_drops_its_question_and_its_copy() {
+        let received = term_core::received::Received::new("annotated-draft-closed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (copy, sender) = window.image.send.stall().expect("writing");
+        type_draft(&mut window, &received, b"z");
+        flatten::write_new(&copy, &::image::RgbaImage::new(4, 4)).unwrap();
+        sender.send(Ok(copy.clone())).unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(
+            window
+                .image
+                .send
+                .confirming(slot(&window).document().unwrap())
+        );
+        slot_mut(&mut window).clear();
+        for _ in 0..3 {
+            painted(&mut window, &ctx, vec![]);
+        }
+        assert!(!window.image.sending(), "the question outlived its image");
+        assert!(!copy.exists(), "the copy stayed");
     }
 
     /// A cancelled Send whose worker fails after its console closed has no image left to say it
@@ -5614,6 +6334,7 @@ mod tests {
             console: "test".into(),
             path: dir.join("annotated-9.png"),
             line: "a second Send".into(),
+            answer: None,
         });
         sender.send(Ok(copy.clone())).unwrap();
         painted(&mut window, &ctx, vec![]);

@@ -11763,8 +11763,8 @@ starts its serials again, since the opening already tells its fields apart.
 - **types one line into that console**: `Annotated screenshot: <copy> · 1: <note> · 2: <note> ·
   Note: <general>`, empty parts left out, every control character turned into a space. That text is
   painted under the image and its notes before the click, from the same function that composes what
-  is sent — inside the paste markers when the console asks for them — together with «It is added to
-  whatever is already typed at that console's prompt, and Enter runs it.» The paste is composed for
+  is sent — inside the paste markers when the console asks for them — together with «If something
+  is typed at this console's prompt, Send asks first; Enter runs the line.» The paste is composed for
   the paste mode the console has when it is sent, after the copy is closed. The notes sit in a fixed
   column beside the image, so the image keeps its height however many markers there are, and go
   under it only where the drawer is too narrow for both; the line takes a band of its own under
@@ -11780,6 +11780,37 @@ starts its serials again, since the opening already tells its fields apart.
   report that text and Enter sent together are read as part of the paste; a separate write a frame
   later is what a person's Enter is, for an agent and a shell alike. A frame egui runs twice still
   keeps the Enter for the next frame. The Git review's insertion keeps writing no Enter.
+
+**A draft at the prompt is asked about before the line joins it (#196).** Each console keeps one
+bit: whether the person sent bytes there since their last Enter. It comes from the app's own writes
+on the person's behalf — keys, pastes, a held paste let through, a panel button, the Git review's
+insertion, Send's line and its Enter — by one rule: after a write holding an Enter (`\r`) or a
+Ctrl+C (`0x03`), only what follows the last of them stays; any other write adds to it. A fresh shell
+started over a failed client clears it. The program's output, the terminal's replies and mouse
+reports never touch it, and nothing is read from the screen (D6). With the bit set, Send writes
+nothing and the drawer says «Something is typed at <console>'s prompt; it will be sent with this
+line.» with three answers: **Send anyway**, which sends as a Send always has; **Type without
+Enter**, which writes the copy and the line with no Enter, clears the marks and leaves the bit set;
+and **Cancel**, which types nothing, keeps the marks and notes, and removes a copy already written.
+The bit is checked at the click and, while the person has not answered, once more when the copy is
+written, just before the line would be typed: what was typed while the copy was being written is
+asked about too, with the copy kept for the answer. **The completed-copy check follows the current
+frame's console input**, because checking first missed a draft typed in the very frame the copy
+finished and the later Enter submitted both without asking. An Enter already owed for a line typed
+in an earlier frame goes **before** new console input; moving all delivery after input would join
+the next draft to that already-written line instead. The Git review's insertion retains its place
+before console input. Once answered, a Send is not asked again — what
+is typed after «Send anyway» goes with the line, as the person chose. Closing the image or its
+console while the question waits drops the Send, a closed console said where the image is still
+shown, and a copy it had written is removed with the folder of a closed console. A window that
+closes over the question removes the copy after its consoles are gone, so their folders, which held
+it, stay and say so — accepted for a window quit with a question unanswered. On a drawer too short for the Send button the answers are not laid out either,
+and the notice says on hover to enlarge it. **The bit is a guess about a line editor, and its misses
+are accepted:** Shift+Enter is a `\r` here and counts as an Enter, though Claude Code reads it as a
+new line in the same draft; Ctrl+J submits in a shell and does not count; and a line cleared with
+Ctrl+U or Esc, or keys a full-screen program took, still count as typed, so Send asks where nothing
+is left. A wrong guess costs one click; a right one keeps a draft from being submitted glued to the
+line.
 
 **Only the copy's path goes in the line, never the path the program printed.** The copy's name is
 the app's own (`[a-z0-9-]` and `.png` in a directory the app created); the original's is whatever a
@@ -11867,6 +11898,9 @@ would send a line different from the one shown; teaching
 `PanelDir::remove` the app's file names, which puts app knowledge into the contract crate (the
 store's card «the contract removes what the contract puts there» argues for it, and is set aside
 here because the copies are the app's, not the contract's); escaping the notes for a shell;
+reading the prompt off the console's screen to know whether a draft is there, which is the app
+deducing a program's state from its painting (D6); Send never pressing Enter, which gives up the
+one-click Send #178 asked for and leaves an image unsent when the person walks away;
 a deadline after which a stuck write is given up, and a Cancel offered only after some seconds,
 because a slow disk is not a stuck one and no constant tells them apart — the person does;
 re-keying or clearing egui's field state when a marker is deleted, which the serial makes needless

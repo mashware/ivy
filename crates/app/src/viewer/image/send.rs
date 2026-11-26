@@ -36,6 +36,7 @@ impl Drop for Written {
 
 /// What a click on Send fixed: the image it was for, the console, the copy's name and the line
 /// painted under the image and its notes.
+#[derive(Clone)]
 pub(super) struct Request {
     /// Which opening of an image this Send belongs to, checked against its console's slot again
     /// before the copy starts and before the line is typed. That console refuses another image
@@ -48,6 +49,15 @@ pub(super) struct Request {
     pub(super) console: String,
     pub(super) path: PathBuf,
     pub(super) line: String,
+    /// An explicit answer permits the line despite later typing (D113).
+    pub(super) answer: Option<Answer>,
+}
+
+/// Whether the person chose to submit the annotated line or leave it at the prompt.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Answer {
+    Anyway,
+    WithoutEnter,
 }
 
 /// Where a Send is, from the click to the Enter; one at a time.
@@ -57,7 +67,10 @@ enum Phase {
     Idle,
     /// Clicked; the copy starts on the next frame's input pass.
     Asked(Request),
+    /// D113: wait for an answer, holding the path if the copy was already written.
+    Confirm(Request, Option<PathBuf>),
     Writing(Request, Job<PathBuf>),
+    Written(Request, PathBuf),
     /// The Enter owed for a line written in the frame named here by the Send last; it is pressed
     /// in a later one.
     Enter(Enter, u64, Request),
@@ -110,8 +123,16 @@ impl Sending {
     /// the button answers are both read from this one value, so a button greyed by a Send says why.
     pub(super) fn button(&self, document: u64) -> Button<'_> {
         match &self.phase {
-            Phase::Asked(r) | Phase::Writing(r, _) if r.document == document => Button::Sending,
-            Phase::Asked(r) | Phase::Writing(r, _) => Button::Waiting(&r.console),
+            Phase::Confirm(r, _) if r.document == document => Button::Confirm,
+            Phase::Asked(r) | Phase::Writing(r, _) | Phase::Written(r, _)
+                if r.document == document =>
+            {
+                Button::Sending
+            }
+            Phase::Asked(r)
+            | Phase::Writing(r, _)
+            | Phase::Written(r, _)
+            | Phase::Confirm(r, _) => Button::Waiting(&r.console),
             Phase::Enter(_, _, r) if r.document == document => Button::Entering,
             Phase::Enter(_, _, r) => Button::Waiting(&r.console),
             Phase::Idle => match &self.parked {
@@ -121,6 +142,10 @@ impl Sending {
         }
     }
 
+    pub(super) fn confirming(&self, document: u64) -> bool {
+        matches!(&self.phase, Phase::Confirm(r, _) if r.document == document)
+    }
+
     /// Takes up what a click in the notes asked, saying in `notice` what became of it.
     pub(super) fn answer(&mut self, asked: Option<Asked>, notice: &mut Option<String>) {
         match asked {
@@ -128,34 +153,53 @@ impl Sending {
                 self.ask(request);
                 *notice = None;
             }
-            Some(Asked::Cancel(document)) if self.cancel(|r| r.document == document) => {
-                *notice = Some(if self.parked.is_some() {
-                    format!("{CANCELLED} {STILL_FINISHING}.")
-                } else {
-                    CANCELLED.into()
-                });
+            Some(Asked::Answer(document, answer)) if self.confirming(document) => {
+                let Phase::Confirm(mut request, copy) = std::mem::take(&mut self.phase) else {
+                    unreachable!("confirming");
+                };
+                request.answer = Some(answer);
+                self.phase = match copy {
+                    Some(path) => Phase::Written(request, path),
+                    None => Phase::Asked(request),
+                };
+                *notice = None;
+            }
+            Some(Asked::Cancel(document)) => {
+                if let Some(said) = self.cancel(|r| r.document == document) {
+                    *notice = Some(said);
+                }
             }
             _ => {}
         }
     }
 
-    /// Takes back the Send whose line is not typed yet, when it is the one `which` names, parking
-    /// its worker if it has one. Answers whether it did: Cancel on one image never takes back
-    /// another's Send.
-    fn cancel(&mut self, which: impl FnOnce(&Request) -> bool) -> bool {
+    /// D113: Cancel is scoped to its image and removes a completed copy immediately.
+    fn cancel(&mut self, which: impl FnOnce(&Request) -> bool) -> Option<String> {
         if !self.in_flight().is_some_and(which) {
-            return false;
+            return None;
         }
-        if let Phase::Writing(request, job) = std::mem::take(&mut self.phase) {
-            // `start` refuses while a worker is parked, so there is never a second one here.
-            debug_assert!(self.parked.is_none(), "a second worker parked");
-            self.parked = Some(Parked {
-                request,
-                job,
-                closed_told: false,
-            });
-        }
-        true
+        let said = match std::mem::take(&mut self.phase) {
+            Phase::Confirm(_, Some(path)) | Phase::Written(_, path) => {
+                match std::fs::remove_file(&path) {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => format!(
+                        "{CANCELLED} The copy at {} could not be removed: {error}.",
+                        path.display()
+                    ),
+                    _ => CANCELLED.into(),
+                }
+            }
+            Phase::Writing(request, job) => {
+                debug_assert!(self.parked.is_none(), "a second worker parked");
+                self.parked = Some(Parked {
+                    request,
+                    job,
+                    closed_told: false,
+                });
+                format!("{CANCELLED} {STILL_FINISHING}.")
+            }
+            _ => CANCELLED.into(),
+        };
+        Some(said)
     }
 
     /// A click on Send, taken up on the next frame. One at a time: a click while another Send is
@@ -170,8 +214,22 @@ impl Sending {
     /// The Send whose line is not typed yet.
     fn in_flight(&self) -> Option<&Request> {
         match &self.phase {
-            Phase::Asked(request) | Phase::Writing(request, _) => Some(request),
+            Phase::Asked(request)
+            | Phase::Writing(request, _)
+            | Phase::Confirm(request, _)
+            | Phase::Written(request, _) => Some(request),
             _ => None,
+        }
+    }
+}
+
+impl Drop for Sending {
+    fn drop(&mut self) {
+        if let Phase::Confirm(_, Some(path)) | Phase::Written(_, path) = &self.phase
+            && let Err(error) = std::fs::remove_file(path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("the annotated copy {} remains ({error})", path.display());
         }
     }
 }
@@ -179,6 +237,7 @@ impl Sending {
 /// What a Send button stands for, given the one Send the window runs at a time.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Button<'a> {
+    Confirm,
     /// Nothing stands in the way of this image's Send.
     Free,
     /// This image's Send is on its way, and Cancel beside it can take it back until its line is
@@ -209,9 +268,16 @@ pub(super) fn console_name(origin: &crate::viewer::Source) -> String {
 
 #[cfg(test)]
 impl Sending {
-    /// Whether the Send has yet to write its line: asked, or writing its copy.
+    pub(super) fn question(&mut self, request: Request) {
+        self.phase = Phase::Confirm(request, None);
+    }
+
+    /// The Send has not yet written its line.
     pub(super) fn before_the_line(&self) -> bool {
-        matches!(self.phase, Phase::Asked(_) | Phase::Writing(..))
+        matches!(
+            self.phase,
+            Phase::Asked(_) | Phase::Writing(..) | Phase::Confirm(..) | Phase::Written(..)
+        )
     }
 
     pub(super) fn asked(&self) -> bool {
@@ -353,36 +419,64 @@ thread_local! {
     pub(super) static TOLD: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// D113: keep an already-owed Enter ahead of the next frame's console typing.
+pub(crate) fn owes_enter(window: &crate::Window) -> bool {
+    matches!(window.image.send.phase, Phase::Enter(..))
+}
+
+pub(crate) fn press_enter(window: &mut crate::Window, ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    if !matches!(&window.image.send.phase, Phase::Enter(_, at, _) if frame > *at) {
+        return;
+    }
+    let Phase::Enter(enter, _, request) = std::mem::take(&mut window.image.send.phase) else {
+        unreachable!("an Enter is owed");
+    };
+    if let Err(refusal) = delivery::press(window, enter) {
+        let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
+        say(window, (request.pane, &request.console), said);
+    }
+}
+
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
+    press_enter(window, ctx);
     // A console that closed took its image, and the Cancel painted under it: its Send is taken
     // back as Cancel would, so its worker, if it has one, is parked and removes what it wrote, and
     // every other console's Send says what it waits for. That covers every way a console leaves.
     let gone = (window.image.send.in_flight())
         .filter(|r| !window.all_panes().any(|p| p.name == r.pane))
-        .map(|r| (r.pane, r.console.clone()));
-    if let Some((pane, console)) = gone {
-        window.image.send.cancel(|r| r.pane == pane);
-        if let Some(parked) = window.image.send.parked.as_mut() {
+        .cloned();
+    if let Some(request) = gone {
+        let cancelled = window.image.send.cancel(|r| r.pane == request.pane);
+        let left = if let Some(parked) = window.image.send.parked.as_mut() {
             parked.closed_told = true;
-        }
-        tell(&console, &format!("{}; nothing was sent.", Refusal::Closed));
+            String::new()
+        } else {
+            forsaken_folder(window, &request)
+        };
+        let extra = cancelled.filter(|said| said != CANCELLED && !said.contains(STILL_FINISHING));
+        let extra = extra.map_or_else(String::new, |said| format!(" {said}"));
+        tell(
+            &request.console,
+            &format!("{}; nothing was sent{left}.{extra}", Refusal::Closed),
+        );
     }
     if let Some(parked) = &window.image.send.parked
         && let Some(written) = take(&parked.job)
     {
         let parked = window.image.send.parked.take().expect("a parked worker");
-        forsake(window, &parked, written);
+        forsake(window, &parked.request, parked.closed_told, written);
     }
-    let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
-        Phase::Enter(enter, at, request) if frame > at => {
-            if let Err(refusal) = delivery::press(window, enter) {
-                let said = format!("The line was typed, but Enter was not pressed: {refusal}.");
-                say(window, (request.pane, &request.console), said);
+        Phase::Confirm(request, copy) if !answerable(window, &request) => {
+            if let Some(path) = copy {
+                forsake(window, &request, false, Ok(path));
             }
             Phase::Idle
         }
+        Phase::Written(request, path) => deliver(window, request, &path, ctx),
+        Phase::Asked(request) if drafted(window, &request) => confirm(window, request, None),
         Phase::Asked(request) => {
             let to = (request.pane, request.console.clone());
             start(window, request, ctx).unwrap_or_else(|why| {
@@ -404,10 +498,37 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
                 failed(window, &request, why);
                 Phase::Idle
             }
+            Some(Ok(path)) if drafted(window, &request) => confirm(window, request, Some(path)),
             Some(Ok(path)) => deliver(window, request, &path, ctx),
         },
         phase => phase,
     };
+}
+
+fn drafted(window: &crate::Window, request: &Request) -> bool {
+    request.answer.is_none()
+        && window
+            .all_panes()
+            .any(|pane| pane.name == request.pane && pane.typed)
+}
+
+/// D113: ask again after writing only if nobody answered at the click.
+fn confirm(window: &mut crate::Window, request: Request, copy: Option<PathBuf>) -> Phase {
+    say(
+        window,
+        (request.pane, &request.console),
+        format!(
+            "Something is typed at {}'s prompt; it will be sent with this line.",
+            request.console
+        ),
+    );
+    Phase::Confirm(request, copy)
+}
+
+fn answerable(window: &crate::Window, request: &Request) -> bool {
+    window
+        .all_panes()
+        .any(|p| p.name == request.pane && p.image.slot.document() == Some(request.document))
 }
 
 /// The worker could not write the copy; its error says whether what it had written of it stayed.
@@ -422,8 +543,12 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
 /// console that closed meanwhile. What could not be removed is said, and so is a worker's failure
 /// in its own words, which name a half-written copy it could not remove; a copy it did not write
 /// is not touched, because a refused `create_new` means the file is somebody else's.
-fn forsake(window: &mut crate::Window, parked: &Parked, written: Result<PathBuf, String>) {
-    let request = &parked.request;
+fn forsake(
+    window: &mut crate::Window,
+    request: &Request,
+    closed_told: bool,
+    written: Result<PathBuf, String>,
+) {
     let closed = !window.all_panes().any(|p| p.name == request.pane);
     let stays = match written {
         Ok(path) => match std::fs::remove_file(&path) {
@@ -435,7 +560,7 @@ fn forsake(window: &mut crate::Window, parked: &Parked, written: Result<PathBuf,
         },
         // A console that closed under the worker is the likely cause, but a failure of its own is
         // said too; the close is named once, here or where `poll` cancelled the Send.
-        Err(why) if closed && !parked.closed_told => Some(format!(
+        Err(why) if closed && !closed_told => Some(format!(
             "{}, and the cancelled copy's worker reported: {why}",
             Refusal::Closed
         )),
@@ -560,7 +685,7 @@ fn deliver(
     let sent = if opened == Some(request.document) {
         let send = delivery::Send {
             text: &request.line,
-            submit: true,
+            submit: request.answer != Some(Answer::WithoutEnter),
         };
         delivery::send(window, request.pane, send).map_err(|r| r.to_string())
     } else {
@@ -648,6 +773,7 @@ mod tests {
             console: "A".into(),
             path: PathBuf::from("/a/annotated-1.png"),
             line: "x".into(),
+            answer: None,
         });
         let mut notice = None;
         sending.answer(Some(Asked::Cancel(2)), &mut notice);
@@ -668,10 +794,41 @@ mod tests {
                 console: "A".into(),
                 path: PathBuf::from("/a/annotated-1.png"),
                 line: "x".into(),
+                answer: None,
             },
         );
         assert_eq!(sending.button(2), Button::Waiting("A"));
         assert_eq!(sending.button(1), Button::Entering);
+    }
+
+    #[test]
+    fn an_answer_from_another_image_leaves_the_draft_question_unanswered() {
+        let mut sending = Sending::default();
+        sending.question(Request {
+            document: 1,
+            pane: 7,
+            console: "A".into(),
+            path: std::env::temp_dir().join("ivy-unwritten-question.png"),
+            line: "x".into(),
+            answer: None,
+        });
+        let mut notice = Some("B's existing notice".to_owned());
+        for answer in [Answer::Anyway, Answer::WithoutEnter] {
+            sending.answer(Some(Asked::Answer(2, answer)), &mut notice);
+            assert_eq!(sending.button(1), Button::Confirm);
+            assert_eq!(sending.button(2), Button::Waiting("A"));
+            assert_eq!(notice.as_deref(), Some("B's existing notice"));
+        }
+        sending.answer(Some(Asked::Cancel(2)), &mut notice);
+        assert_eq!(sending.button(1), Button::Confirm);
+        assert_eq!(notice.as_deref(), Some("B's existing notice"));
+        sending.answer(Some(Asked::Answer(1, Answer::WithoutEnter)), &mut notice);
+        assert!(sending.asked());
+        assert_eq!(
+            sending.in_flight().unwrap().answer,
+            Some(Answer::WithoutEnter)
+        );
+        assert_eq!(notice, None);
     }
 
     /// A console with no name of its own already goes by its number, which is not said twice.
