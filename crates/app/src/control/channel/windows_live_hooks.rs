@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use term_core::{Pty, Screen, Size};
 use windows_sys::Win32::{
+    Foundation::WAIT_OBJECT_0,
     System::LibraryLoader::GetModuleHandleW,
     System::Threading::{
         OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
@@ -450,9 +451,18 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     )
     .expect("launch fixture in native PTY");
     let mut screen = Screen::new(Size::default());
-    wait_file(&work.join("ready"), || {
+    let root_pid = wait_file(&work.join("ready"), || {
         answer_output(&mut pty, &output, &mut screen)
-    });
+    })
+    .parse()
+    .expect("fixture readiness records its root PID");
+    let root_handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, root_pid) };
+    assert!(
+        !root_handle.is_null(),
+        "retain live fixture root synchronization handle: {}",
+        std::io::Error::last_os_error()
+    );
+    let root_handle = unsafe { OwnedHandle::from_raw_handle(root_handle) };
     let _bridge_cleanup = BridgeCleanup::retain(&work);
     let scope = pty.foreground_scope().unwrap();
     let invocation = scope
@@ -646,15 +656,14 @@ fn windows_live_hook_real_bridge_and_helper_clear_wait() {
     );
     std::fs::remove_file(work.join("result")).unwrap();
     std::fs::write(work.join("command"), "exit").unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while pty.exit_success().is_none() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // An exit code can precede the signalled handle used by production authority.
+    let waited = unsafe { WaitForSingleObject(root_handle.as_raw_handle(), 5000) };
+    let exit_status = pty.exit_success();
     assert_eq!(
-        pty.exit_success(),
-        Some(true),
-        "fixture root must actually exit"
+        waited, WAIT_OBJECT_0,
+        "fixture root handle must signal before apply: wait={waited:#x}, exit_success={exit_status:?}"
     );
+    assert_eq!(exit_status, Some(true), "fixture root must actually exit");
     control.apply(&mut state, &mut signals, SystemTime::now());
     assert_eq!(
         control.did().overlays_refused,
