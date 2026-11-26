@@ -108,8 +108,11 @@ impl Probe {
         self.frame(vec![button(to, false)]);
         let copied = self.frame(vec![Event::Copy]).1;
         assert_eq!(copied.len(), 1);
-        assert!(copied[0].starts_with("Witness 001 alpha bravo charlie\n"));
-        assert!(copied[0].lines().count() > 12, "selection did not extend");
+        assert!(copied[0].starts_with("Witness 001 alpha bravo charlie\n\n"));
+        assert!(
+            copied[0].split("\n\n").count() > 8,
+            "selection did not extend"
+        );
     }
 }
 
@@ -227,4 +230,32 @@ fn selection_scroll_markdown_copy_survives_scrollbar_thumb_drag_after_release() 
         p.frame(vec![Event::Copy]).1,
         "scrollbar cleared or changed the selection"
     );
+}
+
+#[test]
+fn selection_scroll_markdown_double_click_still_selects_a_word() {
+    let p = Probe::new();
+    let out = p.output(vec![]);
+    let word = out
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("Witness 001") => Some(
+                text.pos
+                    + text
+                        .galley
+                        .pos_from_cursor(egui::text::CCursor::new(14))
+                        .center()
+                        .to_vec2(),
+            ),
+            _ => None,
+        })
+        .expect("paragraph appears in the viewport");
+    out.drop_without_applying_deltas();
+    p.frame(vec![Event::PointerMoved(word)]);
+    for _ in 0..2 {
+        p.frame(vec![button(word, true)]);
+        p.frame(vec![button(word, false)]);
+    }
+    assert_eq!(p.frame(vec![Event::Copy]).1, ["alpha"]);
 }
