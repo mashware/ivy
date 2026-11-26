@@ -7,6 +7,9 @@ import {join} from 'node:path'
 import {pathToFileURL} from 'node:url'
 
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+function completedRecords(contents) {
+ return contents.split('\n').slice(0,-1).map(line=>JSON.parse(line))
+}
 test('actual Windows plugin and native helper keep two pane signals independent',{
  skip: process.platform !== 'win32' || !process.env.IVY_TEST_PANES ? 'Requires the Windows native opencode-signals example fixture' : false,
 },async()=>{
@@ -36,7 +39,7 @@ test('actual Windows plugin and native helper keep two pane signals independent'
    const deadline=Date.now()+12000
    while(Date.now()<deadline) {
     let rows=[]
-    try {rows=(await readFile(process.env.IVY_TEST_EVENTS,'utf8')).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line))} catch(error) {if(error.code!=='ENOENT')throw error}
+    try {rows=completedRecords(await readFile(process.env.IVY_TEST_EVENTS,'utf8'))} catch(error) {if(error.code!=='ENOENT')throw error}
     if(rows.some(row=>row.pane===pane&&predicate(row.snapshot)))return
     await pause(25)
    }
@@ -56,4 +59,25 @@ test('actual Windows plugin and native helper keep two pane signals independent'
   for(const [key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value}
   await rm(dir,{recursive:true,force:true})
  }
+})
+
+test('completed signal records defer every unterminated write fragment',()=>{
+ const first={pane:0,snapshot:{activity:'busy'}}
+ const second={pane:1,snapshot:{permission:true}}
+ const firstLine=JSON.stringify(first)+'\n'
+ const secondLine=JSON.stringify(second)+'\n'
+ for(let length=0;length<firstLine.length;length++) {
+  assert.deepEqual(completedRecords(firstLine.slice(0,length)),[],`first record fragment ${length}`)
+ }
+ for(let length=0;length<secondLine.length;length++) {
+  assert.deepEqual(completedRecords(firstLine+secondLine.slice(0,length)),[first],`second record fragment ${length}`)
+ }
+ assert.deepEqual(completedRecords(firstLine+secondLine),[first,second])
+})
+
+test('completed signal records reject malformed complete lines',()=>{
+ const valid=JSON.stringify({pane:0,snapshot:null})+'\n'
+ assert.deepEqual(completedRecords(valid+'{'),[{pane:0,snapshot:null}])
+ assert.throws(()=>completedRecords(valid+'{\n'),SyntaxError)
+ assert.throws(()=>completedRecords('\n'),SyntaxError)
 })
