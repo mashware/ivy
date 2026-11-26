@@ -1020,6 +1020,11 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/startup/migration.rs"),
     ),
     ("app/src/startup.rs", include_str!("../src/startup.rs")),
+    ("app/src/usage.rs", include_str!("../src/usage.rs")),
+    (
+        "app/src/usage/paint.rs",
+        include_str!("../src/usage/paint.rs"),
+    ),
     (
         "app/src/restoration.rs",
         include_str!("../src/restoration.rs"),

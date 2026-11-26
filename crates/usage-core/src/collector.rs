@@ -806,7 +806,8 @@ fn selected_paths(roots: &[Binding]) -> Vec<PathBuf> {
     roots.iter().map(|root| root.path.clone()).collect()
 }
 
-#[cfg(all(test, any(target_os = "linux", target_os = "macos", windows)))]
+#[cfg(test)]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod tests {
     use super::*;
     use std::fs;

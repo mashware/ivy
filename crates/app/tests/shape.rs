@@ -692,6 +692,8 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/startup/migration.rs"),
     ),
     ("src/startup.rs", include_str!("../src/startup.rs")),
+    ("src/usage.rs", include_str!("../src/usage.rs")),
+    ("src/usage/paint.rs", include_str!("../src/usage/paint.rs")),
     ("src/restoration.rs", include_str!("../src/restoration.rs")),
     (
         "src/session/ownership.rs",
