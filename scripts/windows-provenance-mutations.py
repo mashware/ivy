@@ -28,8 +28,8 @@ MUTATIONS = [
     ),
     (
         "application-discards-publication-scope", "crates/app/src/control/channel.rs",
-        "services.with_publication_scope(inspector.flatten())",
-        "services.with_publication_scope(None)", "app", APP,
+        ".with_publication_scope(inspector.flatten())",
+        ".with_publication_scope(None)", "app", APP,
     ),
     (
         "outside-notice-is-suppressed", "crates/panel-control/src/windows_services.rs",
