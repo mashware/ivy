@@ -210,10 +210,9 @@ fn project_local_root(directory: &Path) -> io::Result<Option<PathBuf>> {
     };
     let identity = crate::project::resolve(directory)
         .map_err(|_| io::Error::other("Could not resolve the Claude project settings scope."))?;
-    let crate::project::Key::Repository(common) = identity.key else {
-        return Err(io::Error::other(
-            "Could not resolve the Claude project settings scope.",
-        ));
+    let common = match identity.key {
+        crate::project::Key::Repository(common) => common,
+        crate::project::Key::Folder(_) => return Ok(None),
     };
     let Some(main) = common
         .parent()
@@ -328,6 +327,46 @@ mod tests {
         assert_eq!(result["refreshInterval"], 1);
         assert_eq!(result["padding"], 2);
         fs::remove_dir_all(project).unwrap();
+        fs::remove_dir_all(profile).unwrap();
+    }
+
+    #[test]
+    fn empty_ancestor_git_marker_keeps_project_precedence_and_inherited_options() {
+        let directory = panel_contract::PanelDir::create().unwrap();
+        let ancestor = directory.path().join("not-a-repository");
+        let project = ancestor.join("project");
+        let settings = project.join(".claude");
+        let profile = directory.path().join("profile");
+        fs::create_dir_all(&settings).unwrap();
+        fs::create_dir(ancestor.join(".git")).unwrap();
+        fs::create_dir(&profile).unwrap();
+        fs::write(
+            profile.join("settings.json"),
+            r#"{"statusLine":{"type":"command","command":"user","refreshInterval":1,"hideVimModeIndicator":true}}"#,
+        )
+        .unwrap();
+        fs::write(
+            settings.join("settings.json"),
+            r#"{"statusLine":{"type":"command","command":"project","padding":2}}"#,
+        )
+        .unwrap();
+        fs::write(
+            settings.join("settings.local.json"),
+            r#"{"statusLine":{"type":"command","command":"local"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            crate::project::resolve(&project).unwrap().key,
+            crate::project::Key::Folder(_)
+        ));
+        let result = statusline_for_profile(&project, &profile)
+            .expect("an empty ancestor Git marker must not disable the settings preview")
+            .unwrap();
+        assert_eq!(result["command"], "local");
+        assert_eq!(result["refreshInterval"], 1);
+        assert_eq!(result["padding"], 2);
+        assert_eq!(result["hideVimModeIndicator"], true);
+        fs::remove_dir_all(ancestor).unwrap();
         fs::remove_dir_all(profile).unwrap();
     }
 
