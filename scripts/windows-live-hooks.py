@@ -31,14 +31,16 @@ VENDOR_TESTS = (
 def execute(label, args, *, env=None, timeout=900):
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(args, cwd=ROOT, env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, timeout=timeout, check=False)
+                            stderr=subprocess.PIPE, timeout=timeout, check=False)
     output = result.stdout.decode("utf-8", errors="replace")
-    (EVIDENCE / f"{label}.log").write_text(output, encoding="utf-8")
-    print(output, end="", flush=True)
-    return result.returncode, output
+    errors = (result.stderr or b"").decode("utf-8", errors="replace")
+    log = f"=== {label}: stdout ===\n{output}\n=== {label}: stderr ===\n{errors}"
+    (EVIDENCE / f"{label}.log").write_text(log, encoding="utf-8")
+    print(log, end="", flush=True)
+    return result.returncode, output, errors
 
 
-def require_pass(name, code, output):
+def require_pass(name, code, output, errors=""):
     escaped = re.escape(name)
     if (code != 0 or not re.search(r"(?m)^running 1 test$", output)
             or not re.search(rf"(?m)^test {escaped} \.\.\. ok$", output)
@@ -57,7 +59,7 @@ def main():
         raise SystemExit("native Windows is required for the live hook witnesses")
     env = os.environ.copy()
     env["CARGO_TARGET_DIR"] = str(TARGET)
-    code, _ = execute("build-helpers", ["cargo", "build", "--locked", "-p",
+    code, _, _ = execute("build-helpers", ["cargo", "build", "--locked", "-p",
                                         "panel-control", "--bins"], env=env)
     if code:
         raise SystemExit("real helper build failed")

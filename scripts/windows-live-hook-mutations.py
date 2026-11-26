@@ -78,15 +78,18 @@ CASES = (
 def invoke(label, command, env):
     try:
         result = subprocess.run(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=900, check=False)
+                                stderr=subprocess.PIPE, timeout=900, check=False)
         output = result.stdout.decode("utf-8", errors="replace")
+        errors = (result.stderr or b"").decode("utf-8", errors="replace")
         code = result.returncode
     except subprocess.TimeoutExpired as error:
-        output = (error.output or b"").decode("utf-8", errors="replace") + "\nTIMEOUT\n"
+        output = (error.output or b"").decode("utf-8", errors="replace")
+        errors = (error.stderr or b"").decode("utf-8", errors="replace") + "\nTIMEOUT\n"
         code = None
-    (EVIDENCE / f"{label}.log").write_text(output, encoding="utf-8")
-    print(output, end="", flush=True)
-    return code, output
+    log = f"=== {label}: stdout ===\n{output}\n=== {label}: stderr ===\n{errors}"
+    (EVIDENCE / f"{label}.log").write_text(log, encoding="utf-8")
+    print(log, end="", flush=True)
+    return code, output, errors
 
 
 def test_command(package, name):
@@ -94,21 +97,21 @@ def test_command(package, name):
             "--exact", "--show-output", "--test-threads=1"]
 
 
-def passed_once(name, code, output):
+def passed_once(name, code, output, errors=""):
     return (code == 0 and re.search(r"(?m)^running 1 test$", output)
             and re.search(rf"(?m)^test {re.escape(name)} \.\.\. ok$", output)
             and re.search(r"(?m)^test result: ok\. 1 passed; 0 failed;", output))
 
 
-def detected(name, marker, code, output):
+def detected(name, marker, code, output, errors=""):
     # The test summary and its named failures entry rule out zero tests, compiler
     # errors, unrelated panics, and setup errors masquerading as mutation proof.
     return (code not in (None, 0)
             and re.search(r"(?m)^running 1 test$", output)
             and re.search(rf"(?m)^    {re.escape(name)}$", output)
             and re.search(r"(?m)^test result: FAILED\. 0 passed; 1 failed;", output)
-            and marker in output
-            and not re.search(r"(?m)^error(?:\[E\d+\])?: could not compile", output))
+            and (marker in output or marker in errors)
+            and not re.search(r"(?m)^error(?:\[E\d+\])?: could not compile", output + "\n" + errors))
 
 
 def main():
@@ -128,13 +131,13 @@ def main():
     save_inventory()
     env = os.environ.copy()
     env["CARGO_TARGET_DIR"] = str(TARGET)
-    code, _ = invoke("baseline-suite", [sys.executable, str(ROOT / "scripts/windows-live-hooks.py")], env)
+    code, _, _ = invoke("baseline-suite", [sys.executable, str(ROOT / "scripts/windows-live-hooks.py")], env)
     if code != 0:
         raise SystemExit("the named native baseline witnesses must pass first")
     for label, name in [("selected-root-image", IMAGE), ("captured-root-identity", IDENTITY),
                         ("ancestry-sequence-order", SEQUENCE)]:
-        code, output = invoke(f"baseline-{label}", test_command("term-core", name), env)
-        if not passed_once(name, code, output):
+        code, output, errors = invoke(f"baseline-{label}", test_command("term-core", name), env)
+        if not passed_once(name, code, output, errors):
             raise SystemExit(f"the named {label} baseline did not pass exactly once")
 
     for item, (label, relative, before, after, package, name, marker) in zip(inventory, CASES):
@@ -149,8 +152,8 @@ def main():
             item["status"] = "running"
             save_inventory()
             path.write_bytes(original.replace(old, new, 1))
-            code, output = invoke(label, test_command(package, name), env)
-            if not detected(name, marker, code, output):
+            code, output, errors = invoke(label, test_command(package, name), env)
+            if not detected(name, marker, code, output, errors):
                 item["status"] = "not_detected"
                 raise SystemExit(f"{label}: expected named assertion did not detect mutation")
             item["status"] = "detected"

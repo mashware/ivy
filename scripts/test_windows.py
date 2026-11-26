@@ -47,65 +47,92 @@ class WindowsLiveHookDriverTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         source = Path(cls.temp.name, 'witness.rs')
         source.write_text('''
+use std::io::Write;
+fn diagnostic(text: &str) {
+    let text = text.to_owned();
+    std::thread::spawn(move || {
+        writeln!(std::io::stderr().lock(), "{text}").unwrap();
+    }).join().unwrap();
+}
 #[test]
-fn noisy_witness() { eprintln!("fixture diagnostic witness"); }
+fn noisy_witness() {
+    println!("fixture stdout witness");
+    diagnostic("fixture raw diagnostic witness");
+}
 #[test]
-fn failing_witness() { panic!("intended fixture assertion"); }
+fn failing_witness() {
+    diagnostic("intended fixture assertion");
+    panic!("fixture assertion tripped");
+}
 ''', encoding='utf-8')
         cls.executable = Path(cls.temp.name, 'witness.exe' if sys.platform == 'win32' else 'witness')
         subprocess.run([shutil.which('rustc'), '--edition=2024', '--test', str(source),
                         '-o', str(cls.executable)], check=True, stdout=subprocess.PIPE,
-                       stderr=subprocess.STDOUT, timeout=60)
+                       stderr=subprocess.PIPE, timeout=60)
+        cls.real_run = staticmethod(subprocess.run)
 
-    def run_libtest(self, command):
-        arguments = command[command.index('--') + 1:]
-        result = subprocess.run([str(self.executable), *arguments], stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, timeout=30)
-        return result.returncode, result.stdout
+    def cargo_transport(self, command, **options):
+        self.assertEqual(command[0], 'cargo')
+        if '--' in command:
+            arguments = command[command.index('--') + 1:]
+        else:
+            self.assertEqual(command[1], 'build')
+            arguments = ['missing_witness', '--exact']
+        # Keep the driver's real capture kwargs: changing only the Cargo prefix
+        # makes raw-stderr merging a regression this fixture can actually see.
+        return self.real_run([str(self.executable), *arguments], **options)
+
+    def invoke_fixture(self, name):
+        evidence = Path(self.temp.name, 'mutation-evidence')
+        evidence.mkdir(exist_ok=True)
+        with patch.object(subprocess, 'run', self.cargo_transport), \
+                patch.object(MUTATIONS, 'EVIDENCE', evidence), redirect_stdout(io.StringIO()):
+            return MUTATIONS.invoke(name, MUTATIONS.test_command('fixture', name), None)
 
     def test_native_and_vendor_commands_preserve_exact_named_result_with_real_diagnostics(self):
-        runs = []
-
-        def execute(_label, command, **_options):
-            if '--lib' not in command:
-                self.assertEqual(command[1], 'build')
-                return 0, ''
-            result = self.run_libtest(command)
-            runs.append(result)
-            return result
-
-        # Only the Cargo transport is replaced: named() and the standalone vendor
-        # command both hand their actual libtest flags to the compiled fixture.
-        with patch.object(LIVE, 'execute', execute), \
+        evidence = Path(self.temp.name, 'native-evidence')
+        with patch.object(subprocess, 'run', self.cargo_transport), \
+                patch.object(LIVE, 'EVIDENCE', evidence), \
                 patch.object(LIVE, 'sys', SimpleNamespace(platform='win32')), \
                 patch.object(LIVE, 'APP_TESTS', ('noisy_witness',)), \
                 patch.object(LIVE, 'TERM_TESTS', ()), \
                 patch.object(LIVE, 'VENDOR_TESTS', ('noisy_witness',)), \
                 redirect_stdout(io.StringIO()):
             LIVE.main()
-        self.assertEqual(len(runs), 2)
-        for code, output in runs:
-            self.assertIn('fixture diagnostic witness', output)
-            LIVE.require_pass('noisy_witness', code, output)
+        for label in ('app-1', 'vendor-1'):
+            log = (evidence / f'{label}.log').read_text(encoding='utf-8')
+            stdout, stderr = log.split(f'=== {label}: stderr ===\n')
+            self.assertIn(f'=== {label}: stdout ===\n', stdout)
+            self.assertIn('fixture stdout witness', stdout)
+            self.assertNotIn('fixture raw diagnostic witness', stdout)
+            self.assertIn('fixture raw diagnostic witness', stderr)
 
     def test_mutation_commands_accept_real_noisy_pass_and_named_assertion_only(self):
-        passed = self.run_libtest(MUTATIONS.test_command('fixture', 'noisy_witness'))
-        self.assertIn('fixture diagnostic witness', passed[1])
+        passed = self.invoke_fixture('noisy_witness')
         self.assertTrue(MUTATIONS.passed_once('noisy_witness', *passed))
         LIVE.require_pass('noisy_witness', *passed)
-        failed = self.run_libtest(MUTATIONS.test_command('fixture', 'failing_witness'))
+        self.assertIn('fixture stdout witness', passed[1])
+        self.assertNotIn('fixture raw diagnostic witness', passed[1])
+        self.assertIn('fixture raw diagnostic witness', passed[2])
+        failed = self.invoke_fixture('failing_witness')
         marker = 'intended fixture assertion'
+        self.assertNotIn(marker, failed[1])
+        self.assertIn(marker, failed[2])
         self.assertTrue(MUTATIONS.detected('failing_witness', marker, *failed))
-        zero = self.run_libtest(MUTATIONS.test_command('fixture', 'missing_witness'))
-        for name, result in [('noisy_witness', zero), ('wrong_witness', passed),
-                             ('failing_witness', failed), ('noisy_witness', (None, passed[1]))]:
+        zero = self.invoke_fixture('missing_witness')
+        for name, result in [
+                ('noisy_witness', zero), ('wrong_witness', passed), ('failing_witness', failed),
+                ('noisy_witness', (None, passed[1], passed[2])),
+                ('noisy_witness', (0, '', passed[1]))]:
             with self.subTest(name=name, code=result[0]):
                 self.assertFalse(MUTATIONS.passed_once(name, *result))
                 with self.assertRaises(SystemExit):
                     LIVE.require_pass(name, *result)
-        for name, result in [('failing_witness', zero), ('wrong_witness', failed),
-                             ('failing_witness', passed), ('failing_witness', (None, failed[1])),
-                             ('failing_witness', (1, 'error: could not compile fixture\n' + failed[1]))]:
+        for name, result in [
+                ('failing_witness', zero), ('wrong_witness', failed), ('failing_witness', passed),
+                ('failing_witness', (None, failed[1], failed[2])),
+                ('failing_witness', (101, '', failed[1] + failed[2])),
+                ('failing_witness', (1, failed[1], 'error: could not compile fixture\n' + failed[2]))]:
             with self.subTest(name=name, code=result[0]):
                 self.assertFalse(MUTATIONS.detected(name, marker, *result))
 
