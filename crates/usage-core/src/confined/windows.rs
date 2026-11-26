@@ -502,10 +502,7 @@ impl Discovery {
                     Ok(directory) => self.stack.push((Reader::new(directory), path)),
                     Err(_) => self.partial = true,
                 }
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
-            {
+            } else if crate::confined::is_history_candidate(&path) {
                 return Some(path);
             }
         }

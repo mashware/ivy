@@ -6,8 +6,9 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use usage_core::{DateRange, Service, Snapshot, Status};
+use usage_core::{DateRange, Granularity, Provider, Service, Snapshot, Status};
 
+mod codex_controls;
 mod paint;
 use paint::paint_summary;
 
@@ -21,6 +22,11 @@ pub(crate) struct View {
     snapshot: Option<Snapshot>,
     roots: Vec<PathBuf>,
     new_root: String,
+    codex: codex_controls::Controls,
+    provider: Option<Provider>,
+    model_filter: String,
+    applied_model: Option<String>,
+    granularity: Granularity,
     confirm_clear: bool,
     hide_result: bool,
     period: Period,
@@ -73,6 +79,10 @@ fn local_boundary(day: NaiveDate, zone: &impl TimeZone) -> Option<i64> {
     })
 }
 
+fn snapshot_has_partial_codex(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_some_and(|snapshot| snapshot.codex_enabled && snapshot.status == Status::Partial)
+}
+
 impl View {
     #[cfg(test)]
     pub(crate) fn open_for_test(&mut self) {
@@ -98,12 +108,21 @@ impl View {
     fn request(&mut self) {
         if let (Some(service), Some(range)) = (&self.service, self.period.range()) {
             self.requested_range = Some(range);
-            service.request(range);
+            service.request_comparison(
+                range,
+                self.provider,
+                self.applied_model.clone(),
+                self.granularity,
+            );
         }
     }
 
     fn snapshot_matches_range(&self, snapshot: &Snapshot) -> bool {
-        self.requested_range.is_some() && self.requested_range == snapshot.range
+        self.requested_range.is_some()
+            && self.requested_range == snapshot.range
+            && self.provider == snapshot.provider
+            && self.applied_model == snapshot.model_filter
+            && self.granularity == snapshot.granularity
     }
 
     fn install_snapshot(&mut self) {
@@ -129,9 +148,11 @@ impl View {
             .as_ref()
             .is_some_and(|s| s.status == Status::WaitingToClear);
 
+        if let Some(snapshot) = &self.snapshot {
+            ui.label(status_label(snapshot.status));
+        }
         ui.strong("Claude Code · Local, unassigned history");
         if let Some(s) = &self.snapshot {
-            ui.label(status_label(s.status));
             if let Some(success) = s
                 .last_success_at_ms
                 .and_then(chrono::DateTime::from_timestamp_millis)
@@ -223,9 +244,18 @@ impl View {
                 service.enable(std::mem::take(&mut self.roots));
             }
         }
+        let codex_enabled = self.codex.paint(
+            ui,
+            service,
+            self.snapshot.as_ref(),
+            !waiting && supported && !clearing && !incompatible,
+        );
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(enabled && !clearing, egui::Button::new("Stop collection"))
+                .add_enabled(
+                    (enabled || codex_enabled) && !clearing,
+                    egui::Button::new("Stop collection for all providers"),
+                )
                 .clicked()
             {
                 service.stop();
@@ -233,7 +263,9 @@ impl View {
             let has_history = self.snapshot.as_ref().is_some_and(|s| {
                 s.has_history
                     || s.enabled
+                    || s.codex_enabled
                     || !s.roots.is_empty()
+                    || !s.codex_roots.is_empty()
                     || matches!(s.status, Status::Error | Status::Incompatible)
             });
             if ui
@@ -259,14 +291,59 @@ impl View {
                 }
             });
         }
+        if snapshot_has_partial_codex(self.snapshot.as_ref()) {
+            ui.small("Codex coverage can be incomplete. Compressed rollouts and unverified fork history are skipped.");
+        }
         ui.separator();
         let old_period = self.period;
         ui.horizontal_wrapped(|ui| {
             for (period, label) in Period::OPTIONS {
-                ui.selectable_value(&mut self.period, period, label);
+                if self.granularity != Granularity::Hour || period == Period::Week {
+                    ui.selectable_value(&mut self.period, period, label);
+                }
             }
         });
-        if old_period != self.period {
+        let old_provider = self.provider;
+        let old_granularity = self.granularity;
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.provider, None, "All providers");
+            ui.selectable_value(&mut self.provider, Some(Provider::Claude), "Claude Code");
+            ui.selectable_value(&mut self.provider, Some(Provider::Codex), "Codex");
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.granularity, Granularity::Hour, "Hourly");
+            ui.selectable_value(&mut self.granularity, Granularity::Day, "Daily");
+            ui.selectable_value(&mut self.granularity, Granularity::Month, "Monthly");
+        });
+        let mut model_changed = false;
+        ui.horizontal(|ui| {
+            let input = ui.add(
+                egui::TextEdit::singleline(&mut self.model_filter)
+                    .hint_text("Model name")
+                    .char_limit(128),
+            );
+            if ui.button("Filter model").clicked()
+                || (input.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+            {
+                let model = self.model_filter.trim();
+                let next = (!model.is_empty()).then(|| model.to_owned());
+                model_changed = self.applied_model != next;
+                self.applied_model = next;
+            }
+            if self.applied_model.is_some() && ui.button("Clear model filter").clicked() {
+                self.model_filter.clear();
+                self.applied_model = None;
+                model_changed = true;
+            }
+        });
+        if self.granularity == Granularity::Hour {
+            self.period = Period::Week;
+        }
+        if old_period != self.period
+            || old_provider != self.provider
+            || old_granularity != self.granularity
+            || model_changed
+        {
             self.hide_result = true;
             self.request();
             return;
@@ -275,7 +352,9 @@ impl View {
             && !clearing
             && let Some(snapshot) = &self.snapshot
             && self.snapshot_matches_range(snapshot)
-            && (snapshot.has_history || snapshot.last_success_at_ms.is_some())
+            && (snapshot.has_history
+                || snapshot.last_success_at_ms.is_some()
+                || snapshot.codex_last_success_at_ms.is_some())
         {
             paint_summary(ui, snapshot);
         }

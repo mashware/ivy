@@ -116,6 +116,7 @@ impl Usage<'_> {
             cache_write,
             cache_write_1h,
             output,
+            reasoning_output: None,
             flags,
         }
     }
@@ -295,6 +296,7 @@ pub(crate) fn parse(line: &[u8], source_key: [u8; 32], salt: &[u8; 32]) -> Recor
         .map(|date| date.timestamp_millis());
     let counts = usage.counts();
     Record::Observation(Observation {
+        provider: crate::Provider::Claude,
         event_key,
         source_key,
         evidence_key: evidence_key(salt, at_ms, model_key, counts),

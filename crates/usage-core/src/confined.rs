@@ -263,10 +263,7 @@ mod native {
                         }
                     }
                 }
-                if path
-                    .extension()
-                    .is_some_and(|extension| extension == "jsonl")
-                {
+                if crate::confined::is_history_candidate(&path) {
                     if kind == libc::DT_REG || kind == libc::DT_UNKNOWN {
                         return Some(path);
                     }
@@ -432,4 +429,19 @@ pub(crate) use windows::{Discovery, Root, bind, private_directory, same_file, st
 
 pub(crate) fn supported() -> bool {
     cfg!(any(target_os = "linux", target_os = "macos", windows))
+}
+
+fn is_history_candidate(path: &std::path::Path) -> bool {
+    let plain = path.extension().is_some_and(|extension| {
+        if cfg!(windows) {
+            extension.eq_ignore_ascii_case("jsonl")
+        } else {
+            extension == "jsonl"
+        }
+    });
+    plain
+        || path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|name| name.starts_with("rollout-") && name.ends_with(".jsonl.zst"))
 }

@@ -3,6 +3,7 @@
 mod scan;
 mod summary;
 
+use crate::Provider;
 use crate::confined::{self, Binding, Discovery, Root};
 use crate::control::{Consent, Control};
 use crate::ledger::{Error as LedgerError, Ledger};
@@ -77,6 +78,8 @@ pub struct Totals {
     pub cache_read: u128,
     pub cache_write: u128,
     pub output: u128,
+    pub reasoning_output: u128,
+    pub reasoning_output_known: bool,
     pub tokens: u128,
     pub tokens_known: bool,
     pub uncached_input_known: bool,
@@ -87,6 +90,28 @@ pub struct Totals {
     pub estimate: Option<Cost>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Granularity {
+    Hour,
+    #[default]
+    Day,
+    Month,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Request {
+    range: DateRange,
+    provider: Option<Provider>,
+    model: Option<String>,
+    granularity: Granularity,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bucket {
+    pub label: String,
+    pub totals: Totals,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Day {
     pub date: NaiveDate,
@@ -95,6 +120,7 @@ pub struct Day {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Model {
+    pub provider: Provider,
     pub label: String,
     pub totals: Totals,
 }
@@ -104,7 +130,14 @@ pub struct Snapshot {
     pub status: Status,
     pub enabled: bool,
     pub roots: Vec<PathBuf>,
+    pub codex_roots: Vec<PathBuf>,
+    pub codex_enabled: bool,
+    pub codex_last_success_at_ms: Option<i64>,
     pub range: Option<DateRange>,
+    pub provider: Option<Provider>,
+    pub model_filter: Option<String>,
+    pub granularity: Granularity,
+    pub buckets: Vec<Bucket>,
     pub last_success_at_ms: Option<i64>,
     pub pricing_version: String,
     pub pricing_source: String,
@@ -115,7 +148,7 @@ pub struct Snapshot {
 }
 
 enum Command {
-    Enable(Vec<PathBuf>, Option<[u8; 16]>),
+    Enable(Vec<PathBuf>, Option<[u8; 16]>, Provider),
     Stop,
     Clear,
 }
@@ -125,7 +158,7 @@ struct Mailbox {
     generation: u64,
     cancel: Arc<AtomicBool>,
     commands: VecDeque<Command>,
-    range: Option<DateRange>,
+    range: Option<Request>,
     reply: Option<(Snapshot, Option<[u8; 16]>)>,
     observed_clear: Option<[u8; 16]>,
     finish: bool,
@@ -173,7 +206,11 @@ impl Service {
     }
 
     pub fn enable(&self, roots: Vec<PathBuf>) -> bool {
-        self.command(|mailbox| Command::Enable(roots, mailbox.observed_clear))
+        self.command(|mailbox| Command::Enable(roots, mailbox.observed_clear, Provider::Claude))
+    }
+
+    pub fn enable_codex(&self, roots: Vec<PathBuf>) -> bool {
+        self.command(|mailbox| Command::Enable(roots, mailbox.observed_clear, Provider::Codex))
     }
 
     pub fn stop(&self) -> bool {
@@ -197,13 +234,32 @@ impl Service {
     }
 
     pub fn request(&self, range: DateRange) {
-        if !range.valid() {
+        self.request_comparison(range, None, None, Granularity::Day);
+    }
+
+    pub fn request_comparison(
+        &self,
+        range: DateRange,
+        provider: Option<Provider>,
+        model: Option<String>,
+        granularity: Granularity,
+    ) {
+        if !range.valid()
+            || granularity == Granularity::Hour
+                && range.end_ms.saturating_sub(range.start_ms) > 8 * 86_400_000
+        {
             return;
         }
+        let request = Some(Request {
+            range,
+            provider,
+            model,
+            granularity,
+        });
         let mut mailbox = self.shared.mailbox.lock().unwrap();
-        if mailbox.range != Some(range) && !mailbox.finish {
+        if mailbox.range != request && !mailbox.finish {
             mailbox.invalidate();
-            mailbox.range = Some(range);
+            mailbox.range = request;
             self.shared.changed.notify_one();
         }
     }
@@ -231,9 +287,11 @@ struct Writer {
     _lifecycle: File,
     _owner: File,
     recovery: bool,
+    codex_ready: bool,
 }
 
 struct SweepRoot {
+    provider: Provider,
     opened: Root,
     discovery: Discovery,
     key: [u8; 32],
@@ -247,14 +305,29 @@ struct Sweep {
     scan: Option<scan::Scan>,
     resume: Option<scan::Resume>,
     next_resume: Option<scan::Resume>,
+    providers: [SweepProgress; 2],
+    complete: bool,
+}
+
+#[derive(Default)]
+struct SweepProgress {
     discovered: u64,
     partial: bool,
     more: bool,
-    complete: bool,
     reported: bool,
 }
 
+const PROVIDERS: [Provider; 2] = [Provider::Claude, Provider::Codex];
+
 impl Sweep {
+    fn more(&self) -> bool {
+        self.providers.iter().any(|state| state.more)
+    }
+
+    fn partial(&self) -> bool {
+        self.providers.iter().any(|state| state.partial)
+    }
+
     fn step(
         &mut self,
         writer: &mut Writer,
@@ -265,7 +338,22 @@ impl Sweep {
             return Ok(());
         }
         if self.current.is_none() {
-            let Some(binding) = consent.roots.get(self.next_root) else {
+            let claude = if consent.enabled {
+                consent.roots.as_slice()
+            } else {
+                &[]
+            };
+            let codex = if consent.codex_enabled {
+                consent.codex_roots.as_slice()
+            } else {
+                &[]
+            };
+            let Some((binding, provider)) = claude
+                .iter()
+                .map(|root| (root, Provider::Claude))
+                .chain(codex.iter().map(|root| (root, Provider::Codex)))
+                .nth(self.next_root)
+            else {
                 self.complete = true;
                 return Ok(());
             };
@@ -273,19 +361,20 @@ impl Sweep {
             let opened = match Root::open(binding.clone()) {
                 Ok(root) => root,
                 Err(_) => {
-                    self.partial = true;
+                    self.providers[provider as usize].partial = true;
                     return Ok(());
                 }
             };
             let discovery = match opened.discover() {
                 Ok(discovery) => discovery,
                 Err(_) => {
-                    self.partial = true;
+                    self.providers[provider as usize].partial = true;
                     return Ok(());
                 }
             };
             let salt = writer.ledger.info()?.identity_salt;
             self.current = Some(SweepRoot {
+                provider,
                 opened,
                 discovery,
                 key: scan::root_key(binding, &salt),
@@ -302,7 +391,7 @@ impl Sweep {
                     let _consent = control.approve_read(consent)?;
                     let active = self.scan.take().expect("active source required to publish");
                     let (more, resume) = active.publish(&root.opened, &mut writer.ledger)?;
-                    self.more |= more;
+                    self.providers[root.provider as usize].more |= more;
                     if resume.is_some() {
                         self.next_resume = resume;
                     }
@@ -317,14 +406,18 @@ impl Sweep {
             if root.dirty.len() == DIRTY_SOURCES || root.discovery.finished() {
                 break;
             }
-            if let Some(path) = root.discovery.next(1)
-                && !root.dirty.contains(&path)
-            {
-                root.dirty.push_back(path);
+            if let Some(path) = root.discovery.next(1) {
+                if path.extension().is_some_and(|extension| extension == "zst") {
+                    if root.provider == Provider::Codex {
+                        self.providers[Provider::Codex as usize].partial = true;
+                    }
+                } else if accepts_source(root.provider, &path) && !root.dirty.contains(&path) {
+                    root.dirty.push_back(path);
+                }
             }
         }
         if let Some(path) = root.dirty.pop_front() {
-            self.discovered += 1;
+            self.providers[root.provider as usize].discovered += 1;
             let salt = writer.ledger.info()?.identity_salt;
             self.scan = Some(scan::Scan::new(
                 &root.opened,
@@ -333,9 +426,10 @@ impl Sweep {
                 salt,
                 &writer.ledger,
                 self.resume.as_ref(),
+                root.provider,
             )?);
         } else if root.discovery.finished() {
-            self.partial |= root.discovery.partial;
+            self.providers[root.provider as usize].partial |= root.discovery.partial;
             self.current = None;
         }
         Ok(())
@@ -391,7 +485,7 @@ impl Worker {
                 }
                 (
                     mailbox.generation,
-                    mailbox.range,
+                    mailbox.range.clone(),
                     Arc::clone(&mailbox.cancel),
                 )
             };
@@ -430,7 +524,7 @@ impl Worker {
         &mut self,
         shared: &Shared,
         generation: u64,
-        range: Option<DateRange>,
+        range: Option<Request>,
         cancel: Arc<AtomicBool>,
         repaint: &impl Fn(),
     ) -> io::Result<Duration> {
@@ -471,8 +565,9 @@ impl Worker {
         }
         if let Some(command) = self.pending_action.take() {
             let result = match &command {
-                Command::Enable(paths, observed) => {
-                    self.control.set_enabled(paths.clone(), *observed)
+                Command::Enable(paths, observed, provider) => {
+                    self.control
+                        .enable_provider(paths.clone(), *observed, *provider)
                 }
                 Command::Stop => self.control.stop().map(|()| true),
                 Command::Clear => self.control.begin_clear().map(|()| true),
@@ -517,7 +612,7 @@ impl Worker {
             self.next_sweep = Instant::now();
         }
         let mut busy = false;
-        if self.consent.enabled
+        if (self.consent.enabled || self.consent.codex_enabled)
             && (self.failure != Some(Status::Limit)
                 || self.writer.as_ref().is_some_and(|writer| writer.recovery))
         {
@@ -560,6 +655,7 @@ impl Worker {
                 _lifecycle: lifecycle,
                 _owner: owner,
                 recovery: true,
+                codex_ready: false,
             });
         }
 
@@ -574,6 +670,19 @@ impl Worker {
                 }
             }
             return Ok(true);
+        }
+
+        if self.consent.codex_enabled && !writer.codex_ready {
+            let _consent = match self.control.approve_read(&self.consent) {
+                Ok(lock) => lock,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+                Err(error) => return Err(error),
+            };
+            if let Err(error) = writer.ledger.upgrade_for_codex() {
+                self.failure = Some(ledger_status(&error));
+                return Ok(false);
+            }
+            writer.codex_ready = true;
         }
 
         if self.sweep.complete {
@@ -596,7 +705,9 @@ impl Worker {
             self.sweep.scan = None;
             self.sweep.resume = None;
             self.sweep.next_resume = None;
-            self.sweep.partial = true;
+            if let Some(root) = &self.sweep.current {
+                self.sweep.providers[root.provider as usize].partial = true;
+            }
             match error {
                 scan::Error::Io(error) if error.kind() == io::ErrorKind::WouldBlock => {}
                 scan::Error::Io(_) => {}
@@ -607,10 +718,10 @@ impl Worker {
         }
         if self.sweep.complete {
             self.sweep.resume = None;
-            if !self.sweep.partial && !self.sweep.more && self.failure == Some(Status::Stale) {
+            if !self.sweep.partial() && !self.sweep.more() && self.failure == Some(Status::Stale) {
                 self.failure = None;
             }
-            self.next_sweep = if self.sweep.more {
+            self.next_sweep = if self.sweep.more() {
                 Instant::now() + IDLE_POLL
             } else {
                 Instant::now() + SWEEP_INTERVAL
@@ -624,19 +735,22 @@ impl Worker {
         &mut self,
         shared: &Shared,
         generation: u64,
-        range: Option<DateRange>,
+        range: Option<Request>,
         cancel: Arc<AtomicBool>,
         repaint: &impl Fn(),
     ) -> io::Result<()> {
-        let fallback = self.failure.unwrap_or(if self.consent.enabled {
-            Status::Importing
-        } else {
-            Status::Disabled
-        });
-        let Some(range) = range else {
+        let fallback =
+            self.failure
+                .unwrap_or(if self.consent.enabled || self.consent.codex_enabled {
+                    Status::Importing
+                } else {
+                    Status::Disabled
+                });
+        let Some(request) = range else {
             self.deliver_status(shared, generation, fallback, repaint);
             return Ok(());
         };
+        let range = request.range;
         let (guard, path) = match self
             .control
             .reader(false)
@@ -658,42 +772,72 @@ impl Worker {
                 self.last = None;
             }
             self.last_store = Some(store);
-            summary::read(&mut ledger, range, cancel)
+            summary::read(&mut ledger, &request, cancel)
         })();
         let mut snapshot = match result {
             Ok(summary) => {
                 let mut snapshot = summary.snapshot;
-                let source_partial = self.sweep.partial
-                    || self.sweep.complete && summary.source_count > self.sweep.discovered;
-                if self.sweep.complete
-                    && !self.sweep.reported
-                    && !self.sweep.more
-                    && !source_partial
-                    && self.failure.is_none()
-                    && let Some(writer) = self.writer.as_mut()
-                {
-                    let now = Utc::now().timestamp_millis();
-                    if let Ok(_consent) = self.control.approve_read(&self.consent) {
-                        match writer.ledger.mark_refresh_success(now) {
+                let enabled = [self.consent.enabled, self.consent.codex_enabled];
+                let mut source_partial = false;
+                let mut more = false;
+                for provider in PROVIDERS {
+                    let i = provider as usize;
+                    let state = &mut self.sweep.providers[i];
+                    let partial = state.partial
+                        || self.sweep.complete
+                            && enabled[i]
+                            && summary.source_counts[i] > state.discovered;
+                    if request.provider.is_none_or(|selected| selected == provider) {
+                        source_partial |= partial;
+                        more |= state.more;
+                    }
+                    if self.sweep.complete
+                        && enabled[i]
+                        && !state.reported
+                        && !state.more
+                        && !partial
+                        && self.failure.is_none()
+                        && let Some(writer) = self.writer.as_mut()
+                        && let Ok(_consent) = self.control.approve_read(&self.consent)
+                    {
+                        let now = Utc::now().timestamp_millis();
+                        match writer.ledger.mark_provider_refresh_success(provider, now) {
                             Ok(()) => {
-                                snapshot.last_success_at_ms = Some(now);
-                                self.sweep.reported = true;
+                                match provider {
+                                    Provider::Claude => snapshot.last_success_at_ms = Some(now),
+                                    Provider::Codex => {
+                                        snapshot.codex_last_success_at_ms = Some(now)
+                                    }
+                                }
+                                state.reported = true;
                             }
                             Err(error) => self.failure = Some(ledger_status(&error)),
                         }
                     }
                 }
-                let importing = self.writer.is_some() && (!self.sweep.complete || self.sweep.more);
-                let coverage_pending = self.consent.enabled
-                    && (importing
-                        || self.writer.is_none()
-                        || snapshot.last_success_at_ms.is_none());
+                let selected_enabled = request.provider.map_or(
+                    self.consent.enabled || self.consent.codex_enabled,
+                    |provider| enabled[provider as usize],
+                );
+                let importing =
+                    selected_enabled && self.writer.is_some() && (!self.sweep.complete || more);
+                let missing_refresh = match request.provider {
+                    Some(Provider::Claude) => snapshot.last_success_at_ms.is_none(),
+                    Some(Provider::Codex) => snapshot.codex_last_success_at_ms.is_none(),
+                    None => {
+                        (self.consent.enabled && snapshot.last_success_at_ms.is_none())
+                            || (self.consent.codex_enabled
+                                && snapshot.codex_last_success_at_ms.is_none())
+                    }
+                };
+                let coverage_pending =
+                    selected_enabled && (importing || self.writer.is_none() || missing_refresh);
                 let partial = source_partial || summary.partial || coverage_pending;
                 snapshot.totals.partial |= partial;
                 if let Some(cost) = &mut snapshot.totals.estimate {
                     cost.partial |= snapshot.totals.partial;
                 }
-                snapshot.status = self.failure.unwrap_or(if !self.consent.enabled {
+                snapshot.status = self.failure.unwrap_or(if !selected_enabled {
                     Status::Disabled
                 } else if importing {
                     Status::Importing
@@ -711,7 +855,12 @@ impl Worker {
                 let mut snapshot = self
                     .last
                     .clone()
-                    .filter(|previous| previous.range == Some(range))
+                    .filter(|previous| {
+                        previous.range == Some(range)
+                            && previous.provider == request.provider
+                            && previous.model_filter == request.model
+                            && previous.granularity == request.granularity
+                    })
                     .unwrap_or_default();
                 snapshot.status = self.failure.unwrap_or(if snapshot.range.is_some() {
                     Status::Stale
@@ -723,6 +872,8 @@ impl Worker {
         };
         snapshot.enabled = self.consent.enabled;
         snapshot.roots = selected_paths(&self.consent.roots);
+        snapshot.codex_enabled = self.consent.codex_enabled;
+        snapshot.codex_roots = selected_paths(&self.consent.codex_roots);
         self.deliver(shared, generation, snapshot, Some(guard), repaint);
         Ok(())
     }
@@ -754,6 +905,8 @@ impl Worker {
                 status,
                 enabled: self.consent.enabled,
                 roots: selected_paths(&self.consent.roots),
+                codex_enabled: self.consent.codex_enabled,
+                codex_roots: selected_paths(&self.consent.codex_roots),
                 pricing_version: Catalog::bundled().version.to_string(),
                 pricing_source: Catalog::bundled().source.to_string(),
                 ..Snapshot::default()
@@ -799,6 +952,17 @@ fn ledger_status(error: &LedgerError) -> Status {
             Status::Stale
         }
         LedgerError::Sql(_) | LedgerError::Io(_) | LedgerError::Missing => Status::Error,
+    }
+}
+
+fn accepts_source(provider: Provider, path: &std::path::Path) -> bool {
+    let rollout = path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|name| name.starts_with("rollout-") && name.ends_with(".jsonl"));
+    match provider {
+        Provider::Claude => !rollout,
+        Provider::Codex => rollout,
     }
 }
 
@@ -872,6 +1036,68 @@ mod tests {
             start_ms: 1_764_460_800_000,
             end_ms: 1_764_806_400_000,
         }
+    }
+
+    #[test]
+    fn compressed_rollout_marks_only_codex_coverage_partial() {
+        let fixture = Fixture::new();
+        let (root, control) = address(&fixture.0);
+        std::fs::write(
+            root.join("rollout-synthetic.jsonl.zst"),
+            b"not a readable rollout",
+        )
+        .unwrap();
+        let service = Service::new(control, || {});
+        service.request(range());
+        assert!(service.enable(vec![root.clone()]));
+        let claude = await_snapshot(&service, |state| state.status == Status::Ready);
+        assert!(!claude.totals.partial);
+        assert!(service.enable_codex(vec![root]));
+        let combined = await_snapshot(&service, |state| {
+            state.codex_enabled && state.status == Status::Partial
+        });
+        assert_eq!(combined.totals.tokens, 160);
+        service.request_comparison(range(), Some(Provider::Claude), None, Granularity::Day);
+        let only_claude =
+            await_snapshot(&service, |state| state.provider == Some(Provider::Claude));
+        assert!(!only_claude.totals.partial);
+    }
+
+    #[test]
+    fn codex_rollouts_require_separate_consent_and_compare_with_retained_claude() {
+        let fixture = Fixture::new();
+        let (root, control) = address(&fixture.0);
+        std::fs::write(
+            root.join("rollout-synthetic.jsonl"),
+            concat!(
+                r#"{"type":"session_meta","payload":{"id":"fixture-session"}}"#, "\n",
+                r#"{"type":"turn_context","payload":{"model":"gpt-5.3-codex"}}"#, "\n",
+                r#"{"type":"event_msg","timestamp":"2025-12-01T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":30,"output_tokens":20,"reasoning_output_tokens":5},"total_token_usage":{"input_tokens":100,"cached_input_tokens":30,"output_tokens":20,"reasoning_output_tokens":5}}}}"#, "\n",
+            ),
+        ).unwrap();
+        let service = Service::new(control, || {});
+        service.request(range());
+        assert!(service.enable(vec![root.clone()]));
+        let claude = await_snapshot(&service, |state| state.last_success_at_ms.is_some());
+        assert_eq!(claude.totals.tokens, 160);
+        assert!(!claude.codex_enabled);
+
+        assert!(service.enable_codex(vec![root]));
+        let both = await_snapshot(&service, |state| state.totals.tokens == 280);
+        assert!(
+            both.models
+                .iter()
+                .any(|m| m.provider == Provider::Codex && m.label == "gpt-5.3-codex")
+        );
+        service.request_comparison(
+            range(),
+            Some(Provider::Codex),
+            Some("gpt-5.3-codex".into()),
+            Granularity::Hour,
+        );
+        let codex = await_snapshot(&service, |state| state.provider == Some(Provider::Codex));
+        assert_eq!(codex.totals.tokens, 120);
+        assert_eq!(codex.buckets.len(), 1);
     }
 
     #[test]

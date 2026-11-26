@@ -15,6 +15,10 @@ pub(crate) struct Consent {
     pub enabled: bool,
     pub roots: Vec<Binding>,
     #[serde(default)]
+    pub codex_roots: Vec<Binding>,
+    #[serde(default)]
+    pub codex_enabled: bool,
+    #[serde(default)]
     pub clear_generation: Option<[u8; 16]>,
 }
 
@@ -94,10 +98,20 @@ impl Control {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn set_enabled(
         &self,
         paths: Vec<PathBuf>,
         expected_generation: Option<[u8; 16]>,
+    ) -> io::Result<bool> {
+        self.enable_provider(paths, expected_generation, crate::Provider::Claude)
+    }
+
+    pub(crate) fn enable_provider(
+        &self,
+        paths: Vec<PathBuf>,
+        expected_generation: Option<[u8; 16]>,
+        provider: crate::Provider,
     ) -> io::Result<bool> {
         if paths.is_empty() || paths.len() > MAX_ROOTS {
             return Err(io::ErrorKind::InvalidInput.into());
@@ -117,11 +131,18 @@ impl Control {
                 roots.push(binding);
             }
         }
-        self.write_consent(&Consent {
-            enabled: true,
-            roots,
-            clear_generation: expected_generation,
-        })?;
+        let mut consent = self.read()?;
+        match provider {
+            crate::Provider::Claude => {
+                consent.enabled = true;
+                consent.roots = roots;
+            }
+            crate::Provider::Codex => {
+                consent.codex_enabled = true;
+                consent.codex_roots = roots;
+            }
+        }
+        self.write_consent(&consent)?;
         Ok(true)
     }
 
@@ -132,6 +153,7 @@ impl Control {
         let _consent = self.lock_exclusive("consent.lock")?;
         let mut consent = self.read()?;
         consent.enabled = false;
+        consent.codex_enabled = false;
         self.write_consent(&consent)
     }
 

@@ -166,7 +166,7 @@ notification keeps the notes accessible. Ivy does not install or restart itself.
 This is a standalone addition, independent of phase completion. The release publication contract
 and deliberate limits are recorded in D75 and [09-releases.md](09-releases.md).
 
-## AI usage — «See local Claude usage»
+## AI usage — «Compare local AI usage»
 
 **What you see:** a global AI usage screen with Claude Code token categories,
 model totals, a daily trend and an estimated cost based on bundled API list rates.
@@ -598,6 +598,9 @@ console.
 - [ ] **A1 — Claude local usage overview.** One opt-in view with bounded
   background collection, retained normalized accounting, date filters,
   bundled estimates, explicit stop and clear, and named frame costs. D127. (#262)
+- [ ] **A2 — Codex local history and comparisons.** Separate local opt-in,
+  retained Claude history, and hourly, daily and monthly comparisons by
+  provider and model. D128. (#263)
 
 ## Loose ends
 

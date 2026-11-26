@@ -12571,3 +12571,20 @@ rules at the pinned revision with its MIT notice. A ledger copy would double
 the needed staging space. A standalone append journal would need separate
 indexed replay and date queries. A per-console or Board view would imply a
 usage association the local logs cannot prove.
+
+## D128 — Codex history joins local usage through separate consent
+
+**Decision.** AI usage can import explicitly selected Codex rollout folders.
+The existing private ledger is upgraded only when Codex is enabled and the
+worker owns the ledger. Existing Claude records keep their identity, totals
+and dates. The view compares providers and models over local calendar hours,
+days and months. Reasoning is displayed as a subset of output.
+
+**Why.** Copied rollout files can contain the same cumulative snapshots.
+Bounded replay reconstructs the baseline for a verified prefix, and the
+ledger keeps conflicting evidence partial. A single ledger and owner keep
+retention, clearing, resource limits and publication under one lifecycle.
+
+**Discarded.** Separate ledgers complicate clear and combined limits.
+A timestamp and token count cannot identify a Codex call by themselves.
+Direct account access is unnecessary for local history.
