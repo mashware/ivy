@@ -116,7 +116,11 @@ fn raw_windows_publications_remain_unknown_without_a_witness() {
         .unwrap();
     let delivery = pane.inbox.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(delivery.origin, PublicationOrigin::Unknown);
-    assert!(matches!(delivery.what, What::Publish { .. }));
+    assert!(
+        matches!(&delivery.what, What::PublishWindows { witness: None, .. }),
+        "expected an unverified Windows publication, got {:?}",
+        delivery.what
+    );
     delivery.answer.send(Answer::Taken).unwrap();
     assert_eq!(reply(&mut client)["ok"], true);
     pane.channel.shutdown();
