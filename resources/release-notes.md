@@ -1,6 +1,10 @@
-# Ivy 0.1.0-alpha.22
+# Ivy 0.1.0-alpha.23
 
 ## New in this alpha
+
+- When sending an annotated screenshot into a console with a typed draft, Ivy asks first. You can send both together, insert the screenshot line without pressing Enter, or cancel and keep your annotations. The warning also catches typing that arrives as the copy finishes.
+
+## Previously in 0.1.0-alpha.22
 
 - Select text beyond the visible part of a code document: holding the pointer above or below the view scrolls it without losing the selection's starting point. Scrollbars remain visible, and the Open menu has clearer spacing and a visible Wrap lines checkbox.
 - The Board gives project sections more room, keeps controls aligned and reveals tasks on demand.
@@ -184,12 +188,12 @@ Desktop appearance, operating-system clipboard copying and the reported code-too
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.22_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha22-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.22-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.22-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.22-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.23_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha23-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.23-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.23-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.23-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.22/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.23/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
