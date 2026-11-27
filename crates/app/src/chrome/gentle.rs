@@ -28,32 +28,6 @@ fn resolve() -> term_core::Result<PathBuf> {
     discover(std::env::split_paths(&path).chain(roots))
 }
 
-#[cfg(all(test, windows))]
-mod windows_tests {
-    use super::*;
-
-    #[test]
-    fn absolute_executable_is_selected_and_cmd_is_reported() {
-        let root = std::env::temp_dir().join(format!(
-            "ivy-gentle-discover-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let cmd = root.join("gentle-shell.cmd");
-        std::fs::write(&cmd, "fixture").unwrap();
-        let error = discover([PathBuf::new(), PathBuf::from("."), root.clone()]).unwrap_err();
-        assert!(error.to_string().contains(".cmd"));
-        let executable = root.join("gentle-shell.exe");
-        std::fs::write(&executable, "fixture").unwrap();
-        assert_eq!(
-            discover([PathBuf::new(), PathBuf::from("."), root.clone()]).unwrap(),
-            executable
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-}
-
 fn discover(directories: impl IntoIterator<Item = PathBuf>) -> term_core::Result<PathBuf> {
     for directory in directories.into_iter().filter(|p| p.is_absolute()) {
         #[cfg(windows)]
@@ -235,6 +209,32 @@ mod tests {
         assert_eq!(
             discover([PathBuf::new(), PathBuf::from("."), root.clone()]).unwrap(),
             binary
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn absolute_executable_is_selected_and_cmd_is_reported() {
+        let root = std::env::temp_dir().join(format!(
+            "ivy-gentle-discover-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let cmd = root.join("gentle-shell.cmd");
+        std::fs::write(&cmd, "fixture").unwrap();
+        let error = discover([PathBuf::new(), PathBuf::from("."), root.clone()]).unwrap_err();
+        assert!(error.to_string().contains(".cmd"));
+        let executable = root.join("gentle-shell.exe");
+        std::fs::write(&executable, "fixture").unwrap();
+        assert_eq!(
+            discover([PathBuf::new(), PathBuf::from("."), root.clone()]).unwrap(),
+            executable
         );
         std::fs::remove_dir_all(root).unwrap();
     }

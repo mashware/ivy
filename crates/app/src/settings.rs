@@ -727,36 +727,28 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     // would otherwise fall through to `strip_prefix("color.")` and come back as an unknown key.
     if matches!(
         key,
-        "agent.claude.enabled" | "agent.codex.enabled" | "agent.opencode.enabled"
+        "agent.claude.enabled"
+            | "agent.codex.enabled"
+            | "agent.opencode.enabled"
+            | "gentle.enabled"
     ) {
-        let enabled = match value {
+        let normalized = (key == "gentle.enabled").then(|| value.to_ascii_lowercase());
+        let enabled = match normalized.as_deref().unwrap_or(value) {
             "true" | "on" => true,
             "false" | "off" => false,
             _ => {
                 return Err(Missing::InvalidValue {
-                    key: key.to_owned(),
-                    value: value.to_owned(),
+                    key: key.into(),
+                    value: value.into(),
                 });
             }
         };
         match key {
             "agent.claude.enabled" => settings.agent_claude = enabled,
             "agent.codex.enabled" => settings.agent_codex = enabled,
+            "gentle.enabled" => settings.gentle_enabled = enabled,
             _ => settings.agent_opencode = enabled,
         }
-        return Ok(());
-    }
-    if key == "gentle.enabled" {
-        settings.gentle_enabled = match value.to_ascii_lowercase().as_str() {
-            "on" | "true" => true,
-            "off" | "false" => false,
-            _ => {
-                return Err(Missing::InvalidValue {
-                    key: key.to_owned(),
-                    value: value.to_owned(),
-                });
-            }
-        };
         return Ok(());
     }
     if matches!(key, "cursor.blink" | "font.ligatures") {
