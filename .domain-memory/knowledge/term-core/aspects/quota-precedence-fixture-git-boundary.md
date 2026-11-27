@@ -17,7 +17,7 @@ symbols:
   - project_local_root
   - preview_uses_project_precedence_and_keeps_inherited_options
 content_hashes:
-  crates/app/src/usage/quota_setup.rs: 'sha256:42de409258297603c173c5394d8b27ef42bc649198b9756dc852d38d0da4ec56'
+  crates/app/src/usage/quota_setup.rs: 'sha256:f8fbfba51b3cfbfef59fb86ff11137729a58a45fa09d5ace52f665144ac9919a'
 tags:
   - testing
   - fixtures

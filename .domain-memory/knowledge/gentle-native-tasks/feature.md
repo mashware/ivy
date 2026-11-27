@@ -18,7 +18,10 @@ file_paths:
 symbols:
   - Monitor
   - Snapshot
-content_hashes: {}
+content_hashes:
+  crates/app/src/chrome/gentle_task/transport/helpers.rs: 'sha256:54c7f5f5fd4995a4935fe6debf82dd86801fc6ceb66aa39575309f51ccceaa1c'
+  crates/app/src/chrome/gentle_task/transport/process.rs: 'sha256:0a866d838498c60b3e3b3bde172d9953272c3dc27295e0a179ce661a76d2ed7f'
+  prototypes/gentle-rpc/helpers.py: 'sha256:5c3a8c579f69db765cad58f28853ba1050345c2c2c8cc1fe48a312117f999ebc'
 tags:
   - gentle
   - rpc
