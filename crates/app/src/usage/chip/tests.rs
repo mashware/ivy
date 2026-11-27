@@ -220,6 +220,15 @@ fn the_summary_names_each_state_without_a_reading() {
     }
     let off = describe(Agent::Codex, &Source::Off, NOW, &zone());
     assert_eq!(message(&off.body).0, "Allowance reads are off.");
+    // Claude has no reads to turn on; its figures come from a launch made with reporting.
+    let off = describe(Agent::Claude, &Source::Off, NOW, &zone());
+    assert_eq!(
+        message(&off.body),
+        (
+            "Claude's allowance comes from a reporting launch.",
+            Some("Start Claude Code with reporting from AI usage.")
+        )
+    );
     let waiting = Source::Waiting("Codex reads on · reading now…".into());
     let waiting = describe(Agent::Codex, &waiting, NOW, &zone());
     assert_eq!(

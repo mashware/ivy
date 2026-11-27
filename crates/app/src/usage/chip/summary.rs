@@ -63,6 +63,14 @@ where
                 Tone::Stale,
             );
         }
+        // Claude has no reads to turn on: its figures come from a launch made with reporting.
+        Source::Off if agent == Agent::Claude => {
+            return message(
+                "Claude's allowance comes from a reporting launch.",
+                Some("Start Claude Code with reporting from AI usage.".into()),
+                Tone::Stale,
+            );
+        }
         Source::Off => {
             return message(
                 "Allowance reads are off.",

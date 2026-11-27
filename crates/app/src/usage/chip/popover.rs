@@ -69,7 +69,10 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
         state.claude.clone(),
         state.codex.clone(),
     ) else {
+        // The tab picked is remembered only while the summary stays open: it opens again on the
+        // chip's first agent.
         state.popover = false;
+        state.tab = None;
         return false;
     };
     let tab = state

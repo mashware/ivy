@@ -67,6 +67,7 @@ impl Chip {
     pub(crate) fn close_summary(&mut self) {
         self.popover = false;
         self.summary = None;
+        self.tab = None;
     }
 
     /// Rebuilds the items from this frame's readings, and the slot only when the enabled set or
@@ -117,6 +118,9 @@ pub(crate) fn paint(window: &mut Window, ui: &egui::Ui, slot: Rect) {
     if paint_chip(window, ui, slot) {
         let state = &mut window.usage.chip;
         state.popover = !state.popover;
+        if !state.popover {
+            state.tab = None;
+        }
         ui.ctx().request_repaint();
     }
 }

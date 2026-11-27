@@ -228,3 +228,51 @@ fn the_summary_paints_tabs_header_windows_and_footer_in_order() {
         );
     }
 }
+
+/// The summary opens on the chip's first agent — Codex when the chip shows only Codex — keeps a
+/// tab picked while it stays open, and forgets it once closed. Claude's tab, with no reporting
+/// launch, says where its figures come from rather than offering a toggle it does not have.
+#[test]
+fn the_summary_opens_on_the_chips_first_agent_and_forgets_a_picked_tab_once_closed() {
+    let (mut window, ctx) = integrated();
+    let area = area(1400.0);
+    window.usage.chip.forced = Some(codex());
+    for _ in 0..2 {
+        painted(&mut window, &ctx, area, vec![]);
+    }
+    // The header's name is the text below the tab row that names an agent.
+    let header = |window: &mut Window, summary: egui::Rect| {
+        let shapes = painted(window, &ctx, area, vec![]);
+        let below_tabs = summary.top() + 10.0 + 44.0;
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text)
+                if text.pos.y > below_tabs
+                    && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
+            {
+                Some(text.galley.text().to_owned())
+            }
+            _ => None,
+        })
+    };
+    let summary = open_summary(&mut window, &ctx, area);
+    assert_eq!(header(&mut window, summary).as_deref(), Some("Codex"));
+
+    let claude_tab = egui::pos2(summary.left() + 60.0, summary.top() + 30.0);
+    click(&mut window, &ctx, area, claude_tab);
+    assert_eq!(header(&mut window, summary).as_deref(), Some("Claude Code"));
+    let texts = super::bar_tests::texts(&painted(&mut window, &ctx, area, vec![]));
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "Claude's allowance comes from a reporting launch."),
+        "{texts:?}"
+    );
+    assert!(!texts.iter().any(|text| text == "Allowance reads are off."));
+
+    let chip = crate::chrome::strip(&window, area).chip.unwrap();
+    let chip = window.usage.chip.hugged(chip).center();
+    click(&mut window, &ctx, area, chip);
+    assert!(crate::usage::chip_summary(&window.usage).is_none());
+    let summary = open_summary(&mut window, &ctx, area);
+    assert_eq!(header(&mut window, summary).as_deref(), Some("Codex"));
+}
