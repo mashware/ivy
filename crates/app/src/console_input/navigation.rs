@@ -118,15 +118,6 @@ mod tests {
             shift: true,
             ..Modifiers::NONE
         };
-        window.keymap.bind(
-            crate::keyboard::Action::FocusLeft,
-            Some(crate::keyboard::Chord {
-                ctrl: false,
-                shift: true,
-                alt: true,
-                key: Key::Comma,
-            }),
-        );
         let nav = Modifiers {
             alt: true,
             shift: true,
@@ -186,6 +177,9 @@ mod tests {
         ]);
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         while paths.iter().any(|path| !path.exists()) {
+            for pane in window.all_panes_mut() {
+                pane.pump(Default::default());
+            }
             assert!(
                 std::time::Instant::now() < deadline,
                 "receivers did not open: {paths:?}"
@@ -211,6 +205,15 @@ mod tests {
             shift: true,
             ..Modifiers::NONE
         };
+        window.keymap.bind(
+            crate::keyboard::Action::FocusLeft,
+            Some(crate::keyboard::Chord {
+                ctrl: false,
+                shift: true,
+                alt: true,
+                key: Key::Comma,
+            }),
+        );
         let events = vec![
             Event::Text("a".into()),
             arrow(Key::Enter, Modifiers::NONE),
@@ -221,12 +224,14 @@ mod tests {
             arrow(Key::Enter, Modifiers::NONE),
             Event::ModifiersChanged(tab),
             arrow(Key::ArrowRight, tab),
+            Event::ModifiersChanged(nav),
+            arrow(Key::ArrowRight, nav),
+            arrow(Key::Comma, nav),
+            Event::Text("<".into()),
             Event::ModifiersChanged(Modifiers::NONE),
             Event::Text("c".into()),
             arrow(Key::Enter, Modifiers::NONE),
             Event::ModifiersChanged(nav),
-            arrow(Key::Comma, nav),
-            Event::Text("<".into()),
             arrow(Key::ArrowRight, nav),
             Event::ModifiersChanged(Modifiers::NONE),
             Event::Text("d".into()),

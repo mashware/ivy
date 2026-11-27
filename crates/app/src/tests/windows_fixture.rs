@@ -93,10 +93,15 @@ fn trace_command(command: String, path: &std::path::Path) -> String {
         "            throw new Win32Exception(Marshal.GetLastWin32Error());\n    }\n    public static string ReadLine()",
         "            throw new Win32Exception(Marshal.GetLastWin32Error());\n        Trace(\"after-output-mode\");\n    }\n    public static string ReadLine()",
     );
-    let command = command.replace(CONSOLE_INPUT, &format!(
-        "Write-IvyFixtureTrace 'before-add-type'; {source}Write-IvyFixtureTrace 'after-add-type'; [IvyFixtureInput]::TracePath = {}; ",
-        literal(path.to_str().unwrap())
-    ));
+    let command = if command.contains(CONSOLE_INPUT) {
+        let load = console_helper(&source, true);
+        command.replace(CONSOLE_INPUT, &format!(
+            "Write-IvyFixtureTrace 'before-helper-load'; {load}Write-IvyFixtureTrace 'after-helper-load'; [IvyFixtureInput]::TracePath = {}; ",
+            literal(path.to_str().unwrap())
+        ))
+    } else {
+        command
+    };
     format!(
         "function Write-IvyFixtureTrace([string]$stage) {{ [IO.File]::AppendAllText({}, ([DateTime]::UtcNow.ToString('O') + ' pid=' + $PID + ' ' + $stage + [char]10)) }}; try {{ Write-IvyFixtureTrace 'powershell-entered'; {command} }} catch {{ Write-IvyFixtureTrace ('ERROR: ' + $_.Exception.ToString() + ' STACK: ' + $_.ScriptStackTrace); throw }} finally {{ Write-IvyFixtureTrace 'powershell-finally' }}",
         literal(path.to_str().unwrap())
@@ -165,6 +170,50 @@ public static class IvyFixtureInput {
 
 fn literal(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
+}
+
+// Compile outside the pseudoconsole before starting any receiver's readiness deadline.
+// The diagnostic variant has additional instrumentation and needs its own assembly.
+fn console_helper(source: &str, traced: bool) -> String {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::{process::Command, sync::OnceLock};
+    static NORMAL: OnceLock<String> = OnceLock::new();
+    static TRACED: OnceLock<String> = OnceLock::new();
+    let cache = if traced { &TRACED } else { &NORMAL };
+    cache
+        .get_or_init(|| {
+            let directory = panel_contract::PanelDir::create().unwrap();
+            let dll = directory.path().join("IvyFixtureInput.dll");
+            let compile = source.replacen(
+                "Add-Type -TypeDefinition",
+                &format!(
+                    "Add-Type -OutputAssembly {} -TypeDefinition",
+                    literal(dll.to_str().unwrap())
+                ),
+                1,
+            );
+            #[cfg(windows)]
+            let program = std::ffi::OsString::from("powershell.exe");
+            #[cfg(unix)]
+            let program = std::env::var_os("IVY_TEST_PWSH").expect("PowerShell fixture compiler");
+            let output = Command::new(program)
+                .args(["-NoProfile", "-NonInteractive", "-Command"])
+                .arg(format!("$ErrorActionPreference = 'Stop'; {compile}"))
+                .output()
+                .expect("start the PowerShell fixture compiler");
+            assert!(
+                output.status.success(),
+                "fixture compiler: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let bytes = std::fs::read(&dll).unwrap();
+            std::fs::remove_file(dll).unwrap();
+            format!(
+                "$null = [Reflection.Assembly]::Load([Convert]::FromBase64String('{}')); ",
+                STANDARD.encode(bytes)
+            )
+        })
+        .clone()
 }
 
 /// The declared directory is a precondition of interaction tests, not an OSC7 transport witness.
@@ -266,6 +315,8 @@ pub(super) fn command(program: &str) -> String {
             let path = root.join(format!("child-{:x}.trace", u64::from_ne_bytes(nonce)));
             std::fs::write(&path, format!("command-created: {original:?}\n")).unwrap();
             trace_command(prefix, &path)
+        } else if prefix.contains(CONSOLE_INPUT) {
+            prefix.replace(CONSOLE_INPUT, &console_helper(CONSOLE_INPUT, false))
         } else {
             prefix
         }
@@ -337,8 +388,8 @@ fn diagnostics_keep_each_childs_stages_and_exception_outside_its_output() {
     let traces = diagnostics.traces();
     for stage in [
         "powershell-entered",
-        "before-add-type",
-        "after-add-type",
+        "before-helper-load",
+        "after-helper-load",
         "before-input-mode",
         "ERROR:",
         "powershell-finally",
