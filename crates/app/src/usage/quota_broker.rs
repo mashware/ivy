@@ -49,6 +49,9 @@ struct WakeState {
     /// The title bar's chip shows Claude: only a changed value wakes the window for it (D132).
     chip: bool,
     pending: bool,
+    /// The launch that published last, which is the one the chip shows: a repeat from another
+    /// launch changes what the chip reads even when its values do not.
+    last_publisher: usize,
 }
 
 impl Wake {
@@ -84,6 +87,21 @@ impl Wake {
     /// A window's figure, reset or state changed, which the chip shows too.
     fn value_changed(&self) {
         self.wake(true);
+    }
+
+    /// A frame was published by `launch`. The chip needs a frame when its values changed, when it
+    /// was showing them as stale, or when another launch was the one it showed; a repeat of the
+    /// same, current values from the same launch only refreshes the open view.
+    fn published(&self, launch: usize, same: bool, was_stale: bool) {
+        let other_launch = {
+            let mut state = self.state.lock().unwrap();
+            std::mem::replace(&mut state.last_publisher, launch) != launch
+        };
+        if same && !was_stale && !other_launch {
+            self.changed();
+        } else {
+            self.value_changed();
+        }
     }
 
     fn wake(&self, value: bool) {
@@ -150,6 +168,9 @@ struct Model {
 struct BrokerState {
     model: Mutex<Model>,
     wake: Arc<Wake>,
+    /// Frames published, counted after their wake was decided, for tests to wait on.
+    #[cfg(test)]
+    published: std::sync::atomic::AtomicUsize,
 }
 
 impl BrokerState {
@@ -192,14 +213,20 @@ impl BrokerState {
             Outcome::ProducerError => Snapshot::ProducerError,
         };
         let same = same_value(&model.snapshot, &snapshot);
+        let was_stale = match model.snapshot {
+            Snapshot::Observed { received_at, .. } => {
+                now - received_at > super::chip::STALE_AFTER
+            }
+            _ => false,
+        };
         model.snapshot = snapshot;
         drop(model);
-        // A statusline repeats itself on every redraw; only a new figure is worth a frame.
-        if same {
-            self.wake.changed();
-        } else {
-            self.wake.value_changed();
-        }
+        // A statusline repeats itself on every redraw; only what the chip would show differently
+        // is worth a frame.
+        let launch = std::ptr::from_ref(self) as usize;
+        self.wake.published(launch, same, was_stale);
+        #[cfg(test)]
+        self.published.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn expire(&self) -> Option<Duration> {
@@ -260,6 +287,8 @@ impl Broker {
                 stopped: false,
             }),
             wake,
+            #[cfg(test)]
+            published: Default::default(),
         });
         let worker_state = state.clone();
         std::thread::Builder::new()
@@ -324,6 +353,11 @@ impl Broker {
             expire(seven_day, now);
         }
         snapshot
+    }
+
+    #[cfg(test)]
+    pub(super) fn published_for_test(&self) -> usize {
+        self.state.published.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     #[cfg(test)]

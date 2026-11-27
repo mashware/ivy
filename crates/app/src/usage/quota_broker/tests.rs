@@ -334,29 +334,53 @@ fn with_the_view_closed_only_a_changed_value_wakes_the_window_for_the_chip() {
         } => window.used_percentage,
         _ => None,
     };
-    // A snapshot is visible a moment before its wake is requested, outside the broker's lock.
-    let settled = || {
-        std::thread::sleep(Duration::from_millis(50));
+    // Each frame's wake is decided before the broker counts it as published, so waiting for the
+    // count is waiting for the wake: no pause can be too short under load.
+    let published = |frames: usize| {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while broker.published_for_test() < frames {
+            assert!(Instant::now() < deadline, "frame {frames} was not published");
+            std::thread::sleep(Duration::from_millis(2));
+        }
         wakes.load(Ordering::Relaxed)
     };
     launch.run("steady");
     wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
-    assert_eq!(settled(), 1);
+    assert_eq!(published(1), 1);
     // The chip's frame clears the pending wake; then the same values arrive again.
     wake.begin_frame();
     launch.run("steady");
-    // The repeat changes nothing a test can wait for, so the pause lets it land before the next
-    // frame clears the pending wake: a repeat that woke the window shows in the final count.
-    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(published(2), 1, "the repeat must not wake");
     wake.begin_frame();
     launch.run("moved");
-    wait_for(&broker, |snapshot| used(snapshot) == Some(20.0));
-    assert_eq!(settled(), 2, "the repeat must not wake");
+    assert_eq!(published(3), 2);
     wake.set_chip(false);
     wake.begin_frame();
     launch.run("steady");
-    wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
-    assert_eq!(settled(), 2, "no chip, no view: no wake");
+    assert_eq!(published(4), 2, "no chip, no view: no wake");
+}
+
+/// A repeat still wakes the chip when what it shows would change: the reading it repeats was
+/// showing as stale, or another launch was the one shown.
+#[test]
+fn a_repeat_wakes_the_chip_when_it_was_stale_or_from_another_launch() {
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let count = wakes.clone();
+    let wake = Wake::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    wake.set_chip(true);
+    let woke = |launch, same, stale| {
+        wake.begin_frame();
+        let before = wakes.load(Ordering::Relaxed);
+        wake.published(launch, same, stale);
+        wakes.load(Ordering::Relaxed) > before
+    };
+    assert!(woke(1, false, false), "a new value");
+    assert!(!woke(1, true, false), "a repeat of current values");
+    assert!(woke(1, true, true), "a repeat of values shown as stale");
+    assert!(woke(2, true, false), "another launch's frame");
+    assert!(!woke(2, true, false));
 }
 
 #[test]
