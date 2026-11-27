@@ -164,9 +164,6 @@ impl View {
             .as_ref()
             .is_some_and(|s| s.status == Status::WaitingToClear);
 
-        if let Some(snapshot) = &self.snapshot {
-            ui.label(status_label(snapshot.status));
-        }
         ui.strong("Claude Code · Local, unassigned history");
         if let Some(s) = &self.snapshot {
             if let Some(success) = s
@@ -307,10 +304,24 @@ impl View {
                 }
             });
         }
+    }
+
+    /// The figures come before the configuration: below it they sat out of sight in a scroll area
+    /// with no visible bar, and a long status made the window look empty.
+    fn figures(&mut self, ui: &mut egui::Ui) {
+        if self.service.is_none() {
+            return;
+        }
+        let clearing = self
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.status == Status::WaitingToClear);
+        if let Some(snapshot) = &self.snapshot {
+            ui.label(status_label(snapshot.status));
+        }
         if snapshot_has_partial_codex(self.snapshot.as_ref()) {
             ui.small("Codex coverage can be incomplete. Compressed rollouts and unverified fork history are skipped.");
         }
-        ui.separator();
         let old_period = self.period;
         ui.horizontal_wrapped(|ui| {
             for (period, label) in Period::OPTIONS {
@@ -544,6 +555,8 @@ fn show(
                 .max_height((available.y - 150.0).max(40.0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
+                    view.figures(ui);
+                    ui.separator();
                     #[cfg(target_os = "linux")]
                     {
                         *launch = view.quota.show(ui);
@@ -635,6 +648,72 @@ mod tests {
         let report = String::from_utf8(report).unwrap();
         assert!(report.contains("Usage snapshot: frames=1, total=20µs"));
         assert!(report.contains("Usage paint: frames=1, total=0ns"));
+    }
+
+    #[test]
+    fn figures_are_laid_out_above_the_configuration() {
+        let cache = std::env::temp_dir().join(format!(
+            "ivy-usage-layout-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+        ));
+        let mut view = View {
+            service: Some(Service::new(cache.clone(), || {})),
+            ..View::default()
+        };
+        let range = view.period.range().unwrap();
+        view.requested_range = Some(range);
+        view.snapshot = Some(Snapshot {
+            status: Status::Limit,
+            enabled: true,
+            range: Some(range),
+            provider: view.provider,
+            granularity: view.granularity,
+            has_history: true,
+            ..Snapshot::default()
+        });
+        view.open = true;
+        let theme = Theme::default();
+        #[cfg(target_os = "linux")]
+        let mut launch = None;
+        let ctx = egui::Context::default();
+        let mut pass = || {
+            let tall = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 4000.0),
+                )),
+                ..Default::default()
+            };
+            ctx.run_ui(tall, |ui| {
+                show(
+                    &mut view,
+                    ui.ctx(),
+                    &theme,
+                    #[cfg(target_os = "linux")]
+                    &mut launch,
+                )
+            })
+        };
+        // A modal's first pass only measures it; the second one paints.
+        pass().textures_delta.clear();
+        let mut output = pass();
+        output.textures_delta.clear();
+        // What fits in the window's first view is what gets painted: the scroll area culls the rest.
+        let painted: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        let position = |wanted: &str| painted.iter().position(|text| text == wanted);
+        let status = position(status_label(Status::Limit)).expect("status in the first view");
+        let summary = position("Tokens unavailable").expect("figures in the first view");
+        assert!(status < summary, "{painted:?}");
+        drop(view);
+        let _ = std::fs::remove_dir_all(cache);
     }
 
     #[test]
