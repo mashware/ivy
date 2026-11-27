@@ -308,6 +308,33 @@ mod tests {
         let project_settings = project.join(".claude");
         fs::create_dir_all(&profile).unwrap();
         fs::create_dir_all(&project_settings).unwrap();
+        let templates = directory.path().join("empty-templates");
+        fs::create_dir(&templates).unwrap();
+        // Give this precedence fixture its own scope, independent of ancestor Git markers.
+        let mut git = Command::new("git");
+        for (key, _) in std::env::vars_os() {
+            if key
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
+                git.env_remove(key);
+            }
+        }
+        let initialized = git
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-C")
+            .arg(&project)
+            .args(["init", "--quiet", "--initial-branch=main", "--template"])
+            .arg(&templates)
+            .output()
+            .unwrap();
+        assert!(
+            initialized.status.success(),
+            "{}",
+            String::from_utf8_lossy(&initialized.stderr)
+        );
         fs::write(
             profile.join("settings.json"),
             r#"{"statusLine":{"type":"command","command":"user","refreshInterval":1}}"#,
@@ -329,6 +356,7 @@ mod tests {
         assert_eq!(result["padding"], 2);
         fs::remove_dir_all(project).unwrap();
         fs::remove_dir_all(profile).unwrap();
+        fs::remove_dir(templates).unwrap();
     }
 
     #[test]

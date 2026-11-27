@@ -269,6 +269,8 @@ Use **New Gentle task** to write the initial request in Ivy. This starts a separ
 
 Choose **Stop task** to interrupt the current assignment in its session. Ivy reports what Gentle confirmed about the turn and its delegated work. Once Gentle confirms the conversation is idle, use **Send follow-up** to give it another assignment with its history intact. If work left by an earlier assignment cannot be distinguished from the current one, Ivy limits the stop to the current turn and explains which work it left alone. **Close session** ends the client. **Cancel question** dismisses only that question. The private reply channel accepts up to 64 distinct question IDs over the life of a native session. Start a new task if the session reaches that limit.
 
+When a native session reports helpers, **Gentle helpers** opens their session-bound list. Each row shows the client's helper name, stable ID and reported state. At the client limit Ivy says that the list may omit additional helpers. A disconnected session retains its last received rows and identifies them as last known. A helper that leaves the reported window is not labelled completed on that basis.
+
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
 

@@ -1,4 +1,5 @@
 //! Gentle interactive RPC uses newline-delimited JSON on one process's pipes.
+use super::helpers;
 use super::{Answer, Inbox, Kind, MAX_TEXT, Message, Question};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -21,13 +22,20 @@ pub(super) enum Incoming {
     Aborted,
     Rejected(String),
     StopControl(Value),
+    HelperControl(Value),
+    HelperReset,
     CommandError,
 }
 
-pub(super) fn receive(stdout: impl Read, target: &Inbox) -> Result<(), String> {
+pub(super) fn receive(
+    stdout: impl Read,
+    target: &Inbox,
+    updates: &impl Fn(Option<Value>),
+) -> Result<(), String> {
     let mut stream = BufReader::new(stdout);
     let mut line = Vec::new();
     let mut assistant_failed = false;
+    let mut channel = DesktopChannel::default();
     loop {
         line.clear();
         let len = stream
@@ -41,7 +49,22 @@ pub(super) fn receive(stdout: impl Read, target: &Inbox) -> Result<(), String> {
         if len > MAX_LINE || line.last() != Some(&b'\n') {
             return Err("Gentle sent an incomplete or oversized RPC event.".into());
         }
-        if let Some(event) = decode(&line, &mut assistant_failed)?
+        let mut reset = false;
+        let event = decode_record(
+            &line,
+            &mut assistant_failed,
+            &mut channel,
+            updates,
+            &mut reset,
+        )?;
+        if reset
+            && target
+                .send(Message::Incoming(Incoming::HelperReset))
+                .is_err()
+        {
+            return Ok(());
+        }
+        if let Some(event) = event
             && target.send(Message::Incoming(event)).is_err()
         {
             return Ok(());
@@ -49,7 +72,30 @@ pub(super) fn receive(stdout: impl Read, target: &Inbox) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
 fn decode(line: &[u8], assistant_failed: &mut bool) -> Result<Option<Incoming>, String> {
+    decode_record(
+        line,
+        assistant_failed,
+        &mut DesktopChannel::default(),
+        &|_| {},
+        &mut false,
+    )
+}
+
+#[derive(Default)]
+struct DesktopChannel {
+    sequence: u64,
+    switching: bool,
+}
+
+fn decode_record(
+    line: &[u8],
+    assistant_failed: &mut bool,
+    channel: &mut DesktopChannel,
+    updates: &impl Fn(Option<Value>),
+    reset: &mut bool,
+) -> Result<Option<Incoming>, String> {
     let v: Value = serde_json::from_slice(line).map_err(|_| "Gentle sent an invalid RPC event.")?;
     match v["type"]
         .as_str()
@@ -62,16 +108,44 @@ fn decode(line: &[u8], assistant_failed: &mut bool) -> Result<Option<Incoming>, 
                 return Ok(None);
             };
             if let [line] = lines.as_slice()
-                && let Some(line) = line.as_str().filter(|s| s.len() <= 128 * 1024)
+                && let Some(line) = line.as_str()
                 && let Ok(envelope) = serde_json::from_str::<Value>(line)
                 && envelope["schema"] == stop::SCHEMA
-                && envelope["kind"] == "response"
-                && stop::our_id(&envelope["requestId"])
             {
-                return Ok(Some(Incoming::StopControl(envelope)));
+                if envelope["kind"] == "event" {
+                    if let Some(seq) = envelope["seq"].as_u64().filter(|&seq| seq > 0) {
+                        if seq < channel.sequence {
+                            updates(None);
+                            *reset = true;
+                        }
+                        channel.sequence = seq;
+                    }
+                    if envelope["event"] == "agents_update" {
+                        updates(Some(envelope));
+                    }
+                } else if envelope["kind"] == "response" {
+                    let changed = envelope["ok"] == true
+                        && envelope["data"]["changed"] == true
+                        && envelope["data"]["id"].is_string();
+                    let switching =
+                        envelope["ok"] == false && envelope["error"]["code"] == "session_switching";
+                    if changed || (switching && !channel.switching) {
+                        updates(None);
+                        channel.sequence = 0;
+                        *reset = true;
+                    }
+                    channel.switching = switching;
+                    if helpers::our_id(&envelope["requestId"]) {
+                        return Ok(Some(Incoming::HelperControl(envelope)));
+                    }
+                    if line.len() <= 128 * 1024 && stop::our_id(&envelope["requestId"]) {
+                        return Ok(Some(Incoming::StopControl(envelope)));
+                    }
+                }
             }
             Ok(None)
         }
+        "response" if helpers::our_id(&v["id"]) => Ok(Some(Incoming::HelperControl(v))),
         "response" if stop::our_id(&v["id"]) => Ok(Some(Incoming::StopControl(v))),
         "extension_ui_request" => dialog(&v).map(|q| q.map(Incoming::Question)),
         "extension_error" if v["event"] == "command" => Ok(Some(Incoming::CommandError)),
@@ -263,12 +337,52 @@ mod tests {
         );
     }
     #[test]
+    fn a_native_session_reset_separates_queued_pushes_before_rediscovery() {
+        use std::cell::RefCell;
+        let channel = &mut DesktopChannel::default();
+        let callback = RefCell::new(Vec::new());
+        let mut record = |inner: Value| {
+            let outer = json!({"type":"extension_ui_request","method":"setWidget","widgetKey":"gentle-desktop-rpc","widgetLines":[inner.to_string()]});
+            let mut reset = false;
+            let _ = decode_record(
+                &serde_json::to_vec(&outer).unwrap(),
+                &mut false,
+                channel,
+                &|update| {
+                    callback
+                        .borrow_mut()
+                        .push(update.map(|v| v["seq"].as_u64().unwrap()));
+                },
+                &mut reset,
+            )
+            .unwrap();
+            reset
+        };
+        let event =
+            |name, seq| json!({"schema":stop::SCHEMA,"kind":"event","event":name,"seq":seq});
+        assert!(!record(event("agents_update", 4)));
+        assert!(!record(event("session_snapshot", 9)));
+        assert!(record(event("agents_update", 1)));
+        assert_eq!(&*callback.borrow(), &[Some(4), None, Some(1)]);
+        let switching = json!({"schema":stop::SCHEMA,"kind":"response","ok":false,"error":{"code":"session_switching"}});
+        assert!(record(switching.clone()));
+        assert!(!record(switching));
+        assert!(record(
+            json!({"schema":stop::SCHEMA,"kind":"response","ok":true,"data":{"changed":true,"id":"new-session"}})
+        ));
+    }
+
+    #[test]
     fn oversized_or_partial_wire_records_fail_closed() {
         let (inbox, _rx) = std::sync::mpsc::sync_channel(1);
         let big = Cursor::new(vec![b'x'; MAX_LINE + 4]);
-        assert!(receive(big, &inbox).unwrap_err().contains("oversized"));
         assert!(
-            receive(Cursor::new(b"{}"), &inbox)
+            receive(big, &inbox, &|_| {})
+                .unwrap_err()
+                .contains("oversized")
+        );
+        assert!(
+            receive(Cursor::new(b"{}"), &inbox, &|_| {})
                 .unwrap_err()
                 .contains("incomplete")
         );

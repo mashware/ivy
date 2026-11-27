@@ -12695,3 +12695,11 @@ would make the same gesture jump in different visual directions after a split.
 **Reason.** With two Gentle Shell 5.1.0 sessions, aborting the foreground turn could leave a background helper running. The owner later reported that helper cancelled after a targeted request. A second session rejected the foreign helper ID and completed its own work. The user chose to preserve the conversation after a stop.
 
 **Discarded.** Terminating the launcher ends the live conversation. An acknowledgement for a turn abort cannot establish that its delegates stopped. A bounded list cannot prove the absence of other work.
+
+### Listing helpers by their owning session (#298)
+
+**Decision.** Display the bounded helper list reported by the installed Gentle client within its native session. Use the producer's helper ID, name and declared state. Keep the last snapshot visible with an unavailable or disconnected indication when a current observation fails. Empty lists contribute no helper controls.
+
+**Reason.** Different sessions can launch helpers with the same name. Only their private connection and producer-issued IDs establish ownership. Gentle 5.1.0 exposes a bounded list and owner-driven updates. A disappearing entry can have fallen outside that view.
+
+**Discarded.** Inferring helper completion from disappearance would invent state. Matching names across sessions would combine independent work. Parsing terminal painting would duplicate the producer's semantics.
