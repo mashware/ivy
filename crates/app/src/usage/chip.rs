@@ -167,12 +167,40 @@ impl Source {
     }
 }
 
-/// The windows each agent puts on the chip, in the chip's order, as label and length. Codex's
-/// weekly window and any other bucket appear only in the popover.
-fn spans(agent: Agent) -> &'static [(&'static str, i64)] {
+/// The windows each agent puts on the chip, in the chip's order, as label and length: Claude's
+/// 5-hour and weekly windows; Codex's 5-hour window when its plan has one, otherwise its shortest
+/// window — a plan with only a weekly window would leave a 5-hour item empty for ever. The
+/// popover lists every window.
+fn spans(agent: Agent, source: &Source) -> Vec<(String, i64)> {
     match agent {
-        Agent::Claude => &[("5h", FIVE_HOURS), ("W", WEEK)],
-        Agent::Codex => &[("5h", FIVE_HOURS)],
+        Agent::Claude => vec![("5h".into(), FIVE_HOURS), ("W".into(), WEEK)],
+        Agent::Codex => {
+            let shortest = source.reading().and_then(|reading| {
+                if reading.window(FIVE_HOURS).is_some() {
+                    return Some(FIVE_HOURS);
+                }
+                reading
+                    .windows
+                    .iter()
+                    .map(|named| named.length)
+                    .filter(|length| *length > 0)
+                    .min()
+            });
+            let length = shortest.unwrap_or(FIVE_HOURS);
+            vec![(length_label(length), length)]
+        }
+    }
+}
+
+/// A window's length as the chip labels it: «5h», «W», or its hours, days or minutes.
+fn length_label(seconds: i64) -> String {
+    let minutes = seconds / 60;
+    match minutes {
+        300 => "5h".into(),
+        10_080 => "W".into(),
+        _ if minutes % 1440 == 0 => format!("{}d", minutes / 1440),
+        _ if minutes % 60 == 0 => format!("{}h", minutes / 60),
+        _ => format!("{minutes}m"),
     }
 }
 
@@ -180,7 +208,7 @@ fn spans(agent: Agent) -> &'static [(&'static str, i64)] {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Item {
     pub(super) agent: Agent,
-    pub(super) label: &'static str,
+    pub(super) label: String,
     pub(super) value: String,
     pub(super) suffix: Option<String>,
     pub(super) tone: Tone,
@@ -198,7 +226,7 @@ impl Item {
     /// The item's text in the order it is painted, each piece with its part.
     pub(super) fn parts(&self) -> Vec<(&str, Part)> {
         let mut parts = vec![
-            (self.label, Part::Label),
+            (self.label.as_str(), Part::Label),
             (" ", Part::Dim),
             (self.value.as_str(), Part::Value),
         ];
@@ -211,7 +239,7 @@ impl Item {
 }
 
 /// The chip's items, in its fixed order: Claude's 5-hour window with its reset and its weekly
-/// window, then Codex's 5-hour window. An agent that is not enabled adds nothing, so with nothing
+/// window, then Codex's one item. An agent that is not enabled adds nothing, so with nothing
 /// enabled there is no chip.
 pub(super) fn items<Tz: TimeZone>(claude: &Source, codex: &Source, now: i64, zone: &Tz) -> Vec<Item>
 where
@@ -222,8 +250,10 @@ where
         if !source.enabled() {
             continue;
         }
-        for &(label, length) in spans(agent) {
-            out.push(item(agent, label, length, source, now, zone));
+        let spans = spans(agent, source);
+        let single = spans.len() == 1;
+        for (label, length) in spans {
+            out.push(item(agent, label, length, single, source, now, zone));
         }
     }
     out
@@ -231,8 +261,9 @@ where
 
 fn item<Tz: TimeZone>(
     agent: Agent,
-    label: &'static str,
+    label: String,
     length: i64,
+    single: bool,
     source: &Source,
     now: i64,
     zone: &Tz,
@@ -243,7 +274,7 @@ where
     // A stale item keeps its label and greys a dash for its value: «stale» is the popover's word.
     let stale = Item {
         agent,
-        label,
+        label: label.clone(),
         value: "—".into(),
         suffix: None,
         tone: Tone::Stale,
@@ -264,7 +295,10 @@ where
     let reset = window.resets_at.and_then(|at| clock(at, now, zone));
     let suffix = match (tone, reset) {
         (Tone::Red, Some(reset)) => Some(format!("back {reset}")),
-        (_, Some(reset)) if agent == Agent::Claude && length == FIVE_HOURS => Some(reset),
+        // The reset follows Claude's 5-hour figure, and the figure of an agent's only item.
+        (_, Some(reset)) if single || (agent == Agent::Claude && length == FIVE_HOURS) => {
+            Some(reset)
+        }
         _ => None,
     };
     Item {
@@ -299,9 +333,16 @@ pub(super) fn templates(claude: &Source, codex: &Source) -> Vec<Item> {
         if !source.enabled() {
             continue;
         }
-        for &(label, length) in spans(agent) {
-            // A 5-hour window resets within the day, so its reset never carries a weekday.
-            let day = if length == WEEK { "Wed " } else { "" };
+        let fixed = agent == Agent::Claude;
+        for (label, length) in spans(agent, &Source::Waiting(String::new())) {
+            // Claude's 5-hour window resets within the day, so its reset never carries a weekday;
+            // Codex's one item can be any of its windows, so it is sized for the widest label.
+            let day = if fixed && length == FIVE_HOURS {
+                ""
+            } else {
+                "Wed "
+            };
+            let label = if fixed { label } else { "888d".to_owned() };
             out.push(Item {
                 agent,
                 label,

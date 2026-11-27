@@ -96,9 +96,9 @@ fn codex_turns_amber_at_eighty_and_red_with_its_return_when_exhausted() {
         assert_eq!(items[0].agent, Agent::Codex);
         (items[0].tone, line(&items))
     };
-    assert_eq!(tone_and_text(79.9), (Tone::Normal, "5h 79%".into()));
-    assert_eq!(tone_and_text(80.0), (Tone::Amber, "5h 80%".into()));
-    assert_eq!(tone_and_text(99.9), (Tone::Amber, "5h 99%".into()));
+    assert_eq!(tone_and_text(79.9), (Tone::Normal, "5h 79% · 18:26".into()));
+    assert_eq!(tone_and_text(80.0), (Tone::Amber, "5h 80% · 18:26".into()));
+    assert_eq!(tone_and_text(99.9), (Tone::Amber, "5h 99% · 18:26".into()));
     assert_eq!(
         tone_and_text(100.0),
         (Tone::Red, "5h 100% · back 18:26".into())
@@ -300,4 +300,40 @@ fn a_stale_reading_is_greyed_and_says_so() {
     };
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].tone, Tone::Stale);
+}
+
+/// A Codex plan with only a weekly window shows that window, labelled «W» with its reset, instead
+/// of a 5-hour item that would stay «—» for ever; with both, the 5-hour window comes first. Any
+/// other shortest window is labelled by its length.
+#[test]
+fn codex_shows_its_five_hour_window_or_else_its_shortest_one() {
+    let weekly_only = reading(NOW - 60, None, window(42.0, NOW + 3 * 86_400));
+    let items = items(&Source::Off, &weekly_only, NOW, &zone());
+    assert_eq!(line(&items), "W 42% · Mon 08:00");
+    assert_eq!(items[0].tone, Tone::Normal);
+
+    let both = read(window(10.0, at(18, 26)), window(42.0, NOW + 3 * 86_400));
+    assert_eq!(
+        line(&super::items(&Source::Off, &both, NOW, &zone())),
+        "5h 10% · 18:26"
+    );
+
+    let other = Source::Read(Reading {
+        observed_at: NOW - 60,
+        windows: [12 * 3600, 30 * 86_400, 90 * 60]
+            .into_iter()
+            .map(|length| Named {
+                name: "window".into(),
+                length,
+                window: window(5.0, NOW + 60).unwrap(),
+            })
+            .collect(),
+        note: None,
+    });
+    assert_eq!(
+        line(&super::items(&Source::Off, &other, NOW, &zone())),
+        "90m 5% · 08:01"
+    );
+    assert_eq!(length_label(12 * 3600), "12h");
+    assert_eq!(length_label(30 * 86_400), "30d");
 }
