@@ -1,7 +1,7 @@
 //! The chip in a real application pass: where the title bar puts it, and that it is not there when
 //! nothing is enabled or the bar is compact (#283).
 
-use super::{Allowance, Reading, Source};
+use super::{Allowance, Named, Reading, Source};
 use crate::{Window, tests::window_of_tabs};
 use eframe::egui;
 
@@ -52,12 +52,16 @@ pub(super) fn codex() -> (Source, Source) {
     let now = chrono::Utc::now().timestamp();
     let reading = Reading {
         observed_at: now,
-        five_hour: Some(Allowance {
-            used: Some(42.0),
-            resets_at: Some(now + 3600),
-            expired: false,
-        }),
-        weekly: None,
+        windows: vec![Named {
+            name: "5-hour session".into(),
+            length: super::FIVE_HOURS,
+            window: Allowance {
+                used: Some(42.0),
+                resets_at: Some(now + 3600),
+                expired: false,
+            },
+        }],
+        note: None,
     };
     (Source::Off, Source::Read(reading))
 }
@@ -95,19 +99,32 @@ fn a_reading_paints_the_chip_in_the_wide_bar_and_never_in_the_compact_one() {
     let chip = strip.chip.expect("a wide bar has room for the chip");
     assert!(chip.right() < crate::chrome::strip::slots(strip.row).board.left());
     assert!(strip.tabs.right() < before.tabs.right());
-    let painted_at = shapes.iter().find_map(|shape| match &shape.shape {
-        egui::Shape::Text(text) if text.galley.text() == "5h 42%" => Some(text.pos),
-        _ => None,
-    });
+    // The box hugs the text against the slot's right edge, leaving the rest of the slot empty.
+    let hugged = window.usage.chip.hugged(chip);
+    assert_eq!(hugged.right(), chip.right());
+    assert!(hugged.width() < chip.width(), "{hugged:?} in {chip:?}");
+    let box_drawn = shapes
+        .iter()
+        .any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == hugged));
+    assert!(box_drawn, "no box hugging the chip's text");
+    let at = |wanted: &str| {
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos),
+            _ => None,
+        })
+    };
+    let (label, value) = (at("5h"), at("42%"));
     assert!(
-        painted_at.is_some_and(|pos| chip.contains(pos)),
+        label.zip(value).is_some_and(|(label, value)| {
+            hugged.contains(label) && hugged.contains(value) && label.x < value.x
+        }),
         "{:?}",
         texts(&shapes)
     );
     let compact = area(400.0);
     let shapes = painted(&mut window, &ctx, compact, vec![]);
     assert!(crate::chrome::strip(&window, compact).compact());
-    assert!(!texts(&shapes).iter().any(|text| text == "5h 42%"));
+    assert!(!texts(&shapes).iter().any(|text| text == "42%"));
 }
 
 /// AC9 (D13): the chip's work is declared under a series of its own — what it reads in

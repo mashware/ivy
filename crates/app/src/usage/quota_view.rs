@@ -313,40 +313,15 @@ impl QuotaView {
     /// What the chip reads: the most recently updated launch's snapshot, since several launches can
     /// report and none of them is verified to be the account the person means.
     pub(super) fn chip_source(&self) -> super::chip::Source {
-        use super::chip::{Allowance, Reading, Source};
         if !self.enabled.load(Ordering::Acquire) {
-            return Source::Off;
+            return super::chip::Source::Off;
         }
-        let window = |state: WindowState| match state {
-            WindowState::Absent => None,
-            WindowState::Expired => Some(Allowance {
-                used: None,
-                resets_at: None,
-                expired: true,
-            }),
-            WindowState::Reported(window) => Some(Allowance {
-                used: window.used_percentage,
-                resets_at: window.resets_at,
-                expired: false,
-            }),
-        };
-        let latest = self
+        let snapshots: Vec<_> = self
             .brokers
             .iter()
-            .filter_map(|(_, broker)| match broker.snapshot() {
-                Snapshot::Observed {
-                    received_at,
-                    five_hour,
-                    seven_day,
-                } => Some(Reading {
-                    observed_at: received_at,
-                    five_hour: window(five_hour),
-                    weekly: window(seven_day),
-                }),
-                _ => None,
-            })
-            .max_by_key(|reading| reading.observed_at);
-        latest.map_or(Source::Waiting, Source::Read)
+            .map(|(_, broker)| broker.snapshot())
+            .collect();
+        chip_source(&snapshots)
     }
 
     pub(super) fn install(&mut self, name: usize, broker: Arc<Broker>) {
@@ -448,6 +423,59 @@ fn paint_window(ui: &mut egui::Ui, label: &str, state: WindowState) {
         }
     };
     ui.label(format!("{label} · {value}"));
+}
+
+/// The chip's reading from the launches' snapshots.
+fn chip_source(snapshots: &[Snapshot]) -> super::chip::Source {
+    use super::chip::{Allowance, FIVE_HOURS, Named, Reading, Source, WEEK};
+    let named = |name: &str, length: i64, state: WindowState| {
+        let window = match state {
+            WindowState::Absent => return None,
+            WindowState::Expired => Allowance {
+                used: None,
+                resets_at: None,
+                expired: true,
+            },
+            WindowState::Reported(window) => Allowance {
+                used: window.used_percentage,
+                resets_at: window.resets_at,
+                expired: false,
+            },
+        };
+        Some(Named {
+            name: name.into(),
+            length,
+            window,
+        })
+    };
+    let latest = snapshots
+        .iter()
+        .filter_map(|snapshot| match *snapshot {
+            Snapshot::Observed {
+                received_at,
+                five_hour,
+                seven_day,
+            } => Some(Reading {
+                observed_at: received_at,
+                windows: [
+                    named("5-hour session", FIVE_HOURS, five_hour),
+                    named("Weekly", WEEK, seven_day),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+                note: None,
+            }),
+            _ => None,
+        })
+        .max_by_key(|reading| reading.observed_at);
+    match latest {
+        Some(reading) => Source::Read(reading),
+        None if snapshots.contains(&Snapshot::ProducerError) => {
+            Source::Failed("Claude's statusline reported an error.".into())
+        }
+        None => Source::Waiting("Reporting on · launch Claude with it from AI usage".into()),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -578,7 +606,14 @@ mod tests {
         assert_eq!(view.chip_source(), Source::Off);
         let waiting = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
         view.install_fixture(Arc::clone(&waiting), Arc::clone(&wake));
-        assert_eq!(view.chip_source(), Source::Waiting);
+        assert!(matches!(view.chip_source(), Source::Waiting(_)));
+        let failing = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+        failing.observe_for_test(Snapshot::ProducerError);
+        view.install(1, Arc::clone(&failing));
+        assert!(
+            matches!(view.chip_source(), Source::Failed(_)),
+            "an error says so"
+        );
         for (received_at, used) in [(200, 20.0), (300, 30.0), (100, 10.0)] {
             let broker = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
             broker.observe_for_test(observed(received_at, used));
@@ -588,8 +623,9 @@ mod tests {
             panic!("a reading was expected");
         };
         assert_eq!(reading.observed_at, 300);
-        assert_eq!(reading.five_hour.unwrap().used, Some(30.0));
-        assert!(reading.weekly.unwrap().expired);
+        let five_hour = reading.window(super::super::chip::FIVE_HOURS).unwrap();
+        assert_eq!(five_hour.used, Some(30.0));
+        assert!(reading.window(super::super::chip::WEEK).unwrap().expired);
         view.disable();
         assert_eq!(view.chip_source(), Source::Off);
     }

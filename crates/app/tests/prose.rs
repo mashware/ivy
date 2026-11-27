@@ -1069,6 +1069,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
         3,
     ),
     (
+        "src/usage/chip/summary.rs",
+        include_str!("../src/usage/chip/summary.rs"),
+        3,
+    ),
+    (
+        "src/usage/chip/tests.rs",
+        include_str!("../src/usage/chip/tests.rs"),
+        3,
+    ),
+    (
         "src/usage/chip/summary_tests.rs",
         include_str!("../src/usage/chip/summary_tests.rs"),
         3,

@@ -60,6 +60,14 @@ enum Failure {
 
 type Reply = Result<Observation, Failure>;
 
+/// What a failed read tells a person, in AI usage and under the chip alike.
+fn failure_text(failure: &Failure) -> &'static str {
+    match failure {
+        Failure::Unsupported => "This Codex version cannot do verified reads.",
+        _ => "Codex returned no verified reading.",
+    }
+}
+
 struct Pending {
     result: mpsc::Receiver<Reply>,
     cancelled: Arc<AtomicBool>,
@@ -144,7 +152,7 @@ impl AllowanceView {
     /// What the chip reads: the 5-hour window is the one of 300 minutes and the weekly one the one
     /// of 10 080, in the first bucket that reports each; Codex labels neither.
     pub(super) fn chip_source(&self, now: i64) -> super::chip::Source {
-        use super::chip::{Allowance, Reading, Source};
+        use super::chip::{Allowance, Named, Reading, Source};
         if !SUPPORTED_PLATFORM {
             return Source::Unsupported;
         }
@@ -152,27 +160,61 @@ impl AllowanceView {
             return Source::Off;
         }
         let Some(observation) = &self.observation else {
-            return Source::Waiting;
+            // A failed read says so: «waiting» over a failure hid why no figure ever came.
+            return match (&self.pending, &self.failure) {
+                (Some(_), _) => Source::Waiting("Codex reads on · reading now…".into()),
+                (None, Some(failure)) => Source::Failed(failure_text(failure).into()),
+                (None, None) => Source::Waiting(self.next_read_hint()),
+            };
         };
-        let find = |minutes: i64| {
-            let windows = observation
-                .buckets
-                .iter()
-                .flat_map(|bucket| [&bucket.primary, &bucket.secondary]);
-            windows
+        let several = observation.buckets.len() > 1;
+        let windows = observation.buckets.iter().flat_map(|bucket| {
+            [&bucket.primary, &bucket.secondary]
+                .into_iter()
                 .flatten()
-                .find(|window| window.minutes == Some(minutes))
-                .map(|window| Allowance {
-                    used: window.used,
-                    resets_at: window.resets_at,
-                    expired: window.resets_at.is_some_and(|reset| reset <= now),
+                .map(move |window| {
+                    let name = match window.minutes {
+                        Some(300) => "5-hour session".to_owned(),
+                        Some(10_080) => "Weekly".to_owned(),
+                        Some(minutes) => format!("{minutes}-minute window"),
+                        None => "Window".to_owned(),
+                    };
+                    Named {
+                        name: if several {
+                            format!("{} · {name}", bucket.label)
+                        } else {
+                            name
+                        },
+                        length: window.minutes.unwrap_or_default() * 60,
+                        window: Allowance {
+                            used: window.used,
+                            resets_at: window.resets_at,
+                            expired: window.resets_at.is_some_and(|reset| reset <= now),
+                        },
+                    }
                 })
-        };
+        });
         Source::Read(Reading {
             observed_at: observation.observed_at,
-            five_hour: find(300),
-            weekly: find(10_080),
+            windows: windows.collect(),
+            note: self
+                .failure
+                .as_ref()
+                .map(|failure| format!("Last read failed: {}", failure_text(failure))),
         })
+    }
+
+    fn next_read_hint(&self) -> String {
+        match self.last_finished {
+            Some(finished) => {
+                let left = (finished + CADENCE).saturating_duration_since(Instant::now());
+                format!(
+                    "Codex reads on · next read in {} min",
+                    left.as_secs().div_ceil(60)
+                )
+            }
+            None => "Codex reads on · first read starting".into(),
+        }
     }
 
     pub(super) fn measured_windows(&self) -> usize {
@@ -330,13 +372,11 @@ impl AllowanceView {
         }
         if let Some(failure) = &self.failure {
             ui.label(match failure {
-                Failure::Unsupported => {
-                    "This Codex installation does not support verified allowance reads."
-                }
+                Failure::Unsupported => failure_text(failure),
                 _ if self.observation.is_some() => {
                     "Stale · Could not refresh the last successful reading."
                 }
-                _ => "Allowances unavailable for this reading.",
+                _ => failure_text(failure),
             });
         }
         if let Some(observation) = &self.observation {
@@ -505,7 +545,7 @@ mod tests {
 /// where they do not, «unsupported», which is what the popover turns into its sentence.
 #[cfg(test)]
 mod chip_tests {
-    use super::super::chip::{Allowance, Reading, Source};
+    use super::super::chip::{Allowance, Source};
     use super::*;
 
     fn window(used: f64, minutes: i64, resets_at: i64) -> Option<AllowanceWindow> {
@@ -611,14 +651,8 @@ mod chip_tests {
         assert!(view.allowances.observation.is_none());
     }
 
-    #[test]
-    fn the_chip_takes_the_three_hundred_minute_window_as_five_hours() {
-        let mut view = AllowanceView {
-            enabled: true,
-            ..AllowanceView::default()
-        };
-        let enabled = view.chip_source(100);
-        view.observation = Some(Observation {
+    fn observation(buckets: Vec<Bucket>) -> Option<Observation> {
+        Some(Observation {
             account: Account {
                 session: "s".into(),
                 user: "u".into(),
@@ -626,45 +660,107 @@ mod chip_tests {
                 label: "label".into(),
             },
             observed_at: 90,
-            buckets: vec![
-                Bucket {
-                    label: "other".into(),
-                    primary: window(1.0, 60, 500),
-                    secondary: None,
-                },
-                Bucket {
-                    label: "codex".into(),
-                    primary: window(10_080.0, 10_080, 50),
-                    secondary: window(42.0, 300, 400),
-                },
-            ],
-        });
+            buckets,
+        })
+    }
+
+    /// Every reported window reaches the summary, named by its length and, with several buckets,
+    /// by its bucket; the chip finds its 5-hour window by the 300 minutes.
+    #[test]
+    fn the_chip_takes_the_three_hundred_minute_window_as_five_hours() {
+        let mut view = AllowanceView {
+            enabled: true,
+            ..AllowanceView::default()
+        };
+        view.observation = observation(vec![
+            Bucket {
+                label: "other".into(),
+                primary: window(1.0, 60, 500),
+                secondary: None,
+            },
+            Bucket {
+                label: "codex".into(),
+                primary: window(7.0, 10_080, 50),
+                secondary: window(42.0, 300, 400),
+            },
+        ]);
         let read = view.chip_source(100);
         view.enabled = false;
         let off = view.chip_source(100);
         if !SUPPORTED_PLATFORM {
-            for source in [enabled, read, off] {
-                assert_eq!(source, Source::Unsupported);
-            }
+            assert_eq!(read, Source::Unsupported);
+            assert_eq!(off, Source::Unsupported);
             return;
         }
-        assert_eq!(enabled, Source::Waiting);
         assert_eq!(off, Source::Off);
+        let Source::Read(reading) = read else {
+            panic!("a reading was expected: {read:?}");
+        };
+        let names: Vec<_> = reading
+            .windows
+            .iter()
+            .map(|named| named.name.as_str())
+            .collect();
         assert_eq!(
-            read,
-            Source::Read(Reading {
-                observed_at: 90,
-                five_hour: Some(Allowance {
-                    used: Some(42.0),
-                    resets_at: Some(400),
-                    expired: false,
-                }),
-                weekly: Some(Allowance {
-                    used: Some(10_080.0),
-                    resets_at: Some(50),
-                    expired: true,
-                }),
+            names,
+            [
+                "other · 60-minute window",
+                "codex · Weekly",
+                "codex · 5-hour session"
+            ]
+        );
+        assert_eq!(
+            reading.window(super::super::chip::FIVE_HOURS),
+            Some(Allowance {
+                used: Some(42.0),
+                resets_at: Some(400),
+                expired: false,
             })
+        );
+        assert!(reading.window(super::super::chip::WEEK).unwrap().expired);
+        assert_eq!(reading.note, None);
+    }
+
+    /// The states before a figure arrives are told apart: a read in flight, a read that failed —
+    /// which once read «waiting» and hid why nothing came — and the next scheduled read; and a
+    /// failure after a good reading keeps it with a note.
+    #[test]
+    fn a_failed_read_is_said_and_never_shown_as_waiting() {
+        if !SUPPORTED_PLATFORM {
+            return;
+        }
+        let mut view = AllowanceView {
+            enabled: true,
+            ..AllowanceView::default()
+        };
+        assert_eq!(
+            view.chip_source(100),
+            Source::Waiting("Codex reads on · first read starting".into())
+        );
+        view.stub_reads = true;
+        view.refresh(&egui::Context::default());
+        assert_eq!(
+            view.chip_source(100),
+            Source::Waiting("Codex reads on · reading now…".into())
+        );
+        view.poll(Instant::now());
+        assert_eq!(
+            view.chip_source(100),
+            Source::Failed("Codex returned no verified reading.".into())
+        );
+        view.failure = None;
+        assert_eq!(
+            view.chip_source(100),
+            Source::Waiting("Codex reads on · next read in 5 min".into())
+        );
+        view.observation = observation(Vec::new());
+        view.failure = Some(Failure::Unavailable);
+        let Source::Read(reading) = view.chip_source(100) else {
+            panic!("the earlier reading is kept");
+        };
+        assert_eq!(
+            reading.note.as_deref(),
+            Some("Last read failed: Codex returned no verified reading.")
         );
     }
 }

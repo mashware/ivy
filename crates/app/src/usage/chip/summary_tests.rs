@@ -2,6 +2,7 @@
 //! alone, it opens AI usage, and it is not modal — it neither dims the consoles nor takes their
 //! input outside its own rectangle (#283, AC5 and AC8).
 
+use super::Source;
 use super::bar_tests::{area, codex, integrated, painted};
 use crate::{Window, painter::CellMetrics};
 use eframe::egui;
@@ -70,7 +71,7 @@ fn open_summary(window: &mut Window, ctx: &egui::Context, area: egui::Rect) -> e
     let chip = crate::chrome::strip(window, area)
         .chip
         .expect("the chip is shown");
-    click(window, ctx, area, chip.center());
+    click(window, ctx, area, window.usage.chip.hugged(chip).center());
     crate::usage::chip_summary(&window.usage).expect("a click on the chip opens the summary")
 }
 
@@ -119,7 +120,8 @@ fn the_summary_neither_dims_nor_takes_the_consoles_input_and_escape_is_not_its_k
     assert!(crate::usage::chip_summary(&window.usage).is_some());
     assert_eq!(window.active().focus, focused, "the press went through");
     let chip = crate::chrome::strip(&window, area).chip.unwrap();
-    click(&mut window, &ctx, area, chip.center());
+    let chip = window.usage.chip.hugged(chip).center();
+    click(&mut window, &ctx, area, chip);
     assert!(
         crate::usage::chip_summary(&window.usage).is_none(),
         "a second click closes it"
@@ -165,4 +167,64 @@ fn a_press_outside_closes_the_summary_and_open_ai_usage_opens_the_view() {
     painted(&mut window, &ctx, area, release(button));
     assert!(window.usage.blocks(&ctx), "the AI usage view did not open");
     assert!(crate::usage::chip_summary(&window.usage).is_none());
+}
+
+/// The summary as the design lays it out: both agents' tabs, a header with the agent and when it
+/// was read, each window with its figure and reset, and «Open AI usage» as a menu row — painted,
+/// in that order from the top. Before a reading it keeps the header and says why there is none.
+#[test]
+fn the_summary_paints_tabs_header_windows_and_footer_in_order() {
+    let (mut window, ctx) = integrated();
+    let area = area(1400.0);
+    window.usage.chip.forced = Some(codex());
+    for _ in 0..2 {
+        painted(&mut window, &ctx, area, vec![]);
+    }
+    let summary = open_summary(&mut window, &ctx, area);
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    let at = |wanted: &str| {
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos),
+            _ => None,
+        })
+    };
+    let order = [
+        "Claude Code",
+        "Updated just now",
+        "5-hour session",
+        "42% used",
+        "Open AI usage",
+    ];
+    let positions: Vec<_> = order
+        .iter()
+        .map(|text| at(text).unwrap_or_else(|| panic!("{text} was not painted")))
+        .collect();
+    assert!(positions.iter().all(|pos| summary.contains(*pos)));
+    assert!(
+        positions.windows(2).all(|pair| pair[0].y <= pair[1].y),
+        "{positions:?}"
+    );
+    assert!(at("Codex").is_some_and(|tab| (tab.y - positions[0].y).abs() < 1.0));
+    let reset = shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with("Resets at "))
+    });
+    assert!(reset, "no reset line");
+
+    // No reading yet: the header stays and the windows section says why.
+    let waiting = Source::Waiting("Codex reads on · reading now…".into());
+    window.usage.chip.forced = Some((Source::Off, waiting));
+    painted(&mut window, &ctx, area, vec![]);
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    let texts = super::bar_tests::texts(&shapes);
+    for wanted in [
+        "Codex",
+        "Waiting for the first reading.",
+        "Codex reads on · reading now…",
+        "Open AI usage",
+    ] {
+        assert!(
+            texts.iter().any(|text| text == wanted),
+            "{wanted}: {texts:?}"
+        );
+    }
 }

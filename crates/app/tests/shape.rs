@@ -735,6 +735,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/usage/chip/popover.rs"),
     ),
     (
+        "src/usage/chip/summary.rs",
+        include_str!("../src/usage/chip/summary.rs"),
+    ),
+    (
+        "src/usage/chip/tests.rs",
+        include_str!("../src/usage/chip/tests.rs"),
+    ),
+    (
         "src/usage/chip/summary_tests.rs",
         include_str!("../src/usage/chip/summary_tests.rs"),
     ),
