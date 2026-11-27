@@ -820,6 +820,14 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),
+    (
+        "app/src/console_input/navigation.rs",
+        include_str!("../src/console_input/navigation.rs"),
+    ),
+    (
+        "app/src/console_input/navigation/interaction_tests.rs",
+        include_str!("../src/console_input/navigation/interaction_tests.rs"),
+    ),
     ("app/src/board.rs", include_str!("../src/board.rs")),
     (
         "app/src/board/input.rs",

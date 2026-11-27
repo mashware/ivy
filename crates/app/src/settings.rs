@@ -650,7 +650,11 @@ impl Settings {
         // list.** «The last one wins» can only be decided that way, and it is what makes pasting
         // one set of shortcuts on top of another do what is expected.
         for (action, chord) in &self.shortcuts {
-            if let Some(displaced) = window.keymap.bind(*action, *chord) {
+            let displaced = chord
+                .map(|chord| window.keymap.displaced_by(*action, chord))
+                .unwrap_or_default();
+            window.keymap.bind(*action, *chord);
+            for displaced in displaced {
                 // **The clash is said out loud, not resolved in silence.** Without this, whoever
                 // reassigns a chord that already had an owner loses the other shortcut without
                 // noticing, and finds out the day they need it.
@@ -711,12 +715,14 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
         let chord = if value.eq_ignore_ascii_case(OFF) {
             None
         } else {
-            Some(crate::keyboard::Chord::from_written(value).ok_or_else(|| {
-                Missing::InvalidValue {
-                    key: key.to_owned(),
-                    value: value.to_owned(),
-                }
-            })?)
+            Some(
+                crate::keyboard::Chord::for_action(value, action).ok_or_else(|| {
+                    Missing::InvalidValue {
+                        key: key.to_owned(),
+                        value: value.to_owned(),
+                    }
+                })?,
+            )
         };
         settings.shortcuts.push((action, chord));
         return Ok(());

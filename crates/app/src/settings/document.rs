@@ -186,7 +186,7 @@ impl Document {
                 } else if field.value.eq_ignore_ascii_case("none") {
                     None
                 } else {
-                    Chord::from_written(&field.value)
+                    Chord::for_action(&field.value, action)
                 };
                 if let Some(chord) = chord {
                     bindings.push((action, chord));
@@ -195,7 +195,7 @@ impl Document {
         }
         for (index, (action, chord)) in bindings.iter().enumerate() {
             for (other, other_chord) in &bindings[index + 1..] {
-                if chord == other_chord {
+                if chord == other_chord && action.conflicts_with(*other) {
                     errors.push((
                         format!("key.{}", action.as_written()),
                         format!("Also assigned to {}.", other.as_written()),
@@ -296,6 +296,17 @@ mod tests {
     fn set(doc: &mut Document, key: &str, value: &str) {
         doc.fields.iter_mut().find(|f| f.key == key).unwrap().value = value.into();
     }
+    #[test]
+    fn board_shortcuts_accept_bare_keys_and_only_conflict_in_their_scope() {
+        let mut doc = Document::new(String::new());
+        set(&mut doc, "key.board-left", "alt+shift+left");
+        assert!(doc.errors().is_empty(), "{:?}", doc.errors());
+        set(&mut doc, "key.board-right", "alt+shift+left");
+        assert!(doc.errors().iter().any(|(key, _)| key == "key.board-left"));
+        set(&mut doc, "key.board-right", "enter");
+        assert!(doc.errors().iter().any(|(key, _)| key == "key.board-right"));
+    }
+
     #[test]
     fn legacy_sizes_migrate_together_without_reactivating_invalid_duplicates() {
         for version in ["", "version=1\r\n"] {
@@ -603,10 +614,14 @@ mod tests {
             for (action, chord) in saved.shortcuts {
                 keymap.bind(action, chord);
             }
-            assert_eq!(
-                keymap.action_for(Chord::from_written("alt+F12").unwrap()),
-                Some(action)
-            );
+            let chord = Chord::from_written("alt+F12").unwrap();
+            let resolved = if action.is_board_direction() {
+                keymap.board_action_for(chord)
+            } else {
+                keymap.action_for(chord)
+            };
+            assert_eq!(resolved, Some(action));
+            assert_eq!(keymap.chord_for(action), Some(chord));
             assert_eq!(saved.copy, Some(false));
             set(&mut doc, &key, "none");
             let saved = super::super::interpret(&doc.text()).unwrap().0;
@@ -615,6 +630,14 @@ mod tests {
                 keymap.bind(action, chord);
             }
             assert_eq!(keymap.chord_for(action), None);
+            assert_ne!(
+                if action.is_board_direction() {
+                    keymap.board_action_for(chord)
+                } else {
+                    keymap.action_for(chord)
+                },
+                Some(action)
+            );
             let mut reopened = Document::new(doc.text());
             set(&mut reopened, &key, "");
             set(&mut reopened, "key.copy", "");

@@ -475,7 +475,7 @@ fn log_file(editor: &mut Editor, ui: &mut egui::Ui) {
 }
 
 fn shortcuts(editor: &mut Editor, ui: &mut egui::Ui, errors: &[(String, String)]) {
-    ui.label("Blank uses the factory chord. 'none' hands it back to the program. Copy is controlled separately.");
+    ui.label("Blank uses the factory chord. 'none' disables the shortcut. Console chords then reach the program. Copy is controlled separately.");
     ui.add_space(12.0);
     let defaults = crate::keyboard::Keymap::default();
     let draft = editor.draft.as_mut().expect("an open editor has a draft");
@@ -523,7 +523,13 @@ fn shortcuts(editor: &mut Editor, ui: &mut egui::Ui, errors: &[(String, String)]
                 );
                 if ui
                     .button("None")
-                    .on_hover_text("Hand this shortcut back to the program")
+                    .on_hover_text(
+                        if action.is_some_and(|action| action.is_board_direction()) {
+                            "Disable this Board shortcut"
+                        } else {
+                            "Hand this shortcut back to the program"
+                        },
+                    )
                     .clicked()
                 {
                     field.value = "none".into();

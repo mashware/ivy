@@ -669,6 +669,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/console_input.rs"),
         1,
     ),
+    (
+        "src/console_input/navigation.rs",
+        include_str!("../src/console_input/navigation.rs"),
+        0,
+    ),
+    (
+        "src/console_input/navigation/interaction_tests.rs",
+        include_str!("../src/console_input/navigation/interaction_tests.rs"),
+        0,
+    ),
     ("src/board.rs", include_str!("../src/board.rs"), 1),
     (
         "src/board/branches.rs",

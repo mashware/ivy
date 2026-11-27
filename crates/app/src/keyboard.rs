@@ -2732,6 +2732,15 @@ pub enum Action {
     ScrollToBottom,
     Search,
     Board,
+    FocusLeft,
+    FocusRight,
+    FocusUp,
+    FocusDown,
+    MaximizePane,
+    BoardLeft,
+    BoardRight,
+    BoardUp,
+    BoardDown,
 }
 
 impl Action {
@@ -2751,7 +2760,29 @@ impl Action {
             Self::ScrollToBottom => "scroll-to-bottom",
             Self::Search => "search",
             Self::Board => "board",
+            Self::FocusLeft => "focus-left",
+            Self::FocusRight => "focus-right",
+            Self::FocusUp => "focus-up",
+            Self::FocusDown => "focus-down",
+            Self::MaximizePane => "maximize-pane",
+            Self::BoardLeft => "board-left",
+            Self::BoardRight => "board-right",
+            Self::BoardUp => "board-up",
+            Self::BoardDown => "board-down",
         }
+    }
+
+    pub(crate) fn is_board_direction(self) -> bool {
+        matches!(
+            self,
+            Self::BoardLeft | Self::BoardRight | Self::BoardUp | Self::BoardDown
+        )
+    }
+
+    pub(crate) fn conflicts_with(self, other: Self) -> bool {
+        self.is_board_direction() == other.is_board_direction()
+            || self == Self::Board
+            || other == Self::Board
     }
 
     /// The one written this way, if any.
@@ -2763,7 +2794,7 @@ impl Action {
 }
 
 /// The configurable actions, to iterate over them.
-pub const ALL: [Action; 13] = [
+pub const ALL: [Action; 22] = [
     Action::SplitRight,
     Action::SplitDown,
     Action::ClosePane,
@@ -2777,6 +2808,15 @@ pub const ALL: [Action; 13] = [
     Action::ScrollToBottom,
     Action::Search,
     Action::Board,
+    Action::FocusLeft,
+    Action::FocusRight,
+    Action::FocusUp,
+    Action::FocusDown,
+    Action::MaximizePane,
+    Action::BoardLeft,
+    Action::BoardRight,
+    Action::BoardUp,
+    Action::BoardDown,
 ];
 
 /// A chord: the modifier keys needed, and the key.
@@ -2797,6 +2837,28 @@ impl Chord {
     /// The parts are separated by `+`, in any order and regardless of case: `ctrl+shift+e`,
     /// `Shift+Prior`, `alt+f4`.
     pub fn from_written(text: &str) -> Option<Self> {
+        Self::parse(text, false)
+    }
+
+    pub(crate) fn for_action(text: &str, action: Action) -> Option<Self> {
+        let chord = Self::parse(text, action.is_board_direction())?;
+        if action.is_board_direction()
+            && matches!(
+                chord.key,
+                egui::Key::Tab
+                    | egui::Key::Enter
+                    | egui::Key::Escape
+                    | egui::Key::Space
+                    | egui::Key::Home
+                    | egui::Key::End
+            )
+        {
+            return None;
+        }
+        Some(chord)
+    }
+
+    fn parse(text: &str, allow_bare: bool) -> Option<Self> {
         let mut chord = Self {
             ctrl: false,
             shift: false,
@@ -2844,7 +2906,7 @@ impl Chord {
         }
         // **A chord with no modifier key stays with the program inside.** Allowing it would be
         // letting whoever configures take away the `a` from typing without anything warning them.
-        (chord.ctrl || chord.shift || chord.alt).then_some(chord)
+        (allow_bare || chord.ctrl || chord.shift || chord.alt).then_some(chord)
     }
 }
 
@@ -2944,6 +3006,79 @@ impl Default for Keymap {
                 // WezTerm's and Alacritty's chord for the same thing (D61).
                 (with_the_chord(Key::F), Action::Search),
                 (with_the_chord(Key::O), Action::Board),
+                (with_the_chord(Key::M), Action::MaximizePane),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: true,
+                        alt: true,
+                        key: Key::ArrowLeft,
+                    },
+                    Action::FocusLeft,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: true,
+                        alt: true,
+                        key: Key::ArrowRight,
+                    },
+                    Action::FocusRight,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: true,
+                        alt: true,
+                        key: Key::ArrowUp,
+                    },
+                    Action::FocusUp,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: true,
+                        alt: true,
+                        key: Key::ArrowDown,
+                    },
+                    Action::FocusDown,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                        key: Key::ArrowLeft,
+                    },
+                    Action::BoardLeft,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                        key: Key::ArrowRight,
+                    },
+                    Action::BoardRight,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                        key: Key::ArrowUp,
+                    },
+                    Action::BoardUp,
+                ),
+                (
+                    Chord {
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                        key: Key::ArrowDown,
+                    },
+                    Action::BoardDown,
+                ),
             ],
         }
     }
@@ -2965,8 +3100,25 @@ impl Keymap {
     pub fn action_for(&self, chord: Chord) -> Option<Action> {
         self.table
             .iter()
-            .find(|(chord_of, _)| *chord_of == chord)
+            .find(|(chord_of, action)| *chord_of == chord && !action.is_board_direction())
             .map(|(_, action)| *action)
+    }
+
+    pub(crate) fn board_action_for(&self, chord: Chord) -> Option<Action> {
+        self.table
+            .iter()
+            .find(|(candidate, action)| *candidate == chord && action.is_board_direction())
+            .map(|(_, action)| *action)
+    }
+
+    pub(crate) fn displaced_by(&self, action: Action, chord: Chord) -> Vec<Action> {
+        self.table
+            .iter()
+            .filter_map(|(candidate, other)| {
+                (*candidate == chord && *other != action && action.conflicts_with(*other))
+                    .then_some(*other)
+            })
+            .collect()
     }
 
     /// Changes an action's chord. `None` unbinds it.
@@ -2982,9 +3134,10 @@ impl Keymap {
         let displaced = self
             .table
             .iter()
-            .find(|(chord_of, _)| *chord_of == chord)
+            .find(|(chord_of, other)| *chord_of == chord && action.conflicts_with(*other))
             .map(|(_, action)| *action);
-        self.table.retain(|(chord_of, _)| *chord_of != chord);
+        self.table
+            .retain(|(chord_of, other)| *chord_of != chord || !action.conflicts_with(*other));
         self.table.push((chord, action));
         displaced
     }
@@ -2995,6 +3148,32 @@ mod keymap_tests {
     use super::*;
     use crate::tests::markdown;
     use eframe::egui::Key;
+
+    #[test]
+    fn board_and_console_bindings_are_independent_and_global_toggle_conflicts() {
+        let mut map = Keymap::default();
+        let chord = Chord::for_action("alt+shift+left", Action::BoardLeft).unwrap();
+        assert_eq!(map.bind(Action::BoardLeft, Some(chord)), None);
+        assert_eq!(map.action_for(chord), Some(Action::FocusLeft));
+        assert_eq!(map.board_action_for(chord), Some(Action::BoardLeft));
+        assert_eq!(map.bind(Action::BoardLeft, None), None);
+        assert_eq!(map.action_for(chord), Some(Action::FocusLeft));
+        assert_eq!(map.board_action_for(chord), None);
+        let toggle = map.chord_for(Action::Board).unwrap();
+        assert_eq!(map.bind(Action::BoardUp, Some(toggle)), Some(Action::Board));
+        assert_eq!(map.action_for(toggle), None);
+        assert_eq!(map.board_action_for(toggle), Some(Action::BoardUp));
+    }
+
+    #[test]
+    fn only_board_directions_accept_bare_keys_and_reserved_controls_are_rejected() {
+        assert!(Chord::for_action("left", Action::FocusLeft).is_none());
+        assert!(Chord::for_action("left", Action::BoardLeft).is_some());
+        assert!(Chord::for_action("a", Action::BoardLeft).is_some());
+        for key in ["tab", "enter", "escape", "space", "home", "end"] {
+            assert!(Chord::for_action(key, Action::BoardLeft).is_none(), "{key}");
+        }
+    }
 
     #[test]
     fn the_document_publishes_exactly_the_shortcuts_the_code_has() {
@@ -3019,6 +3198,15 @@ mod keymap_tests {
             ("scroll-to-bottom", "shift+end", Action::ScrollToBottom),
             ("search", "ctrl+shift+f", Action::Search),
             ("board", "ctrl+shift+o", Action::Board),
+            ("focus-left", "alt+shift+left", Action::FocusLeft),
+            ("focus-right", "alt+shift+right", Action::FocusRight),
+            ("focus-up", "alt+shift+up", Action::FocusUp),
+            ("focus-down", "alt+shift+down", Action::FocusDown),
+            ("maximize-pane", "ctrl+shift+m", Action::MaximizePane),
+            ("board-left", "left", Action::BoardLeft),
+            ("board-right", "right", Action::BoardRight),
+            ("board-up", "up", Action::BoardUp),
+            ("board-down", "down", Action::BoardDown),
         ];
         assert_eq!(
             published.len(),
@@ -3035,11 +3223,15 @@ mod keymap_tests {
                 Some(action),
                 "the document publishes the name «{name}» and the code does not understand it"
             );
-            let chord = Chord::from_written(written).unwrap_or_else(|| {
+            let chord = Chord::for_action(written, action).unwrap_or_else(|| {
                 panic!("the document publishes «{written}» and the code does not understand it")
             });
             assert_eq!(
-                keymap.action_for(chord),
+                if action.is_board_direction() {
+                    keymap.board_action_for(chord)
+                } else {
+                    keymap.action_for(chord)
+                },
                 Some(action),
                 "the document says «{name}» is «{written}» by default, and it is not"
             );
@@ -3089,15 +3281,7 @@ mod keymap_tests {
                 expected.as_written()
             );
         }
-        // **Against the pairs just exercised, not against a number written separately.** A literal
-        // here goes stale as soon as the list changes, and what has to be tied down is that **no action is
-        // left without a factory chord**: a new action with no pair in the list above would never
-        // fire and nothing would say so.
-        assert_eq!(
-            ALL.len(),
-            factory.len(),
-            "there are actions without a factory chord, or factory chords of actions that no longer exist"
-        );
+        assert!(ALL.iter().all(|action| keymap.chord_for(*action).is_some()));
     }
 
     #[test]
@@ -3454,10 +3638,10 @@ mod keymap_tests {
             .filter(|token| **token == token.to_lowercase())
             .collect();
         // Without a floor, a document that stopped writing chords in backticks would leave this
-        // test passing by being empty. Today it publishes eighteen.
+        // test passing by being empty. Today it publishes twenty-three.
         assert_eq!(
             published.len(),
-            18,
+            23,
             "the document publishes {} chords in lowercase: either it changed shape, or this walk stopped \
              finding them and the test is not looking at anything — {published:?}",
             published.len()
@@ -3551,6 +3735,7 @@ mod keymap_tests {
         );
 
         let keymap = Keymap::default();
+        let mut seen = std::collections::HashSet::new();
         for (name, written) in published {
             let action = Action::from_written(name).unwrap_or_else(|| {
                 panic!(
@@ -3559,17 +3744,27 @@ mod keymap_tests {
                      ignores the line"
                 )
             });
-            let chord = Chord::from_written(written).unwrap_or_else(|| {
+            assert!(
+                seen.insert(action),
+                "the document repeats shortcut «{name}»"
+            );
+            let chord = Chord::for_action(written, action).unwrap_or_else(|| {
                 panic!("the document publishes «{written}» for «{name}» and the code rejects it")
             });
+            let resolved = if action.is_board_direction() {
+                keymap.board_action_for(chord)
+            } else {
+                keymap.action_for(chord)
+            };
             assert_eq!(
-                keymap.action_for(chord),
+                resolved,
                 Some(action),
                 "the document says «{name}» comes as «{written}» out of the box, and pressing that \
                  chord does {:?}",
-                keymap.action_for(chord)
+                resolved
             );
         }
+        assert_eq!(seen.len(), ALL.len(), "the document omitted an action");
     }
 }
 

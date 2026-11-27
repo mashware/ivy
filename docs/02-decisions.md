@@ -12646,3 +12646,16 @@ retention, clearing, resource limits and publication under one lifecycle.
 **Discarded.** Separate ledgers complicate clear and combined limits.
 A timestamp and token count cannot identify a Codex call by themselves.
 Direct account access is unnecessary for local history.
+
+## D131 — Keyboard focus follows visible neighbors and Board owns its directions
+
+Directional shortcuts move focus within the active tab. At a split with several neighbors,
+prefer the nearest facing edge, then the widest shared span and the nearest center. A maximized
+console keeps the keyboard until restored. Maximizing and restoring use the same shortcut and
+the same view as the header control.
+
+Board directions have independent bindings. Plain arrows can navigate cards while a shell or
+editor still receives its own arrows. The existing previous-tab and next-tab bindings keep
+their meaning. Discarded a shared directional binding because it would force a user who wants
+plain arrows on Board to change the way they type in a terminal. Cycling panes in tree order
+would make the same gesture jump in different visual directions after a split.
