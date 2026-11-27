@@ -23,6 +23,10 @@ fn source(window: &mut Window, name: usize) -> Option<Source> {
     })
 }
 
+pub(crate) fn console_directory(window: &mut Window, name: usize) -> Option<PathBuf> {
+    source(window, name)?.cwd
+}
+
 fn pin(state: &mut State, source: Source) -> bool {
     if state.review.has_comments() {
         state.message = "Send or clear the review comments before opening another document.".into();

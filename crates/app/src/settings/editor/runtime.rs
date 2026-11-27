@@ -564,6 +564,47 @@ mod tests {
         })
     }
     #[test]
+    fn gentle_save_cancel_and_reset_change_only_the_saved_preference() {
+        let file = File::new("# retain\n");
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let mut window = window(&file);
+        let _output = crate::tests::isolate_output(&mut window);
+        assert!(!window.gentle_enabled);
+        set(&mut window, "gentle.enabled", "on");
+        frame(&mut window, &ctx);
+        assert!(!window.gentle_enabled);
+        assert_eq!(file.read(), "# retain\n");
+        save(&mut window);
+        frame(&mut window, &ctx);
+        frame(&mut window, &ctx);
+        assert!(window.gentle_enabled);
+        assert!(file.read().contains("gentle.enabled = on"));
+        set(&mut window, "gentle.enabled", "off");
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area_of(1200.0),
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, &ctx);
+        assert!(window.gentle_enabled);
+        assert!(file.read().contains("gentle.enabled = on"));
+        window.settings_editor.open(Some(file.0.clone()));
+        window.settings_editor.draft.as_mut().unwrap().defaults();
+        save(&mut window);
+        frame(&mut window, &ctx);
+        frame(&mut window, &ctx);
+        assert!(!window.gentle_enabled);
+    }
+
+    #[test]
     fn ligatures_save_cancel_and_reset_preserve_programs_grid_and_lazy_fonts() {
         let file = File::new("# retain\nsize=14\n");
         let ctx = egui::Context::default();

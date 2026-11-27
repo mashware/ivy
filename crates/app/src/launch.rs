@@ -32,6 +32,20 @@ impl std::error::Error for StartupFailure {
     }
 }
 
+impl StartupFailure {
+    fn report(&self) {
+        crate::pty_output::say(&format!("console could not be started: {self}"));
+    }
+
+    pub(crate) fn new(program: &str, error: term_core::Error) -> Self {
+        Self {
+            program: program.into(),
+            reason: error.to_string(),
+            source: error,
+        }
+    }
+}
+
 struct Ready {
     spawned: Spawned,
     startup: Vec<u8>,
@@ -206,19 +220,28 @@ impl Process {
                     .and_then(|(_, value)| value.as_ref())
                     .map(|v| v.to_string_lossy())
                     .unwrap_or_else(|| "console".into());
-                let spawn = |program, args: &[&str]| match scope_launcher.as_deref() {
-                    Some(launcher) => Pty::spawn_with_launcher_in(
-                        launcher,
-                        &identity,
-                        program,
-                        args,
-                        size,
-                        &borrowed,
-                        directory.as_deref(),
-                    ),
-                    None => {
-                        Pty::spawn_with_env_in(program, args, size, &borrowed, directory.as_deref())
+                let spawn = |program: &str, args: &[&str]| {
+                    match scope_launcher.as_deref() {
+                        Some(launcher) => Pty::spawn_with_launcher_in(
+                            launcher,
+                            &identity,
+                            program,
+                            args,
+                            size,
+                            &borrowed,
+                            directory.as_deref(),
+                        ),
+                        None => Pty::spawn_with_env_in(
+                            program,
+                            args,
+                            size,
+                            &borrowed,
+                            directory.as_deref(),
+                        ),
                     }
+                    .map_err(|error| -> term_core::Error {
+                        Box::new(StartupFailure::new(program, error))
+                    })
                 };
                 let result = match spawn(&program, &args) {
                     Err(error)
@@ -276,6 +299,7 @@ impl Process {
     }
 
     pub(crate) fn failed(error: StartupFailure) -> (Self, Receiver<Vec<u8>>) {
+        error.report();
         let (sender, output) = std::sync::mpsc::channel();
         drop(sender);
         let process = Self {
@@ -428,7 +452,14 @@ impl Process {
                 Some((output, startup, pending.reads))
             }
             Err(error) => {
-                self.failure = Some(error.to_string());
+                match error.downcast::<StartupFailure>() {
+                    Ok(failure) => {
+                        failure.report();
+                        self.failure = Some(failure.to_string());
+                        self.startup_failure = Some(*failure);
+                    }
+                    Err(error) => self.failure = Some(error.to_string()),
+                }
                 self.input.clear();
                 None
             }

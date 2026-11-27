@@ -695,3 +695,23 @@ fn normal_restored_fallback_and_takeover_paths_use_the_explicit_ivy_launcher() {
 #[test]
 #[ignore = "unix-only: requires the built target/debug/app and a real systemd user manager"]
 fn a_real_scoped_exit_keeps_repainting_until_the_observer_finishes() {}
+
+#[test]
+fn worker_spawn_failure_keeps_the_program_and_reason_visible() {
+    let (mut process, complete) = pending();
+    complete
+        .send(Err(Box::new(StartupFailure::new(
+            "gentle-shell",
+            "missing executable".into(),
+        ))))
+        .unwrap();
+    assert!(process.poll().is_none());
+    assert!(process.keeps_open());
+    assert_eq!(
+        process.notice(),
+        Some("This console's program could not be started.")
+    );
+    let failure = process.startup_failure.as_ref().unwrap();
+    assert_eq!(failure.program, "gentle-shell");
+    assert_eq!(failure.reason, "missing executable");
+}
