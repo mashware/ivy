@@ -298,6 +298,18 @@ impl QuotaView {
         self.disconnected = false;
     }
 
+    /// Called on every frame before the chip reads the launches: clearing the pending wake is what
+    /// lets the next change schedule its own repaint.
+    pub(super) fn chip_frame(&self, shown: bool) {
+        if let Some(wake) = &self.wake {
+            let shown = shown && self.enabled.load(Ordering::Acquire);
+            wake.set_chip(shown);
+            if shown {
+                wake.begin_frame();
+            }
+        }
+    }
+
     /// What the chip reads: the most recently updated launch's snapshot, since several launches can
     /// report and none of them is verified to be the account the person means.
     pub(super) fn chip_source(&self) -> super::chip::Source {

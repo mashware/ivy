@@ -46,6 +46,8 @@ pub(super) struct Wake {
 #[derive(Default)]
 struct WakeState {
     visible: bool,
+    /// The title bar's chip shows Claude: only a changed value wakes the window for it (D132).
+    chip: bool,
     pending: bool,
 }
 
@@ -70,13 +72,46 @@ impl Wake {
         self.state.lock().unwrap().pending = false;
     }
 
+    pub(super) fn set_chip(&self, shown: bool) {
+        self.state.lock().unwrap().chip = shown;
+    }
+
+    /// Something only the open view shows changed, such as when a frame was received.
     pub(super) fn changed(&self) {
+        self.wake(false);
+    }
+
+    /// A window's figure, reset or state changed, which the chip shows too.
+    fn value_changed(&self) {
+        self.wake(true);
+    }
+
+    fn wake(&self, value: bool) {
         let mut state = self.state.lock().unwrap();
-        if state.visible && !state.pending {
+        if (state.visible || (value && state.chip)) && !state.pending {
             state.pending = true;
             // Serialize the request with hiding the view. The callback queues a repaint.
             (self.repaint)();
         }
+    }
+}
+
+/// Whether two snapshots show the same windows, whenever they were received.
+fn same_value(old: &Snapshot, new: &Snapshot) -> bool {
+    match (old, new) {
+        (
+            Snapshot::Observed {
+                five_hour,
+                seven_day,
+                ..
+            },
+            Snapshot::Observed {
+                five_hour: new_five_hour,
+                seven_day: new_seven_day,
+                ..
+            },
+        ) => five_hour == new_five_hour && seven_day == new_seven_day,
+        _ => old == new,
     }
 }
 
@@ -129,7 +164,7 @@ impl BrokerState {
         model.snapshot = snapshot;
         model.root = None;
         drop(model);
-        self.wake.changed();
+        self.wake.value_changed();
     }
 
     fn publish(&self, root: &Arc<Root>, frame: Frame) {
@@ -145,7 +180,7 @@ impl BrokerState {
             return;
         }
         let now = unix_seconds();
-        model.snapshot = match frame.outcome {
+        let snapshot = match frame.outcome {
             Outcome::Observed {
                 five_hour,
                 seven_day,
@@ -156,8 +191,15 @@ impl BrokerState {
             },
             Outcome::ProducerError => Snapshot::ProducerError,
         };
+        let same = same_value(&model.snapshot, &snapshot);
+        model.snapshot = snapshot;
         drop(model);
-        self.wake.changed();
+        // A statusline repeats itself on every redraw; only a new figure is worth a frame.
+        if same {
+            self.wake.changed();
+        } else {
+            self.wake.value_changed();
+        }
     }
 
     fn expire(&self) -> Option<Duration> {
@@ -181,7 +223,7 @@ impl BrokerState {
         };
         drop(model);
         if changed {
-            self.wake.changed();
+            self.wake.value_changed();
         }
         next
     }

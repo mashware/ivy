@@ -62,6 +62,17 @@ fn native_helper() {
                             seven_day: None,
                         },
                     },
+                    "steady" | "moved" => Frame {
+                        v: 1,
+                        sequence: admission.sequence,
+                        outcome: Outcome::Observed {
+                            five_hour: Some(Window {
+                                used_percentage: Some(if mode == "steady" { 10.0 } else { 20.0 }),
+                                resets_at: Some(4_000_000_000),
+                            }),
+                            seven_day: None,
+                        },
+                    },
                     "wrong-sequence" => Frame {
                         v: 1,
                         sequence: admission.sequence + 1,
@@ -296,6 +307,46 @@ fn received_quota_is_painted_and_measured_only_in_the_open_usage_view() {
             .unwrap()
             .contains("Usage paint: frames=1")
     );
+}
+
+/// While the chip shows Claude and AI usage is closed, a launch wakes the window when its windows
+/// change and not when it repeats them (D132).
+#[test]
+fn with_the_view_closed_only_a_changed_value_wakes_the_window_for_the_chip() {
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let count = wakes.clone();
+    let wake = Wake::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    wake.set_chip(true);
+    let broker = Broker::prepare(wake.clone()).unwrap();
+    let mut launch = Launch::new(broker.endpoint());
+    launch.bind(&broker);
+    let used = |snapshot: Snapshot| match snapshot {
+        Snapshot::Observed {
+            five_hour: WindowState::Reported(window),
+            ..
+        } => window.used_percentage,
+        _ => None,
+    };
+    launch.run("steady");
+    wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
+    assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    // The chip's frame clears the pending wake; then the same values arrive again.
+    wake.begin_frame();
+    launch.run("steady");
+    // The repeat changes nothing a test can wait for, so the pause lets it land before the next
+    // frame clears the pending wake: a repeat that woke the window shows in the final count.
+    std::thread::sleep(Duration::from_millis(150));
+    wake.begin_frame();
+    launch.run("moved");
+    wait_for(&broker, |snapshot| used(snapshot) == Some(20.0));
+    assert_eq!(wakes.load(Ordering::Relaxed), 2, "the repeat must not wake");
+    wake.set_chip(false);
+    wake.begin_frame();
+    launch.run("steady");
+    wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
+    assert_eq!(wakes.load(Ordering::Relaxed), 2, "no chip, no view: no wake");
 }
 
 #[test]
