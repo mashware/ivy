@@ -674,14 +674,15 @@ mod tests {
         let mut launch = None;
         let ctx = egui::Context::default();
         let mut pass = || {
-            let tall = egui::RawInput {
+            // The window size the empty-looking screen was reported at.
+            let reported = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(1100.0, 4000.0),
+                    egui::vec2(1100.0, 740.0),
                 )),
                 ..Default::default()
             };
-            ctx.run_ui(tall, |ui| {
+            ctx.run_ui(reported, |ui| {
                 show(
                     &mut view,
                     ui.ctx(),
@@ -695,7 +696,6 @@ mod tests {
         pass().textures_delta.clear();
         let mut output = pass();
         output.textures_delta.clear();
-        // What fits in the window's first view is what gets painted: the scroll area culls the rest.
         let painted: Vec<_> = output
             .shapes
             .iter()
