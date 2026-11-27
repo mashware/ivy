@@ -2883,6 +2883,62 @@ mod tests {
         frame(window, ctx, area, vec![])
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn gentle_task_composer_owns_its_draft_and_returns_input_to_the_same_console() {
+        let ctx = egui::Context::default();
+        let received = term_core::received::Received::new("gentle-task-menu");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.start(&ctx, crate::chrome::Run::Measured);
+        window.headers = window.headers.integrated(true);
+        window.gentle_enabled = true;
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let menu = open_updates_menu(&mut window, &ctx, area);
+        let at = text_center(&menu, "New Gentle task…");
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        assert!(has_text(&shapes, "Start task"));
+
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("Private draft".into())],
+        );
+        let draft = frame(&mut window, &ctx, area, vec![]);
+        assert!(has_text(&draft, "Private draft"));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Text("DISMISS".into()),
+            ],
+        );
+        let resumed = frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("AFTER".into())],
+        );
+        assert!(!has_text(&resumed, "Start task"));
+        assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
+    }
+
+    crate::windows_unix_omission!(
+        gentle_task_composer_owns_its_draft_and_returns_input_to_the_same_console,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
     fn update_notes_are_reachable_in_wide_and_compact_windows_without_network() {
         for width in [1400.0, 240.0] {

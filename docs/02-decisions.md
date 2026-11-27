@@ -12666,3 +12666,11 @@ Direct account access is unnecessary for local history.
 **Reason.** Ivy hosts ordinary shells and several independent agent clients. A user who never works with Gentle should spend neither screen space nor startup work on it. Choosing to expose a launcher and choosing to start an agent are two distinct actions.
 
 **Discarded.** Automatic executable discovery at startup would turn an installed command into an implicit preference. An always-visible empty task section would reserve workspace space before a producer had anything to publish. Making Ivy's own authentication a prerequisite would break D4.
+
+## D132 — Start a native Gentle task explicitly and keep review replies with its session
+
+**Decision.** Offer an initial prompt through **New Gentle task** when the integration is enabled. Keep **New Gentle session** for interactive console use. The task runs in the selected project's directory in its own Gentle process. Use that process and the exact dialog ID to answer or cancel. A pending question may announce itself during another project's review. Opening it is an explicit action. Preserve the file, hunk and reading position throughout.
+
+**Reason.** In the two-process experiment, identically worded questions belonged to different live processes. A reply written to the process had no receipt for helper continuation. Name the project and session; show an uncertain outcome when delivery cannot be established. Let the installed client own authentication.
+
+**Discarded.** Attaching the interactive protocol after launch has no documented support in Gentle 5.1.0. Guessing a helper from nearby activity would misattribute overlapping questions. Opening the originating console would displace the active review. A complete transcript and continuing conversation belong to the next roadmap phase.

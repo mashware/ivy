@@ -81,7 +81,7 @@ pub fn run() -> eframe::Result {
         options.viewport = options.viewport.with_inner_size(size);
     }
 
-    eframe::run_native(
+    let result = eframe::run_native(
         APP_NAME,
         options,
         Box::new(move |cc| {
@@ -151,7 +151,9 @@ pub fn run() -> eframe::Result {
             crate::usage::configure_measurement(&mut window, &cc.egui_ctx, measuring);
             Ok(Box::new(window))
         }),
-    )
+    );
+    chrome::gentle_task::shutdown();
+    result
 }
 
 /// Where the Board remembers its arrangement: the person's file, never under measurement.

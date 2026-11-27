@@ -368,7 +368,7 @@ pub(crate) fn keys(
     metrics: &crate::painter::CellMetrics,
     blocked: bool,
 ) -> (bool, Vec<crate::WindowRequest>) {
-    let blocked = blocked || window.chrome.guide_blocked(ui.ctx());
+    let blocked = blocked || window.chrome.dialogs_block_input(ui.ctx());
     window.viewer.context = Some(ui.ctx().clone());
     window.viewer_other.context = Some(ui.ctx().clone());
     if blocked {
@@ -503,7 +503,7 @@ pub(crate) fn before_keys(
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::Rect) {
     if window.settings_editor.is_open()
         || window.pane_view.is_modal()
-        || window.chrome.guide_blocked(ui.ctx())
+        || window.chrome.hides_tools(ui.ctx())
     {
         return;
     }
@@ -563,6 +563,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         (
             &tabs,
             &title,
+            !window.chrome.dialogs_block_input(&ctx),
             if image {
                 view::Body::Image(
                     window.tabs.get(window.active).map(|tab| tab.focus),

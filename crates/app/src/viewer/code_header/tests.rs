@@ -158,6 +158,7 @@ impl Drawer {
                             folder: "the source console".into(),
                             unavailable: false,
                         },
+                        true,
                         crate::viewer::view::Body::Document,
                     ),
                 );

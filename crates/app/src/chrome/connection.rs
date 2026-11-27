@@ -180,6 +180,7 @@ pub(super) fn paint_icon(painter: &egui::Painter, rect: Rect, fg: Color32) {
 
 pub(super) fn open(window: &mut Window, ctx: &egui::Context, board_handoff: bool) {
     if window.settings_editor.is_open()
+        || window.chrome.gentle_task.blocks(ctx)
         || window.chrome.updates.blocked(ctx)
         || (crate::board::blocked(window, ctx) && !board_handoff)
         || window.pane_view.is_modal()

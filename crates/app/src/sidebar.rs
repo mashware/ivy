@@ -244,7 +244,7 @@ pub(crate) fn before_keys(
     if chrome_owned
         || window.settings_editor.is_open()
         || window.pane_view.is_modal()
-        || window.chrome.guide_blocked(&ctx)
+        || window.chrome.dialogs_block_input(&ctx)
     {
         window.sidebar.record(started.elapsed());
         window.timed_separately += window.sidebar.take_cost();

@@ -3,7 +3,7 @@ use crate::{OpeningLayout, Tab, Window, opening};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
-fn resolve() -> term_core::Result<PathBuf> {
+pub(super) fn resolve() -> term_core::Result<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     #[cfg(not(windows))]
     let roots = std::env::var_os("HOME")
