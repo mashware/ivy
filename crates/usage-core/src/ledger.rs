@@ -12,7 +12,8 @@ use crate::accounting::{Canonical, Counts, Observation, Provider, Reducer, Resol
 const VERSION: i64 = 2;
 const PARSER_VERSION: i64 = 1;
 const PAGE_SIZE: u64 = 4096;
-const MAX_PAGES: u64 = 49_152;
+// 1.25 GiB: room for MAX_EVENTS at the ~1.19 KB an event took in a real Claude history (D127).
+const MAX_PAGES: u64 = 327_680;
 const DB_BYTES: u64 = PAGE_SIZE * MAX_PAGES;
 // The pinned pager writes at most one original-page frame per page and a
 // sector (up to 64 KiB) header. No cache spill means no additional headers.
@@ -187,7 +188,7 @@ impl Ledger {
             connection.query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))?;
         if journal_mode != "delete"
             || pragma_number(&connection, "cache_spill")? != 0
-            || connection.query_row("PRAGMA max_page_count=49152", [], |row| {
+            || connection.query_row(&format!("PRAGMA max_page_count={MAX_PAGES}"), [], |row| {
                 row.get::<_, u64>(0)
             })? != MAX_PAGES
         {
