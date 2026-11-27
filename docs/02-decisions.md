@@ -12666,3 +12666,16 @@ Direct account access is unnecessary for local history.
 **Reason.** Ivy hosts ordinary shells and several independent agent clients. A user who never works with Gentle should spend neither screen space nor startup work on it. Choosing to expose a launcher and choosing to start an agent are two distinct actions.
 
 **Discarded.** Automatic executable discovery at startup would turn an installed command into an implicit preference. An always-visible empty task section would reserve workspace space before a producer had anything to publish. Making Ivy's own authentication a prerequisite would break D4.
+
+## D132 — Keyboard focus follows visible neighbors and Board owns its directions
+
+Directional shortcuts move focus within the active tab. At a split with several neighbors,
+prefer the nearest facing edge, then the widest shared span and the nearest center. A maximized
+console keeps the keyboard until restored. Maximizing and restoring use the same shortcut and
+the same view as the header control.
+
+Board directions have independent bindings. Plain arrows can navigate cards while a shell or
+editor still receives its own arrows. The existing previous-tab and next-tab bindings keep
+their meaning. Discarded a shared directional binding because it would force a user who wants
+plain arrows on Board to change the way they type in a terminal. Cycling panes in tree order
+would make the same gesture jump in different visual directions after a split.

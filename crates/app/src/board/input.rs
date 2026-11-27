@@ -166,7 +166,7 @@ pub(crate) fn before_keys(
     let events = ui.input(|i| i.events.clone());
     let arrangement_before = window.board.arrangement;
     let mut owns_events = false;
-    for event in &events {
+    for (index, event) in events.iter().enumerate() {
         if window.board.keyboard_focus && super::filter::edit(&mut window.board.filter, event) {
             owns_events = true;
             continue;
@@ -210,17 +210,51 @@ pub(crate) fn before_keys(
                 pressed: true,
                 ..
             } if window.board.keyboard_focus => {
+                // The filter owns printable keys as well as their following Text events.
+                if window.board.filter.editing
+                    && matches!(events.get(index + 1), Some(egui::Event::Text(_)))
+                {
+                    owns_events = true;
+                    continue;
+                }
+                let direction = window.keymap.board_action_for(Chord {
+                    ctrl: modifiers.ctrl,
+                    shift: modifiers.shift,
+                    alt: modifiers.alt,
+                    key: *key,
+                });
+                let effective = match direction {
+                    Some(Action::BoardLeft) => Some(egui::Key::ArrowLeft),
+                    Some(Action::BoardRight) => Some(egui::Key::ArrowRight),
+                    Some(Action::BoardUp) => Some(egui::Key::ArrowUp),
+                    Some(Action::BoardDown) => Some(egui::Key::ArrowDown),
+                    _ if matches!(
+                        key,
+                        egui::Key::ArrowLeft
+                            | egui::Key::ArrowRight
+                            | egui::Key::ArrowUp
+                            | egui::Key::ArrowDown
+                    ) =>
+                    {
+                        None
+                    }
+                    _ => Some(*key),
+                };
+                let Some(effective) = effective else {
+                    owns_events = true;
+                    continue;
+                };
                 if window.board.arrangement == super::filter::Arrangement::ByMilestone {
                     let (handled, activate) = window
                         .board
                         .surface
                         .milestones
-                        .keyboard(*key, modifiers.shift);
+                        .keyboard(effective, modifiers.shift);
                     if let Some(pane) = activate {
                         window.board.activate = Some(pane);
                     }
                     if handled {
-                        if *key == egui::Key::Tab {
+                        if effective == egui::Key::Tab {
                             window.board.filter.editing = false;
                         }
                         owns_events = true;
@@ -228,7 +262,7 @@ pub(crate) fn before_keys(
                     }
                 }
                 if matches!(
-                    key,
+                    effective,
                     egui::Key::ArrowUp
                         | egui::Key::ArrowDown
                         | egui::Key::ArrowLeft
@@ -237,7 +271,7 @@ pub(crate) fn before_keys(
                         | egui::Key::End
                         | egui::Key::Enter
                 ) {
-                    navigate(&mut window.board, *key);
+                    navigate(&mut window.board, effective);
                 }
                 owns_events = true;
             }
@@ -627,6 +661,137 @@ mod tests {
             },
         )
         .drop_without_applying_deltas();
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn rebound_direction_moves_cards_in_both_arrangements_and_filter_keeps_text() {
+        for arrangement in [
+            super::super::filter::Arrangement::ByState,
+            super::super::filter::Arrangement::ByMilestone,
+        ] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            let ctx = egui::Context::default();
+            crate::fonts::install_bundled(&ctx);
+            toggle(&mut window, &ctx);
+            window.board.arrangement = arrangement;
+            window.board.keyboard_focus = true;
+            window.board.order = slots(&[(4, 0, 0), (8, 0, 1)]);
+            window.board.selected = Some(4);
+            window.keymap.bind(
+                Action::BoardRight,
+                Some(Chord {
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    key: egui::Key::L,
+                }),
+            );
+            section_cancellation_input(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
+            assert_eq!(window.board.selected, Some(4));
+            section_cancellation_input(
+                &mut window,
+                &ctx,
+                vec![key(egui::Key::L), egui::Event::Text("l".into())],
+            );
+            assert_eq!(window.board.selected, Some(8));
+            assert!(window.board.filter.query.is_empty());
+            window.board.selected = Some(4);
+            window.board.filter.editing = true;
+            section_cancellation_input(
+                &mut window,
+                &ctx,
+                vec![key(egui::Key::L), egui::Event::Text("l".into())],
+            );
+            assert_eq!(window.board.selected, Some(4));
+            assert_eq!(window.board.filter.query, "l");
+            section_cancellation_input(&mut window, &ctx, vec![key(egui::Key::Enter)]);
+            assert!(!window.board.filter.editing);
+            assert!(window.board.activate.is_none());
+        }
+    }
+
+    #[test]
+    fn filter_owns_punctuation_but_non_text_binding_still_moves() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        toggle(&mut window, &ctx);
+        section_cancellation_input(&mut window, &ctx, vec![]);
+        window.board.keyboard_focus = true;
+        window.board.filter.editing = true;
+        window.board.order = slots(&[(4, 0, 0), (8, 0, 1)]);
+        window.board.selected = Some(4);
+        let chord = |key| Chord {
+            ctrl: false,
+            shift: false,
+            alt: false,
+            key,
+        };
+        window
+            .keymap
+            .bind(Action::BoardRight, Some(chord(egui::Key::Comma)));
+        section_cancellation_input(
+            &mut window,
+            &ctx,
+            vec![key(egui::Key::Comma), egui::Event::Text(",".into())],
+        );
+        assert_eq!(window.board.selected, Some(4));
+        assert_eq!(window.board.filter.query, ",");
+        window
+            .keymap
+            .bind(Action::BoardRight, Some(chord(egui::Key::F1)));
+        section_cancellation_input(&mut window, &ctx, vec![key(egui::Key::F1)]);
+        assert_eq!(window.board.selected, Some(8));
+        assert_eq!(window.board.filter.query, ",");
+    }
+
+    #[test]
+    fn rebound_direction_moves_milestone_controls() {
+        use super::super::milestones::state::{FocusZone, Identity, Key, Target};
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        toggle(&mut window, &ctx);
+        window.board.keyboard_focus = true;
+        window.board.arrangement = super::super::filter::Arrangement::ByMilestone;
+        let first = Target::Header(Key {
+            project: "p".into(),
+            milestone: Identity::from("a"),
+        });
+        let second = Target::Header(Key {
+            project: "p".into(),
+            milestone: Identity::from("b"),
+        });
+        let reader = &mut window.board.surface.milestones;
+        reader.zone = FocusZone::Columns;
+        reader.focus = Some(first.clone());
+        reader.targets = vec![
+            (first.clone(), egui::Rect::EVERYTHING),
+            (second.clone(), egui::Rect::EVERYTHING),
+        ];
+        window.keymap.bind(
+            Action::BoardRight,
+            Some(Chord {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: egui::Key::L,
+            }),
+        );
+        section_cancellation_input(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(window.board.surface.milestones.focus, Some(first));
+        section_cancellation_input(&mut window, &ctx, vec![key(egui::Key::L)]);
+        assert_eq!(window.board.surface.milestones.focus, Some(second));
     }
 
     #[test]
