@@ -41,6 +41,7 @@ pub(super) fn show(
             false,
         ),
         ("Connect agents", Action::Connect, None, true),
+        ("New Gentle session", Action::Gentle, None, false),
         (
             "Search console",
             Action::Search,
@@ -53,6 +54,9 @@ pub(super) fn show(
     ]
     .into_iter()
     .filter(|entry| {
+        if !available(entry.1, window.gentle_enabled) {
+            return false;
+        }
         // A compact bar has no room for the tools' and the window's own buttons; its menu does.
         compact
             || !matches!(
@@ -265,4 +269,46 @@ pub(super) fn show(
         }
     }
     (menu_rect, action)
+}
+
+fn available(action: Action, gentle_enabled: bool) -> bool {
+    !matches!(action, Action::Gentle) || gentle_enabled
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gentle_is_absent_until_enabled() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.chrome.menu = true;
+        let ctx = egui::Context::default();
+        let area = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
+        let row = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 40.0));
+        for enabled in [false, true] {
+            window.gentle_enabled = enabled;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    ..Default::default()
+                },
+                |ui| {
+                    show(&mut window, ui, row, area, true);
+                },
+            );
+            let has_label = |label| {
+                output.shapes.iter().any(|shape| {
+                    matches!(
+                        &shape.shape, egui::Shape::Text(text) if text.galley.text() == label
+                    )
+                })
+            };
+            let preferences_visible = has_label("Preferences");
+            let gentle_visible = has_label("New Gentle session");
+            output.drop_without_applying_deltas();
+            assert!(preferences_visible, "the menu must actually be open");
+            assert_eq!(gentle_visible, enabled);
+        }
+    }
 }

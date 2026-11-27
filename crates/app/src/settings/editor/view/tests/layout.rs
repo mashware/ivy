@@ -465,6 +465,45 @@ fn theme_font_and_color_popup_escape_preserves_settings_before_second_escape_dis
     }
 }
 #[test]
+fn gentle_checkbox_is_off_by_default_and_edits_the_draft() {
+    let mut editor = Editor {
+        draft: Some(Document::new(String::new())),
+        section: 4,
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    paint(&mut editor, &ctx, size, vec![]);
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    assert!(text.iter().any(|(s, _)| s == "Enable Gentle"));
+    assert!(
+        !editor
+            .draft
+            .as_ref()
+            .unwrap()
+            .text()
+            .contains("gentle.enabled")
+    );
+    click_label(&mut editor, &ctx, "Enable Gentle");
+    assert!(
+        editor
+            .draft
+            .as_ref()
+            .unwrap()
+            .text()
+            .contains("gentle.enabled = on")
+    );
+    click_label(&mut editor, &ctx, "Enable Gentle");
+    assert!(
+        editor
+            .draft
+            .as_ref()
+            .unwrap()
+            .text()
+            .contains("gentle.enabled = off")
+    );
+}
+#[test]
 fn typography_reset_and_cursor_shortcuts_remain_native_and_staged() {
     let mut editor = Editor {
         draft: Some(Document::new("font=Fixture Family\nsize=20\n".into())),

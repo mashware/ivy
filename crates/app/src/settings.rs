@@ -288,6 +288,7 @@ pub struct Settings {
     pub agent_claude: bool,
     pub agent_codex: bool,
     pub agent_opencode: bool,
+    pub gentle_enabled: bool,
     pub theme: Option<crate::theme::NamedTheme>,
     /// The family the file asks to paint with. `None` if it asks for none.
     ///
@@ -644,6 +645,7 @@ impl Settings {
         );
         window.copy_enabled = self.copy.unwrap_or(true);
         window.ligatures = self.ligatures.unwrap_or(false);
+        window.gentle_enabled = self.gentle_enabled;
         window.blink.ceiling = self.blink;
         window.keymap = crate::keyboard::Keymap::default();
         // **They are applied in the order they were written, and that is why they arrive as a
@@ -725,21 +727,26 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     // would otherwise fall through to `strip_prefix("color.")` and come back as an unknown key.
     if matches!(
         key,
-        "agent.claude.enabled" | "agent.codex.enabled" | "agent.opencode.enabled"
+        "agent.claude.enabled"
+            | "agent.codex.enabled"
+            | "agent.opencode.enabled"
+            | "gentle.enabled"
     ) {
-        let enabled = match value {
+        let normalized = (key == "gentle.enabled").then(|| value.to_ascii_lowercase());
+        let enabled = match normalized.as_deref().unwrap_or(value) {
             "true" | "on" => true,
             "false" | "off" => false,
             _ => {
                 return Err(Missing::InvalidValue {
-                    key: key.to_owned(),
-                    value: value.to_owned(),
+                    key: key.into(),
+                    value: value.into(),
                 });
             }
         };
         match key {
             "agent.claude.enabled" => settings.agent_claude = enabled,
             "agent.codex.enabled" => settings.agent_codex = enabled,
+            "gentle.enabled" => settings.gentle_enabled = enabled,
             _ => settings.agent_opencode = enabled,
         }
         return Ok(());
@@ -1995,10 +2002,10 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Fifteen is what the table publishes today.
+        // left to check. The row count also detects a missing published setting.
         assert_eq!(
             published.len(),
-            15,
+            16,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()

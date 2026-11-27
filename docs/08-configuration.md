@@ -258,9 +258,12 @@ It is the same thing Kitty and Ghostty do.
 | `pane.title_size` | pane-title size in points; 6–24, default 9 |
 | `tab.label_size` | tab-label size in points; 6–24, default 9 |
 | `font` | the font family it paints with, by its name; omitted means the bundled Geist Mono |
+| `gentle.enabled` | enable Gentle: `on` or `off`; omitted means `off` |
 | `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
 | `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, `directories`, or `sessions` |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
+
+When enabled, **New Gentle session** launches an installed `gentle-shell` in a new console using the focused console's working directory. Ivy searches absolute directories in its own desktop `PATH`, then the official `~/.gentle-shell/bin` bundle on Unix. Shell startup files can give an interactive shell a different `PATH` from Ivy's. On Windows Ivy accepts an executable found in an absolute `PATH` directory; the official bundled `.cmd` launcher and npm `.cmd` shims cannot currently be launched by Ivy. Open those installations in an ordinary console instead. If the client or the active directory is unavailable, the new console shows the reason.
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.

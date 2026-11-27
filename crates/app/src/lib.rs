@@ -797,6 +797,7 @@ struct Window {
     /// The same as pasting.
     copy_enabled: bool,
     ligatures: bool,
+    gentle_enabled: bool,
     ligature_measurement: Option<ligatures::Measurement>,
     /// Everything a blinking cursor needs the window to remember between frames.
     ///
@@ -7396,6 +7397,7 @@ mod tests {
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
             ligatures: false,
+            gentle_enabled: false,
             ligature_measurement: None,
             blink: alarms::BlinkState::default(),
             font_size: DEFAULT_FONT_SIZE,
