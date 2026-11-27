@@ -265,6 +265,8 @@ It is the same thing Kitty and Ghostty do.
 
 When enabled, **New Gentle session** launches an installed `gentle-shell` in a new console using the focused console's working directory. Ivy searches absolute directories in its own desktop `PATH`, then the official `~/.gentle-shell/bin` bundle on Unix. Shell startup files can give an interactive shell a different `PATH` from Ivy's. On Windows Ivy accepts an executable found in an absolute `PATH` directory; the official bundled `.cmd` launcher and npm `.cmd` shims cannot currently be launched by Ivy. Open those installations in an ordinary console instead. If the client or the active directory is unavailable, the new console shows the reason.
 
+Use **New Gentle task** to write the initial request in Ivy. This starts a separate native task in the selected project. Questions identify their project and session, so you can answer while reviewing a different project. The installed Gentle client supplies its own authentication. See [D133](02-decisions.md#d133--start-a-native-gentle-task-explicitly-and-keep-review-replies-with-its-session).
+
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
 

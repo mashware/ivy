@@ -615,6 +615,30 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/project_view/tests.rs"),
     ),
     (
+        "app/src/chrome/gentle_task/transport.rs",
+        include_str!("../src/chrome/gentle_task/transport.rs"),
+    ),
+    (
+        "app/src/chrome/gentle_task/transport/process.rs",
+        include_str!("../src/chrome/gentle_task/transport/process.rs"),
+    ),
+    (
+        "app/src/chrome/gentle_task/transport/wire.rs",
+        include_str!("../src/chrome/gentle_task/transport/wire.rs"),
+    ),
+    (
+        "app/src/chrome/gentle_task/view.rs",
+        include_str!("../src/chrome/gentle_task/view.rs"),
+    ),
+    (
+        "app/src/chrome/gentle_task.rs",
+        include_str!("../src/chrome/gentle_task.rs"),
+    ),
+    (
+        "app/src/chrome/gentle_task/transport/process/windows.rs",
+        include_str!("../src/chrome/gentle_task/transport/process/windows.rs"),
+    ),
+    (
         "app/src/chrome/gentle.rs",
         include_str!("../src/chrome/gentle.rs"),
     ),

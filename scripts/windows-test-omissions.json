@@ -1,6 +1,21 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "chrome::gentle_task::tests::reviewer_answers_the_background_session_at_the_same_visible_diff_line",
+    "reason": "unix-only: uses a POSIX shell for private RPC pipes and a terminal directory witness"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "chrome::gentle_task::transport::tests::separate_rpc_children_receive_only_their_own_choice",
+    "reason": "unix-only: directly launches an executable Python shebang fixture using private pipes"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::gentle_task_composer_owns_its_draft_and_returns_input_to_the_same_console",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "shell_integration::tests::git_bash_routes_the_native_launcher_instead_of_the_extensionless_npm_shim",
     "reason": "unix-only: exercises the MSYS lookup branch using executable POSIX shell fixtures"
   },

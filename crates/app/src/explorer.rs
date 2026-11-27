@@ -331,7 +331,7 @@ pub(crate) fn before_keys(
             window.explorer.visible = true;
             window.explorer.keyboard = true;
         }
-        if blocked || window.settings_editor.is_open() || window.chrome.guide_blocked(ctx) {
+        if blocked || window.settings_editor.is_open() || window.chrome.dialogs_block_input(ctx) {
             return (false, false);
         }
         let target = active(window);
@@ -417,7 +417,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
     if window.settings_editor.is_open()
         || window.board.is_open()
         || window.pane_view.is_modal()
-        || window.chrome.guide_blocked(ui.ctx())
+        || window.chrome.dialogs_block_input(ui.ctx())
     {
         return;
     }

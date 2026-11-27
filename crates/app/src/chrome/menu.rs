@@ -41,6 +41,7 @@ pub(super) fn show(
             false,
         ),
         ("Connect agents", Action::Connect, None, true),
+        ("New Gentle task…", Action::GentleTask, None, false),
         ("New Gentle session", Action::Gentle, None, false),
         (
             "Search console",
@@ -272,7 +273,7 @@ pub(super) fn show(
 }
 
 fn available(action: Action, gentle_enabled: bool) -> bool {
-    !matches!(action, Action::Gentle) || gentle_enabled
+    !matches!(action, Action::Gentle | Action::GentleTask) || gentle_enabled
 }
 
 #[cfg(test)]
@@ -306,9 +307,11 @@ mod tests {
             };
             let preferences_visible = has_label("Preferences");
             let gentle_visible = has_label("New Gentle session");
+            let native_task_visible = has_label("New Gentle task…");
             output.drop_without_applying_deltas();
             assert!(preferences_visible, "the menu must actually be open");
             assert_eq!(gentle_visible, enabled);
+            assert_eq!(native_task_visible, enabled);
         }
     }
 }

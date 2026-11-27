@@ -34,6 +34,7 @@ pub(crate) struct Chrome {
     menu_scroll: f32,
     menu_selected: Option<usize>,
     guide: connection::Guide,
+    gentle_task: gentle_task::GentleTasks,
     updates: updates::Dialog,
     held: bool,
     /// Passes in a row that had to move macOS's window buttons back.
@@ -72,7 +73,10 @@ impl Chrome {
     pub(crate) fn enabled(&self) -> bool {
         self.enabled
     }
-    pub(crate) fn guide_blocked(&self, ctx: &egui::Context) -> bool {
+    pub(crate) fn dialogs_block_input(&self, ctx: &egui::Context) -> bool {
+        self.hides_tools(ctx) || self.gentle_task.blocks(ctx)
+    }
+    pub(crate) fn hides_tools(&self, ctx: &egui::Context) -> bool {
         self.guide.blocked(ctx) || self.updates.blocked(ctx)
     }
     pub(crate) fn record_work(&mut self, cost: Duration) {
@@ -119,6 +123,7 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 mod branding;
 mod connection;
 mod gentle;
+pub(crate) mod gentle_task;
 mod menu;
 pub(crate) mod strip;
 mod tools;
@@ -135,6 +140,7 @@ enum Action {
     SplitDown,
     Search,
     Gentle,
+    GentleTask,
     Connect,
     Updates(bool),
     Menu,
@@ -242,7 +248,7 @@ pub(crate) fn open_for_tests(window: &mut Window, ctx: &egui::Context, guide: bo
 
 /// Whether the title bar holds a modal surface — its menu or a dialog — that dims the consoles.
 pub(crate) fn is_modal(window: &Window, ctx: &egui::Context) -> bool {
-    window.chrome.menu || window.chrome.guide_blocked(ctx) || window.usage.blocks(ctx)
+    window.chrome.menu || window.chrome.dialogs_block_input(ctx) || window.usage.blocks(ctx)
 }
 
 /// Paint and claim the titlebar before settings and terminal input dispatch.
@@ -253,6 +259,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let started = Instant::now();
     let ctx = ui.ctx().clone();
     let area = ui.max_rect();
+    gentle_task::poll(window, &ctx);
+    let task_owned = gentle_task::before_keys(window, ui);
     let geometry = strip(window, area);
     let row = geometry.row;
     let roles = crate::ui::style::roles(&ctx, &window.theme);
@@ -346,14 +354,15 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         let response = ui.interact(rect, ui.id().with(id), Sense::click_and_drag());
         if response.double_clicked() {
             action = Some(Action::Maximize);
-        } else if response.drag_started() {
+        } else if response.drag_started() && !task_owned {
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
     }
-    if window.settings_editor.is_open()
+    if task_owned
+        || window.settings_editor.is_open()
         || window.pane_view.is_modal()
         || window.usage.blocks(&ctx)
-        || window.chrome.guide_blocked(&ctx)
+        || window.chrome.dialogs_block_input(&ctx)
     {
         action = None;
         window.chrome.menu = false;
@@ -381,6 +390,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         && ui.is_enabled()
         && !maximized
         && !window.settings_editor.is_open()
+        && !task_owned
         && let Some(edge) = edge
         && ctx.input(|i| i.pointer.primary_pressed())
     {
@@ -393,7 +403,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     {
         window.chrome.menu = false;
     }
-    let owned = window.chrome.guide_blocked(&ctx)
+    let owned = task_owned
+        || window.chrome.dialogs_block_input(&ctx)
         || window.usage.blocks(&ctx)
         || menu_owned
         || ((over || edge.is_some()) && gesture)
@@ -419,7 +430,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     if window.settings_editor.is_open()
         || window.pane_view.is_modal()
         || window.usage.blocks(&ctx)
-        || window.chrome.guide_blocked(&ctx)
+        || window.chrome.dialogs_block_input(&ctx)
         || !ui.is_enabled()
         || (crate::board::blocked(window, &ctx)
             && !window.board.is_open()
@@ -444,6 +455,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                     | Action::Updates(_)
                     | Action::Search
                     | Action::Gentle
+                    | Action::GentleTask
             )
         );
     if board_handoff {
@@ -454,6 +466,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         action,
         Some(
             Action::Search
+                | Action::GentleTask
                 | Action::Minimize
                 | Action::Maximize
                 | Action::Close
@@ -485,6 +498,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         }
         Some(Action::Connect) => connection::open(window, &ctx, board_handoff),
         Some(Action::Gentle) => gentle::open(window, &ctx),
+        Some(Action::GentleTask) => gentle_task::start(window, &ctx),
         Some(Action::Updates(check)) => updates::open(window, &ctx, check, board_handoff),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
         Some(Action::Preferences) => {

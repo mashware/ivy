@@ -31,7 +31,12 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    (tabs, title, mut image): (&super::drawer::Tabs, &super::drawer::Title, Body),
+    (tabs, title, interactive, mut image): (
+        &super::drawer::Tabs,
+        &super::drawer::Title,
+        bool,
+        Body,
+    ),
 ) {
     let namespace = if state.kind.is_document() {
         "markdown-viewer"
@@ -39,6 +44,8 @@ pub(super) fn show(
         "git-viewer"
     };
     egui::Area::new(egui::Id::new(("document-viewer", namespace)))
+        .enabled(interactive)
+        .interactable(interactive)
         .fade_in(false)
         .constrain(false)
         .fixed_pos(full.min)
@@ -492,7 +499,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
-                        (&tabs(true), &title(), super::Body::Document),
+                        (&tabs(true), &title(), true, super::Body::Document),
                     )
                 },
             );
@@ -556,7 +563,7 @@ mod tests {
                             theme,
                             true,
                             false,
-                            (&tabs(false), &title(), super::Body::Document),
+                            (&tabs(false), &title(), true, super::Body::Document),
                         )
                     },
                 );
@@ -622,7 +629,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         true,
                         false,
-                        (&tabs(false), &gone, super::Body::Document),
+                        (&tabs(false), &gone, true, super::Body::Document),
                     )
                 },
             )
