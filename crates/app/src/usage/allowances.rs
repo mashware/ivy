@@ -142,7 +142,7 @@ impl AllowanceView {
     /// What the chip reads: the 5-hour window is the one of 300 minutes and the weekly one the one
     /// of 10 080, in the first bucket that reports each; Codex labels neither.
     pub(super) fn chip_source(&self, now: i64) -> super::chip::Source {
-        use super::chip::{Reading, Source, Allowance};
+        use super::chip::{Allowance, Reading, Source};
         if !SUPPORTED_PLATFORM {
             return Source::Unsupported;
         }
@@ -452,7 +452,10 @@ mod tests {
         view.poll(Instant::now());
         assert!(view.observation.is_none());
         assert!(!view.polling());
-        assert_eq!(view.last_finished, None, "a revoked read is not a finished one");
+        assert_eq!(
+            view.last_finished, None,
+            "a revoked read is not a finished one"
+        );
     }
 
     #[test]
@@ -493,7 +496,7 @@ mod tests {
 /// where they do not, «unsupported», which is what the popover turns into its sentence.
 #[cfg(test)]
 mod chip_tests {
-    use super::super::chip::{Reading, Source, Allowance};
+    use super::super::chip::{Allowance, Reading, Source};
     use super::*;
 
     fn window(used: f64, minutes: i64, resets_at: i64) -> Option<AllowanceWindow> {
@@ -519,8 +522,14 @@ mod chip_tests {
         assert_eq!(next_read(true, true, false, finished, at(300)), Next::Now);
         assert_eq!(next_read(true, true, true, finished, at(900)), Next::Never);
         assert_eq!(next_read(true, true, true, None, start), Next::Never);
-        assert_eq!(next_read(false, true, false, finished, at(900)), Next::Never);
-        assert_eq!(next_read(true, false, false, finished, at(900)), Next::Never);
+        assert_eq!(
+            next_read(false, true, false, finished, at(900)),
+            Next::Never
+        );
+        assert_eq!(
+            next_read(true, false, false, finished, at(900)),
+            Next::Never
+        );
     }
 
     /// The clock starts when a read ends: the instant `poll` takes the reply.

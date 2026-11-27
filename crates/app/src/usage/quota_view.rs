@@ -313,7 +313,7 @@ impl QuotaView {
     /// What the chip reads: the most recently updated launch's snapshot, since several launches can
     /// report and none of them is verified to be the account the person means.
     pub(super) fn chip_source(&self) -> super::chip::Source {
-        use super::chip::{Reading, Source, Allowance};
+        use super::chip::{Allowance, Reading, Source};
         if !self.enabled.load(Ordering::Acquire) {
             return Source::Off;
         }

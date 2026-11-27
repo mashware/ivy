@@ -12,8 +12,8 @@ mod chip;
 mod codex_controls;
 mod paint;
 mod report;
-use paint::paint_summary;
 pub(crate) use chip::{paint as paint_chip, show_summary};
+use paint::paint_summary;
 pub(crate) use report::configure_measurement;
 
 /// The title bar's slot for the allowance chip, in points; zero when there is no chip.

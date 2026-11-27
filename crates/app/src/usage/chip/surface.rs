@@ -1,6 +1,6 @@
-//! The chip in the title bar and the summary that opens under it. Neither is modal: the summary
-//! claims the pointer over its own rectangle only and never dims the consoles, because a glance at
-//! the allowances must not stop anybody typing (only modal surfaces may dim).
+//! The chip in the title bar and the state of the summary that opens under it. Neither is modal,
+//! by decision (#283): a glance at the allowances must not stop anybody typing, and only modal
+//! surfaces may dim the consoles.
 
 use super::{Agent, Item, Source, Tone, items, templates, width};
 use crate::{Window, theme::Roles};

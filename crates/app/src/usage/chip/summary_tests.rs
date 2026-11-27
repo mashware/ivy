@@ -67,7 +67,9 @@ fn inks(
 }
 
 fn open_summary(window: &mut Window, ctx: &egui::Context, area: egui::Rect) -> egui::Rect {
-    let chip = crate::chrome::strip(window, area).chip.expect("the chip is shown");
+    let chip = crate::chrome::strip(window, area)
+        .chip
+        .expect("the chip is shown");
     click(window, ctx, area, chip.center());
     crate::usage::chip_summary(&window.usage).expect("a click on the chip opens the summary")
 }
@@ -84,7 +86,10 @@ fn the_summary_neither_dims_nor_takes_the_consoles_input_and_escape_is_not_its_k
     let consoles = crate::tab_bar::geometry(&window, area, &metrics).consoles;
     let plain = painted(&mut window, &ctx, area, vec![]);
     let summary = open_summary(&mut window, &ctx, area);
-    assert!(consoles.intersects(summary), "the summary floats over a console");
+    assert!(
+        consoles.intersects(summary),
+        "the summary floats over a console"
+    );
     assert!(!crate::chrome::is_modal(&window, &ctx));
     assert!(!window.usage.blocks(&ctx));
     let open = painted(&mut window, &ctx, area, vec![]);
@@ -115,7 +120,10 @@ fn the_summary_neither_dims_nor_takes_the_consoles_input_and_escape_is_not_its_k
     assert_eq!(window.active().focus, focused, "the press went through");
     let chip = crate::chrome::strip(&window, area).chip.unwrap();
     click(&mut window, &ctx, area, chip.center());
-    assert!(crate::usage::chip_summary(&window.usage).is_none(), "a second click closes it");
+    assert!(
+        crate::usage::chip_summary(&window.usage).is_none(),
+        "a second click closes it"
+    );
     click(&mut window, &ctx, area, inside);
     assert_ne!(
         window.active().focus,

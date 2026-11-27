@@ -351,7 +351,11 @@ fn with_the_view_closed_only_a_changed_value_wakes_the_window_for_the_chip() {
     wake.begin_frame();
     launch.run("steady");
     wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
-    assert_eq!(wakes.load(Ordering::Relaxed), 2, "no chip, no view: no wake");
+    assert_eq!(
+        wakes.load(Ordering::Relaxed),
+        2,
+        "no chip, no view: no wake"
+    );
 }
 
 #[test]

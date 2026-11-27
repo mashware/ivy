@@ -1,6 +1,7 @@
 //! The summary that opens under the chip: one tab per agent, its windows with use, reset and pace,
-//! and a way into AI usage. It floats like a menu but is not one: it holds no keys, claims the
-//! pointer over its own rectangle only and never dims the consoles (only modal surfaces may).
+//! and a way into AI usage. It floats like a menu but is not modal, by decision (#283): it takes
+//! no keys, claims the pointer over its own rectangle only and does not dim the consoles, since
+//! only modal surfaces may. `summary_tests.rs` holds it to that.
 
 use super::{Agent, Source, Tone, describe};
 use crate::Window;

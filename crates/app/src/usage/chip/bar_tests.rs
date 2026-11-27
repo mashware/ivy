@@ -139,10 +139,16 @@ fn the_chip_declares_its_work_under_its_own_series_and_not_as_the_chromes() {
             crate::chrome::before_keys(&mut window, ui, &metrics);
             let wall = started.elapsed();
             let painted = window.usage.timing.pending[CHIP].unwrap() - read;
-            assert!(painted > std::time::Duration::ZERO, "the chip's paint is declared");
+            assert!(
+                painted > std::time::Duration::ZERO,
+                "the chip's paint is declared"
+            );
             assert_eq!(window.timed_separately - set_aside, painted);
             let chrome = window.chrome.take_cost();
-            assert!(chrome + painted <= wall, "{chrome:?} + {painted:?} > {wall:?}");
+            assert!(
+                chrome + painted <= wall,
+                "{chrome:?} + {painted:?} > {wall:?}"
+            );
         },
     );
     output.textures_delta.clear();
@@ -164,6 +170,9 @@ fn a_measured_run_does_no_chip_work() {
     for _ in 0..3 {
         painted(&mut window, &ctx, wide, vec![]);
     }
-    assert_eq!(window.usage.timing.pending[crate::usage::report::CHIP], None);
+    assert_eq!(
+        window.usage.timing.pending[crate::usage::report::CHIP],
+        None
+    );
     assert_eq!(crate::chrome::strip(&window, wide).chip, None);
 }
