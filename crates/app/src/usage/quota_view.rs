@@ -545,8 +545,9 @@ mod tests {
                 .usage
                 .quota
                 .install_fixture(Arc::clone(&broker), Arc::clone(&wake));
-            let mut output =
-                ctx.run_ui(Default::default(), |ui| crate::usage::begin_pass(&mut window, ui));
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                crate::usage::begin_pass(&mut window, ui)
+            });
             output.textures_delta.clear();
             assert!(!window.usage.open);
             broker.stop();

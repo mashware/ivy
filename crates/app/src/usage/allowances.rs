@@ -551,8 +551,9 @@ mod chip_tests {
             window.usage.measuring = measuring;
             window.usage.allowances.enabled = true;
             window.usage.allowances.stub_reads = true;
-            let mut output =
-                ctx.run_ui(Default::default(), |ui| crate::usage::begin_pass(&mut window, ui));
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                crate::usage::begin_pass(&mut window, ui)
+            });
             output.textures_delta.clear();
             assert!(!window.usage.open);
             assert_eq!(
