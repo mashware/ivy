@@ -192,6 +192,33 @@ fn spans(agent: Agent, source: &Source) -> Vec<(String, i64)> {
     }
 }
 
+/// The agents the chip renders, in its order. The summary's tabs are exactly these, and it opens
+/// on the first.
+pub(super) fn shown(claude: &Source, codex: &Source) -> Vec<Agent> {
+    [(Agent::Claude, claude), (Agent::Codex, codex)]
+        .into_iter()
+        .filter(|(_, source)| source.enabled())
+        .map(|(agent, _)| agent)
+        .collect()
+}
+
+/// The share and tone of the window the chip shows first for `agent`, grey once the reading is
+/// stale; none without a figure.
+pub(super) fn headline(agent: Agent, source: &Source, now: i64) -> Option<(f64, Tone)> {
+    let reading = source.reading()?;
+    let (_, length) = spans(agent, source).into_iter().next()?;
+    let used = reading
+        .window(length)
+        .filter(|window| !window.expired)?
+        .used?;
+    let tone = if now - reading.observed_at > STALE_AFTER {
+        Tone::Stale
+    } else {
+        tone_of(used)
+    };
+    Some((used, tone))
+}
+
 /// A window's length as the chip labels it: «5h», «W», or its hours, days or minutes.
 fn length_label(seconds: i64) -> String {
     let minutes = seconds / 60;

@@ -162,24 +162,74 @@ fn a_press_outside_closes_the_summary_and_open_ai_usage_opens_the_view() {
     let summary = open_summary(&mut window, &ctx, area);
     assert!(!window.usage.blocks(&ctx));
     // «Open AI usage» is the summary's bottom-left button.
-    let button = egui::pos2(summary.left() + 40.0, summary.bottom() - 26.0);
+    let button = egui::pos2(summary.left() + 40.0, summary.bottom() - 40.0);
     painted(&mut window, &ctx, area, press(button));
     painted(&mut window, &ctx, area, release(button));
     assert!(window.usage.blocks(&ctx), "the AI usage view did not open");
     assert!(crate::usage::chip_summary(&window.usage).is_none());
 }
 
+/// Both agents with readings: Claude 38 % of its five hours, Codex 85 % of a weekly-only plan.
+fn both() -> (Source, Source) {
+    use super::{Allowance, FIVE_HOURS, Named, Reading, WEEK};
+    let now = chrono::Utc::now().timestamp();
+    let named = |name: &str, length, used| Named {
+        name: name.into(),
+        length,
+        window: Allowance {
+            used: Some(used),
+            resets_at: Some(now + 3600),
+            expired: false,
+        },
+    };
+    let claude = Reading {
+        observed_at: now,
+        windows: vec![
+            named("5-hour session", FIVE_HOURS, 38.0),
+            named("Weekly", WEEK, 6.0),
+        ],
+        note: None,
+    };
+    let codex = Reading {
+        observed_at: now,
+        windows: vec![named("Weekly", WEEK, 85.0)],
+        note: None,
+    };
+    (Source::Read(claude), Source::Read(codex))
+}
+
+/// The tab row's bottom, where the header starts when there are tabs.
+fn below_tabs(summary: egui::Rect) -> f32 {
+    summary.top() + 10.0 + 44.0
+}
+
+/// The header's agent name: the first agent name painted below .
+fn header(shapes: &[egui::epaint::ClippedShape], top: f32) -> Option<String> {
+    shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Text(text)
+            if text.pos.y > top && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
+        {
+            Some(text.galley.text().to_owned())
+        }
+        _ => None,
+    })
+}
+
+fn ready(window: &mut Window, ctx: &egui::Context, area: egui::Rect, sources: (Source, Source)) {
+    window.usage.chip.forced = Some(sources);
+    for _ in 0..2 {
+        painted(window, ctx, area, vec![]);
+    }
+}
+
 /// The summary as the design lays it out: both agents' tabs, a header with the agent and when it
 /// was read, each window with its figure and reset, and «Open AI usage» as a menu row — painted,
-/// in that order from the top. Before a reading it keeps the header and says why there is none.
+/// in that order from the top.
 #[test]
 fn the_summary_paints_tabs_header_windows_and_footer_in_order() {
     let (mut window, ctx) = integrated();
     let area = area(1400.0);
-    window.usage.chip.forced = Some(codex());
-    for _ in 0..2 {
-        painted(&mut window, &ctx, area, vec![]);
-    }
+    ready(&mut window, &ctx, area, both());
     let summary = open_summary(&mut window, &ctx, area);
     let shapes = painted(&mut window, &ctx, area, vec![]);
     let at = |wanted: &str| {
@@ -192,7 +242,7 @@ fn the_summary_paints_tabs_header_windows_and_footer_in_order() {
         "Claude Code",
         "Updated just now",
         "5-hour session",
-        "42% used",
+        "38% used",
         "Open AI usage",
     ];
     let positions: Vec<_> = order
@@ -205,17 +255,105 @@ fn the_summary_paints_tabs_header_windows_and_footer_in_order() {
         "{positions:?}"
     );
     assert!(at("Codex").is_some_and(|tab| (tab.y - positions[0].y).abs() < 1.0));
-    let reset = shapes.iter().any(|shape| {
-        matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with("Resets at "))
-    });
-    assert!(reset, "no reset line");
+}
+
+/// With both agents on the chip the summary opens on the first, Claude; a tab picked is kept
+/// while it stays open and forgotten once it closes.
+#[test]
+fn with_both_agents_it_opens_on_claude_and_forgets_a_picked_tab_once_closed() {
+    let (mut window, ctx) = integrated();
+    let area = area(1400.0);
+    ready(&mut window, &ctx, area, both());
+    let summary = open_summary(&mut window, &ctx, area);
+    let top = below_tabs(summary);
+    let shown = |window: &mut Window| header(&painted(window, &ctx, area, vec![]), top);
+    assert_eq!(shown(&mut window).as_deref(), Some("Claude Code"));
+    let codex_tab = egui::pos2(summary.right() - 60.0, summary.top() + 30.0);
+    click(&mut window, &ctx, area, codex_tab);
+    assert_eq!(shown(&mut window).as_deref(), Some("Codex"));
+    let chip = crate::chrome::strip(&window, area).chip.unwrap();
+    let chip = window.usage.chip.hugged(chip).center();
+    click(&mut window, &ctx, area, chip);
+    assert!(crate::usage::chip_summary(&window.usage).is_none());
+    open_summary(&mut window, &ctx, area);
+    assert_eq!(shown(&mut window).as_deref(), Some("Claude Code"));
+}
+
+/// Each tab's thin bar is the share of the window the chip shows for that agent, in the chip's
+/// tone: Claude's 5 hours at 38 % in its own colour, Codex's week at 85 % in amber.
+#[test]
+fn each_tabs_bar_is_the_chips_window_in_the_chips_tone() {
+    let (mut window, ctx) = integrated();
+    let area = area(1400.0);
+    ready(&mut window, &ctx, area, both());
+    let summary = open_summary(&mut window, &ctx, area);
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    let roles = crate::ui::style::roles(&ctx, &window.theme);
+    let claude = super::surface::dot(super::Agent::Claude, &window.theme);
+    let bars: Vec<_> = shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if (rect.rect.height() - 3.0).abs() < 0.01
+                    && rect.rect.top() < below_tabs(summary)
+                    && summary.contains_rect(rect.rect) =>
+            {
+                Some((rect.rect, rect.fill))
+            }
+            _ => None,
+        })
+        .collect();
+    let fill = |color: egui::Color32| {
+        bars.iter()
+            .find(|(_, fill)| *fill == color)
+            .unwrap_or_else(|| panic!("no bar in {color:?}: {bars:?}"))
+            .0
+    };
+    let track = |bar: egui::Rect| {
+        bars.iter()
+            .find(|(rect, fill)| *fill == roles.line && rect.left() == bar.left())
+            .unwrap()
+            .0
+    };
+    let (claude_bar, codex_bar) = (fill(claude), fill(roles.wait));
+    assert!(claude_bar.center().x < codex_bar.center().x);
+    let share = |bar: egui::Rect| bar.width() / track(bar).width();
+    assert!(
+        (share(claude_bar) - 0.38).abs() < 0.01,
+        "{}",
+        share(claude_bar)
+    );
+    assert!(
+        (share(codex_bar) - 0.85).abs() < 0.01,
+        "{}",
+        share(codex_bar)
+    );
+}
+
+/// Without a reporting launch Claude is not on the chip, so it gets no tab: the summary is
+/// Codex's alone, and a discreet line says where Claude's figures come from.
+#[test]
+fn without_a_reporting_launch_there_is_no_claude_tab() {
+    let (mut window, ctx) = integrated();
+    let area = area(1400.0);
+    ready(&mut window, &ctx, area, codex());
+    let summary = open_summary(&mut window, &ctx, area);
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    let texts = super::bar_tests::texts(&shapes);
+    assert!(!texts.iter().any(|text| text == "Claude Code"), "{texts:?}");
+    assert_eq!(header(&shapes, summary.top()).as_deref(), Some("Codex"));
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "Claude: start it with reporting from AI usage"),
+        "{texts:?}"
+    );
 
     // No reading yet: the header stays and the windows section says why.
     let waiting = Source::Waiting("Codex reads on · reading now…".into());
     window.usage.chip.forced = Some((Source::Off, waiting));
     painted(&mut window, &ctx, area, vec![]);
-    let shapes = painted(&mut window, &ctx, area, vec![]);
-    let texts = super::bar_tests::texts(&shapes);
+    let texts = super::bar_tests::texts(&painted(&mut window, &ctx, area, vec![]));
     for wanted in [
         "Codex",
         "Waiting for the first reading.",
@@ -229,166 +367,71 @@ fn the_summary_paints_tabs_header_windows_and_footer_in_order() {
     }
 }
 
-/// The summary opens on the chip's first agent — Codex when the chip shows only Codex — keeps a
-/// tab picked while it stays open, and forgets it once closed. Claude's tab, with no reporting
-/// launch, says where its figures come from rather than offering a toggle it does not have.
-#[test]
-fn the_summary_opens_on_the_chips_first_agent_and_forgets_a_picked_tab_once_closed() {
-    let (mut window, ctx) = integrated();
-    let area = area(1400.0);
-    window.usage.chip.forced = Some(codex());
-    for _ in 0..2 {
-        painted(&mut window, &ctx, area, vec![]);
-    }
-    // The header's name is the text below the tab row that names an agent.
-    let header = |window: &mut Window, summary: egui::Rect| {
-        let shapes = painted(window, &ctx, area, vec![]);
-        let below_tabs = summary.top() + 10.0 + 44.0;
-        shapes.iter().find_map(|shape| match &shape.shape {
-            egui::Shape::Text(text)
-                if text.pos.y > below_tabs
-                    && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
-            {
-                Some(text.galley.text().to_owned())
-            }
-            _ => None,
-        })
-    };
-    let summary = open_summary(&mut window, &ctx, area);
-    assert_eq!(header(&mut window, summary).as_deref(), Some("Codex"));
-
-    let claude_tab = egui::pos2(summary.left() + 60.0, summary.top() + 30.0);
-    click(&mut window, &ctx, area, claude_tab);
-    assert_eq!(header(&mut window, summary).as_deref(), Some("Claude Code"));
-    let texts = super::bar_tests::texts(&painted(&mut window, &ctx, area, vec![]));
-    assert!(
-        texts
-            .iter()
-            .any(|text| text == "Claude's allowance comes from a reporting launch."),
-        "{texts:?}"
-    );
-    assert!(!texts.iter().any(|text| text == "Allowance reads are off."));
-
-    let chip = crate::chrome::strip(&window, area).chip.unwrap();
-    let chip = window.usage.chip.hugged(chip).center();
-    click(&mut window, &ctx, area, chip);
-    assert!(crate::usage::chip_summary(&window.usage).is_none());
-    let summary = open_summary(&mut window, &ctx, area);
-    assert_eq!(header(&mut window, summary).as_deref(), Some("Codex"));
-}
-
-/// The owner's case through the window's own sources, not a forced reading: Codex reads enabled
-/// and failed, no Claude reporting. The chip shows only Codex, so the summary opens on Codex.
-/// Linux x86_64 only: elsewhere Codex reads are unsupported and there is no chip to click.
+/// The owner's window through its own sources rather than forced readings: a weekly-only Codex
+/// plan, a failed read, no Claude reporting. The summary shows Codex alone every time it opens,
+/// whichever way it was closed. Linux x86_64 only: elsewhere Codex reads are unsupported and
+/// there is no chip to click.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
-fn a_failed_codex_read_alone_opens_the_summary_on_codex() {
-    let (mut window, ctx) = integrated();
-    let area = area(1400.0);
-    window.usage.allowances.fail_for_test();
-    for _ in 0..2 {
-        painted(&mut window, &ctx, area, vec![]);
-    }
-    let summary = open_summary(&mut window, &ctx, area);
-    let shapes = painted(&mut window, &ctx, area, vec![]);
-    let below_tabs = summary.top() + 10.0 + 44.0;
-    let header = shapes.iter().find_map(|shape| match &shape.shape {
-        egui::Shape::Text(text)
-            if text.pos.y > below_tabs
-                && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
-        {
-            Some(text.galley.text().to_owned())
-        }
-        _ => None,
-    });
-    assert_eq!(header.as_deref(), Some("Codex"));
-    let texts = super::bar_tests::texts(&shapes);
-    assert!(
-        texts
-            .iter()
-            .any(|text| text == "Could not read Codex allowances."),
-        "{texts:?}"
-    );
-}
-
-/// The owner's case again (failed Codex read, no Claude reporting), through every way the summary
-/// closes: a tab picked before closing is forgotten, and it reopens on Codex each time.
-/// Linux x86_64 only: elsewhere Codex reads are unsupported and there is no chip to click.
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-#[test]
-fn every_way_of_closing_forgets_the_picked_tab_on_the_real_sources() {
-    fn header(
-        window: &mut Window,
-        ctx: &egui::Context,
-        area: egui::Rect,
-        summary: egui::Rect,
-    ) -> Option<String> {
-        let shapes = painted(window, ctx, area, vec![]);
-        let below_tabs = summary.top() + 10.0 + 44.0;
-        shapes.iter().find_map(|shape| match &shape.shape {
-            egui::Shape::Text(text)
-                if text.pos.y > below_tabs
-                    && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
-            {
-                Some(text.galley.text().to_owned())
+fn the_owners_window_shows_codex_alone_on_every_open() {
+    for failed in [false, true] {
+        for way in ["chip", "console", "board", "open AI usage"] {
+            let (mut window, ctx) = integrated();
+            let area = area(1400.0);
+            if failed {
+                window.usage.allowances.fail_for_test();
+            } else {
+                window.usage.allowances.weekly_for_test(85.0);
             }
-            _ => None,
-        })
-    }
-    for way in ["chip", "console", "board", "open AI usage"] {
-        let (mut window, ctx) = integrated();
-        let area = area(1400.0);
-        window.usage.allowances.fail_for_test();
-        for _ in 0..2 {
-            painted(&mut window, &ctx, area, vec![]);
-        }
-        let summary = open_summary(&mut window, &ctx, area);
-        assert_eq!(
-            header(&mut window, &ctx, area, summary).as_deref(),
-            Some("Codex"),
-            "{way}"
-        );
-        let claude_tab = egui::pos2(summary.left() + 60.0, summary.top() + 30.0);
-        click(&mut window, &ctx, area, claude_tab);
-        assert_eq!(
-            header(&mut window, &ctx, area, summary).as_deref(),
-            Some("Claude Code"),
-            "{way}"
-        );
-        match way {
-            "chip" => {
-                let chip = crate::chrome::strip(&window, area).chip.unwrap();
-                let chip = window.usage.chip.hugged(chip).center();
-                click(&mut window, &ctx, area, chip);
-            }
-            "console" => click(&mut window, &ctx, area, egui::pos2(100.0, 500.0)),
-            "board" => {
-                let row = crate::chrome::strip(&window, area).row;
-                let board = crate::chrome::strip::slots(row).board.center();
-                click(&mut window, &ctx, area, board);
-                click(&mut window, &ctx, area, board);
-            }
-            _ => {
-                let open = egui::pos2(summary.left() + 40.0, summary.bottom() - 26.0);
-                click(&mut window, &ctx, area, open);
-                let escape = egui::Event::Key {
-                    key: egui::Key::Escape,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                };
-                painted(&mut window, &ctx, area, vec![escape]);
+            for _ in 0..2 {
                 painted(&mut window, &ctx, area, vec![]);
             }
+            for round in 0..2 {
+                let summary = open_summary(&mut window, &ctx, area);
+                let shapes = painted(&mut window, &ctx, area, vec![]);
+                let texts = super::bar_tests::texts(&shapes);
+                assert_eq!(
+                    header(&shapes, summary.top()).as_deref(),
+                    Some("Codex"),
+                    "{way} {round}"
+                );
+                assert!(!texts.iter().any(|text| text == "Claude Code"), "{texts:?}");
+                let wanted = if failed {
+                    "Could not read Codex allowances."
+                } else {
+                    "85% used"
+                };
+                assert!(texts.iter().any(|text| text == wanted), "{texts:?}");
+                match way {
+                    "chip" => {
+                        let chip = crate::chrome::strip(&window, area).chip.unwrap();
+                        let chip = window.usage.chip.hugged(chip).center();
+                        click(&mut window, &ctx, area, chip);
+                    }
+                    "console" => click(&mut window, &ctx, area, egui::pos2(100.0, 500.0)),
+                    "board" => {
+                        let row = crate::chrome::strip(&window, area).row;
+                        let board = crate::chrome::strip::slots(row).board.center();
+                        click(&mut window, &ctx, area, board);
+                        click(&mut window, &ctx, area, board);
+                    }
+                    _ => {
+                        let open = egui::pos2(summary.left() + 40.0, summary.bottom() - 40.0);
+                        click(&mut window, &ctx, area, open);
+                        let escape = egui::Event::Key {
+                            key: egui::Key::Escape,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        };
+                        painted(&mut window, &ctx, area, vec![escape]);
+                        painted(&mut window, &ctx, area, vec![]);
+                    }
+                }
+                assert!(crate::usage::chip_summary(&window.usage).is_none(), "{way}");
+                assert!(!window.usage.blocks(&ctx), "{way}");
+            }
         }
-        assert!(crate::usage::chip_summary(&window.usage).is_none(), "{way}");
-        assert!(!window.usage.blocks(&ctx), "{way}");
-        let summary = open_summary(&mut window, &ctx, area);
-        assert_eq!(
-            header(&mut window, &ctx, area, summary).as_deref(),
-            Some("Codex"),
-            "{way}"
-        );
     }
 }

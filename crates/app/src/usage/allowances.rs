@@ -232,6 +232,32 @@ impl AllowanceView {
         self.last_finished = Some(Instant::now());
     }
 
+    /// Reads enabled and a reading just taken whose only window is a week: the owner's plan.
+    #[cfg(test)]
+    pub(super) fn weekly_for_test(&mut self, used: f64) {
+        let now = chrono::Utc::now().timestamp();
+        self.enabled = true;
+        self.last_finished = Some(Instant::now());
+        self.observation = Some(Observation {
+            account: Account {
+                session: "s".into(),
+                user: "u".into(),
+                workspace: "w".into(),
+                label: "label".into(),
+            },
+            observed_at: now,
+            buckets: vec![Bucket {
+                label: "codex".into(),
+                primary: Some(AllowanceWindow {
+                    used: Some(used),
+                    minutes: Some(10_080),
+                    resets_at: Some(now + 5 * 86_400),
+                }),
+                secondary: None,
+            }],
+        });
+    }
+
     pub(super) fn measured_windows(&self) -> usize {
         self.painted_fixture_windows.unwrap_or_default()
     }

@@ -6,7 +6,7 @@
 
 use super::summary::{Body, Panel, Row, describe};
 use super::surface::{dot, ink};
-use super::{Agent, FIVE_HOURS, STALE_AFTER, Source, Tone, tone_of};
+use super::{Agent, Source, Tone, headline, shown};
 use crate::{Window, theme::Roles};
 use eframe::egui::{self, Align2, Color32, FontId, Painter, Rect, Sense, Stroke, pos2, vec2};
 
@@ -24,6 +24,7 @@ const GAP: f32 = 6.0;
 const BETWEEN: f32 = 14.0;
 const FOOTER_ROW: f32 = 36.0;
 const FOOTER_PAD: f32 = 6.0;
+const FOOTER_NOTE: f32 = 18.0;
 
 fn proportional(size: f32) -> FontId {
     FontId::proportional(size)
@@ -75,27 +76,39 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
         state.tab = None;
         return false;
     };
+    // Only the agents the chip renders get a tab, and it opens on the first of them.
+    let agents = shown(&claude, &codex);
+    let Some(&first) = agents.first() else {
+        state.popover = false;
+        return false;
+    };
     let tab = state
         .tab
-        .unwrap_or(if claude.enabled() || !codex.enabled() {
-            Agent::Claude
-        } else {
-            Agent::Codex
-        });
+        .filter(|tab| agents.contains(tab))
+        .unwrap_or(first);
+    let tabbed = agents.len() > 1;
+    // Claude has no reads to turn on; when it is not on the chip the footer says where it comes
+    // from instead of a tab with nothing in it.
+    let claude_hint = matches!(claude, Source::Off);
     let now = chrono::Utc::now().timestamp();
     let source = match tab {
         Agent::Claude => &claude,
         Agent::Codex => &codex,
     };
     let panel = describe(tab, source, now, &chrono::Local);
-    let height = 2.0 * TABS_PAD
-        + TAB_HEIGHT
+    let tabs_height = if tabbed {
+        2.0 * TABS_PAD + TAB_HEIGHT
+    } else {
+        TABS_PAD
+    };
+    let height = tabs_height
         + header_height(&panel)
         + 1.0
         + body_height(&panel)
         + 1.0
         + 2.0 * FOOTER_PAD
-        + FOOTER_ROW;
+        + FOOTER_ROW
+        + if claude_hint { FOOTER_NOTE } else { 0.0 };
     let screen = ctx.content_rect();
     let left = (chip.right() - WIDTH).clamp(screen.left(), (screen.right() - WIDTH).max(0.0));
     let rect = Rect::from_min_size(
@@ -136,10 +149,11 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
     };
     let mut chosen = None;
     let tab_width = (rect.width() - 2.0 * TABS_PAD - GAP) / 2.0;
-    for (index, (agent, source)) in [(Agent::Claude, &claude), (Agent::Codex, &codex)]
+    let sources = [(Agent::Claude, &claude), (Agent::Codex, &codex)];
+    let tabs = sources
         .into_iter()
-        .enumerate()
-    {
+        .filter(|(agent, _)| tabbed && agents.contains(agent));
+    for (index, (agent, source)) in tabs.enumerate() {
         let target = Rect::from_min_size(
             pos2(
                 rect.left() + TABS_PAD + index as f32 * (tab_width + GAP),
@@ -148,7 +162,7 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
             vec2(tab_width, TAB_HEIGHT),
         );
         let response = ui.interact(target, id.with(agent.name()), Sense::CLICK);
-        let mini = mini_bar(source, now);
+        let mini = headline(agent, source, now);
         paint.tab(
             target,
             agent,
@@ -161,7 +175,7 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
             chosen = Some(agent);
         }
     }
-    let mut y = rect.top() + 2.0 * TABS_PAD + TAB_HEIGHT;
+    let mut y = rect.top() + tabs_height;
     y = paint.header(y, tab, &panel);
     paint.rule(y);
     y = paint.body(y + 1.0, tab, &panel, window);
@@ -172,6 +186,15 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
     );
     let response = ui.interact(row, id.with("open"), Sense::CLICK);
     paint.footer(row, response.hovered());
+    if claude_hint {
+        paint.text(
+            pos2(rect.left() + SIDE, row.bottom() + FOOTER_NOTE / 2.0),
+            Align2::LEFT_CENTER,
+            "Claude: start it with reporting from AI usage",
+            proportional(11.0),
+            roles.tx3,
+        );
+    }
     let open_usage = response.clicked();
     let state = &mut window.usage.chip;
     if let Some(agent) = chosen {
@@ -184,19 +207,6 @@ pub(crate) fn show(window: &mut Window, ctx: &egui::Context, chip: Option<Rect>)
         state.summary = Some(rect);
     }
     open_usage
-}
-
-/// A tab's small bar: its 5-hour use and tone, from a current reading only.
-fn mini_bar(source: &Source, now: i64) -> Option<(f64, Tone)> {
-    let reading = source.reading()?;
-    if now - reading.observed_at > STALE_AFTER {
-        return None;
-    }
-    let window = reading
-        .window(FIVE_HOURS)
-        .filter(|window| !window.expired)?;
-    let used = window.used?;
-    Some((used, tone_of(used)))
 }
 
 struct Paint<'a> {
@@ -274,8 +284,10 @@ impl Paint<'_> {
             pos2(target.left() + 10.0, target.bottom() - 8.0 - 3.0),
             vec2(target.width() - 20.0, 3.0),
         );
-        let (used, tone) = mini.map_or((None, Tone::Stale), |(used, tone)| (Some(used), tone));
-        self.bar(span, used, self.fill(tone, agent, window));
+        // The bar belongs to a figure: with none yet, there is no line to read.
+        if let Some((used, tone)) = mini {
+            self.bar(span, Some(used), self.fill(tone, agent, window));
+        }
     }
 
     fn header(&self, top: f32, agent: Agent, panel: &Panel) -> f32 {
