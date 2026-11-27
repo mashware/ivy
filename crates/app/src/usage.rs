@@ -13,12 +13,21 @@ mod codex_controls;
 mod paint;
 mod report;
 use paint::paint_summary;
-pub(crate) use chip::paint as paint_chip;
+pub(crate) use chip::{paint as paint_chip, show_summary};
 pub(crate) use report::configure_measurement;
 
 /// The title bar's slot for the allowance chip, in points; zero when there is no chip.
 pub(crate) fn chip_slot(view: &View) -> f32 {
     view.chip.slot()
+}
+
+/// The chip's summary while it is open, for the title bar's pointer claim.
+pub(crate) fn chip_summary(view: &View) -> Option<egui::Rect> {
+    view.chip.summary()
+}
+
+pub(crate) fn close_summary(view: &mut View) {
+    view.chip.close_summary();
 }
 use report::{Measurement, Timing};
 

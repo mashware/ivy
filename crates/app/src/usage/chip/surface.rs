@@ -42,6 +42,8 @@ pub(crate) struct Chip {
     measured_for: Option<(bool, bool, u32)>,
     pub(super) popover: bool,
     pub(super) tab: Option<Agent>,
+    /// Where the summary fell this frame, for the title bar's pointer claim.
+    pub(super) summary: Option<Rect>,
     /// Readings a test hands the chip in place of the window's sources.
     #[cfg(test)]
     pub(super) forced: Option<(Source, Source)>,
@@ -50,6 +52,15 @@ pub(crate) struct Chip {
 impl Chip {
     pub(crate) fn slot(&self) -> f32 {
         self.slot
+    }
+
+    pub(crate) fn summary(&self) -> Option<Rect> {
+        self.summary
+    }
+
+    pub(crate) fn close_summary(&mut self) {
+        self.popover = false;
+        self.summary = None;
     }
 
     /// Rebuilds the items from this frame's readings, and the slot only when the enabled set or
@@ -87,8 +98,16 @@ fn measure(ctx: &egui::Context, text: &str) -> f32 {
     })
 }
 
-/// Paints the chip on its slot; returns whether it was clicked.
-pub(crate) fn paint(window: &Window, ui: &egui::Ui, rect: Rect) -> bool {
+/// Paints the chip on its slot; a click opens the summary under it, or closes it.
+pub(crate) fn paint(window: &mut Window, ui: &egui::Ui, rect: Rect) {
+    if paint_chip(window, ui, rect) {
+        let state = &mut window.usage.chip;
+        state.popover = !state.popover;
+        ui.ctx().request_repaint();
+    }
+}
+
+fn paint_chip(window: &Window, ui: &egui::Ui, rect: Rect) -> bool {
     let state = &window.usage.chip;
     if state.items.is_empty() || !rect.is_positive() {
         return false;

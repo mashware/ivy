@@ -1060,6 +1060,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
         2,
     ),
     (
+        "src/usage/chip/popover.rs",
+        include_str!("../src/usage/chip/popover.rs"),
+        3,
+    ),
+    (
+        "src/usage/chip/summary_tests.rs",
+        include_str!("../src/usage/chip/summary_tests.rs"),
+        3,
+    ),
+    (
         "src/usage/report.rs",
         include_str!("../src/usage/report.rs"),
         1,

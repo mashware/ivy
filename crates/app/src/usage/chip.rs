@@ -8,7 +8,9 @@ use chrono::{DateTime, TimeZone};
 use eframe::egui;
 use std::fmt::Display;
 
+mod popover;
 mod surface;
+pub(crate) use popover::show as show_summary;
 pub(crate) use surface::{Chip, paint};
 
 /// Rebuilds the chip from this frame's readings. Kept out of measured runs, where its work would
@@ -254,15 +256,6 @@ where
     Some(time.format(format).to_string())
 }
 
-/// The chip's text as one line, items joined the way the bar shows them.
-pub(super) fn line(items: &[Item]) -> String {
-    items
-        .iter()
-        .map(|item| item.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
-
 /// The widest text each enabled item can take, so the slot is sized by what the chip may say and
 /// not by what it says now: a slot that followed the live value would move the tabs as it changed.
 pub(super) fn templates(claude: &Source, codex: &Source) -> Vec<Item> {
@@ -416,6 +409,15 @@ mod tests {
     use chrono::FixedOffset;
 
     const NOW: i64 = 1_800_000_000;
+
+    /// The chip's text as one line, items joined the way the bar paints them.
+    fn line(items: &[Item]) -> String {
+        items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>()
+            .join(SEPARATOR)
+    }
 
     fn zone() -> FixedOffset {
         FixedOffset::east_opt(0).unwrap()
@@ -598,3 +600,6 @@ mod tests {
 
 #[cfg(test)]
 mod bar_tests;
+
+#[cfg(test)]
+mod summary_tests;

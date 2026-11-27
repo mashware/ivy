@@ -361,6 +361,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     {
         action = None;
         window.chrome.menu = false;
+        crate::usage::close_summary(&mut window.usage);
     }
     if matches!(action, Some(Action::Menu)) {
         window.chrome.menu = !window.chrome.menu;
@@ -371,12 +372,27 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     let (menu_rect, menu_action) = menu::show(window, ui, row, area, compact);
     action = menu_action.or(action);
+    if crate::usage::show_summary(window, &ctx, geometry.chip) {
+        action = Some(Action::Usage);
+    }
+    let summary = crate::usage::chip_summary(&window.usage);
     let frame = ctx.cumulative_frame_nr();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
+    // The summary claims the pointer over its own rectangle only: it is not modal (#283).
     let over = pointer.is_some_and(|p| {
         (row.contains(p) && !tabs.is_some_and(|tabs| tabs.contains(p)))
             || (window.chrome.menu && menu_rect.contains(p))
+            || summary.is_some_and(|summary| summary.contains(p))
     });
+    if summary.is_some()
+        && ctx.input(|i| i.pointer.primary_pressed())
+        && !pointer.is_some_and(|p| {
+            summary.is_some_and(|summary| summary.contains(p))
+                || geometry.chip.is_some_and(|chip| chip.contains(p))
+        })
+    {
+        crate::usage::close_summary(&mut window.usage);
+    }
     let gesture = ctx.input(|i| {
         i.pointer.any_pressed() || i.pointer.any_released() || i.smooth_scroll_delta != Vec2::ZERO
     });
