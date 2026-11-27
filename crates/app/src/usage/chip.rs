@@ -18,17 +18,20 @@ pub(crate) use surface::{Chip, paint};
 /// land in the frame undeclared (D13).
 pub(super) fn begin_pass(view: &mut super::View, ctx: &egui::Context) {
     let now = chrono::Utc::now().timestamp();
-    #[cfg(test)]
-    if let Some((claude, codex)) = view.chip.forced.clone() {
-        view.chip.update(ctx, claude, codex, now);
-        return;
-    }
     #[cfg(target_os = "linux")]
     let claude = view.quota.chip_source();
     #[cfg(not(target_os = "linux"))]
     let claude = Source::Unsupported;
     let codex = view.allowances.chip_source(now);
+    #[cfg(test)]
+    let (claude, codex) = view.chip.forced.clone().unwrap_or((claude, codex));
     view.chip.update(ctx, claude, codex, now);
+    if view.chip.popover {
+        // The open summary counts minutes («Updated 3m ago», «in 2h 14m»): a window at rest
+        // repaints at the next minute so they do not freeze.
+        let wait = 60 - now.rem_euclid(60) as u64;
+        ctx.request_repaint_after(std::time::Duration::from_secs(wait));
+    }
 }
 
 /// The next second at which a reading's look changes with no new read: it turns stale, or one of its
@@ -104,7 +107,8 @@ pub(super) fn tone_of(used: f64) -> Tone {
 /// A used share as a figure. Floored, so it never shows a threshold the tone has not reached:
 /// 79.6 reads 79 %.
 pub(super) fn percent(used: f64) -> String {
-    format!("{}%", used.clamp(0.0, EXHAUSTED).floor())
+    // Adding zero turns a negative zero into zero, which would otherwise print «-0%».
+    format!("{}%", used.clamp(0.0, EXHAUSTED).floor() + 0.0)
 }
 
 /// One allowance window as its source reported it. `expired` is a window whose reset has passed:
@@ -121,6 +125,9 @@ pub(super) struct Allowance {
 pub(super) struct Named {
     pub(super) name: String,
     pub(super) length: i64,
+    /// A window of a limit other than the main allowance: listed in the popover, never the
+    /// chip's.
+    pub(super) extra: bool,
     pub(super) window: Allowance,
 }
 
@@ -128,7 +135,7 @@ pub(super) struct Named {
 pub(super) struct Reading {
     /// Seconds since the epoch.
     pub(super) observed_at: i64,
-    /// Every window the source reported, in its order.
+    /// Every window the source reported: the main allowance's first, then any other limit's.
     pub(super) windows: Vec<Named>,
     /// Why the latest read did not replace this reading, when it did not.
     pub(super) last_failure: Option<String>,
@@ -140,7 +147,7 @@ impl Reading {
     pub(super) fn window(&self, length: i64) -> Option<Allowance> {
         self.windows
             .iter()
-            .find(|named| named.length == length)
+            .find(|named| !named.extra && named.length == length)
             .map(|named| named.window)
     }
 }
@@ -192,6 +199,7 @@ fn spans(agent: Agent, source: &Source) -> Vec<(String, i64)> {
                 reading
                     .windows
                     .iter()
+                    .filter(|named| !named.extra)
                     .map(|named| named.length)
                     .filter(|length| *length > 0)
                     .min()
@@ -354,14 +362,15 @@ where
     }
 }
 
-/// A reset as a person reads it from the bar: the time when it falls within a day, and the weekday
-/// with it when it does not.
+/// A reset as a person reads it from the bar: the time when it falls on today's local date, and
+/// the weekday with it when it does not — a reset tomorrow at 09:00 is «Tue 09:00», not «09:00».
 pub(super) fn clock<Tz: TimeZone>(at: i64, now: i64, zone: &Tz) -> Option<String>
 where
     Tz::Offset: Display,
 {
     let time = DateTime::from_timestamp(at, 0)?.with_timezone(zone);
-    let format = if at - now < 24 * 60 * 60 {
+    let today = DateTime::from_timestamp(now, 0)?.with_timezone(zone);
+    let format = if time.date_naive() == today.date_naive() {
         "%H:%M"
     } else {
         "%a %H:%M"
@@ -378,21 +387,16 @@ pub(super) fn templates(claude: &Source, codex: &Source) -> Vec<Item> {
             continue;
         }
         let fixed = agent == Agent::Claude;
-        for (label, length) in spans(agent, &Source::Waiting(String::new())) {
-            // Claude's 5-hour window resets within the day, so its reset never carries a weekday;
-            // Codex's one item can be any of its windows, and its label is at most four
-            // characters (`length_label`).
-            let day = if fixed && length == FIVE_HOURS {
-                ""
-            } else {
-                "Wed "
-            };
+        for (label, _) in spans(agent, &Source::Waiting(String::new())) {
+            // Any reset can fall on another local date, even a 5-hour one past midnight, so each
+            // carries a weekday; Codex's one item can be any of its windows, and its label is at
+            // most four characters (`length_label`).
             let label = if fixed { label } else { "888d".to_owned() };
             out.push(Item {
                 agent,
                 label,
                 value: "100%".into(),
-                suffix: Some(format!("back {day}88:88")),
+                suffix: Some("back Wed 88:88".to_owned()),
                 tone: Tone::Red,
             });
         }

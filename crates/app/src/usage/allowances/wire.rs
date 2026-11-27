@@ -118,7 +118,9 @@ fn parse_window(value: &Value) -> Result<Option<AllowanceWindow>, Failure> {
         value.as_f64().filter(|used| (0.0..=100.0).contains(used))
     })?;
     let minutes = optional(&value["windowDurationMins"], |value| {
-        value.as_i64().filter(|minutes| *minutes > 0)
+        value
+            .as_i64()
+            .filter(|minutes| (1..=super::MAX_WINDOW / 60).contains(minutes))
     })?;
     let resets_at = optional(&value["resetsAt"], |value| {
         value.as_i64().filter(|seconds| {
@@ -242,6 +244,20 @@ mod tests {
             bind_observation(account("a"), account("a"), invalid, 1),
             Err(Failure::SameAccount(_))
         ));
+        // A window longer than a year and a day is refused as out of range, not multiplied.
+        for minutes in [i64::MAX, 366 * 24 * 60 + 1] {
+            let mut absurd = quotas();
+            absurd["rateLimitsByLimitId"]["codex"]["primary"]["windowDurationMins"] =
+                json!(minutes);
+            assert!(matches!(
+                bind_observation(account("a"), account("a"), absurd, 1),
+                Err(Failure::SameAccount(_))
+            ));
+        }
+        let mut year = quotas();
+        year["rateLimitsByLimitId"]["codex"]["primary"]["windowDurationMins"] =
+            json!(366 * 24 * 60);
+        assert!(bind_observation(account("a"), account("a"), year, 1).is_ok());
     }
 
     #[test]

@@ -445,6 +445,7 @@ fn chip_source(snapshots: &[Snapshot], disconnected: bool) -> super::chip::Sourc
         Some(Named {
             name: name.into(),
             length,
+            extra: false,
             window,
         })
     };

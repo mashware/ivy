@@ -28,6 +28,7 @@ fn named(name: &str, length: i64, window: Option<Allowance>) -> Option<Named> {
     window.map(|window| Named {
         name: name.into(),
         length,
+        extra: false,
         window,
     })
 }
@@ -376,6 +377,7 @@ fn codex_shows_its_five_hour_window_or_else_its_shortest_one() {
             .map(|length| Named {
                 name: "window".into(),
                 length,
+                extra: false,
                 window: window(5.0, NOW + 60).unwrap(),
             })
             .collect(),
@@ -387,4 +389,40 @@ fn codex_shows_its_five_hour_window_or_else_its_shortest_one() {
     );
     assert_eq!(length_label(12 * 3600), "12h");
     assert_eq!(length_label(30 * 86_400), "30d");
+}
+
+/// A reset on another local date names its day, even when it is hours away: at 23:00, a reset at
+/// 01:00 is tomorrow's.
+#[test]
+fn a_reset_past_midnight_names_its_day() {
+    let midnight = NOW - NOW % 86_400;
+    let late = midnight + 23 * 3600;
+    assert_eq!(clock(late + 1800, late, &zone()).as_deref(), Some("23:30"));
+    assert_eq!(clock(late + 2 * 3600, late, &zone()).as_deref(), Some("Sat 01:00"));
+}
+
+/// A share that comes as negative zero still reads «0%».
+#[test]
+fn negative_zero_reads_zero() {
+    assert_eq!(percent(-0.0), "0%");
+    assert_eq!(percent(0.4), "0%");
+}
+
+/// Pace is classified on the figure it prints: five points either way is on track, six is not —
+/// behind as well as ahead.
+#[test]
+fn pace_is_judged_on_the_figure_it_shows() {
+    // Half of the five hours gone: a share of 50 % is on track.
+    let pace = |used: f64| {
+        let source = read(window(used, NOW + FIVE_HOURS / 2), None);
+        let Body::Windows(rows) = describe(Agent::Codex, &source, NOW, &zone()).body else {
+            panic!("no windows");
+        };
+        rows[0].pace.clone().unwrap()
+    };
+    assert!(pace(55.4).starts_with("Pace: on track"), "{}", pace(55.4));
+    assert!(pace(44.6).starts_with("Pace: on track"), "{}", pace(44.6));
+    assert!(pace(55.6).starts_with("Pace: ahead (+6%)"), "{}", pace(55.6));
+    assert!(pace(44.4).starts_with("Pace: behind (−6%)"), "{}", pace(44.4));
+    assert!(pace(20.0).starts_with("Pace: behind (−30%)"), "{}", pace(20.0));
 }

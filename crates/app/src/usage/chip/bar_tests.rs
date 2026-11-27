@@ -55,6 +55,7 @@ pub(super) fn codex() -> (Source, Source) {
         windows: vec![Named {
             name: "5-hour session".into(),
             length: super::FIVE_HOURS,
+            extra: false,
             window: Allowance {
                 used: Some(42.0),
                 resets_at: Some(now + 3600),

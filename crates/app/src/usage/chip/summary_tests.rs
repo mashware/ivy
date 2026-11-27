@@ -176,6 +176,7 @@ fn both() -> (Source, Source) {
     let named = |name: &str, length, used| Named {
         name: name.into(),
         length,
+        extra: false,
         window: Allowance {
             used: Some(used),
             resets_at: Some(now + 3600),

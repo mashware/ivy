@@ -153,7 +153,8 @@ where
     };
     let reset = resets_at.and_then(|at| {
         let when = clock(at, now, zone)?;
-        let at_time = if at - now < 24 * 60 * 60 { "at " } else { "" };
+        // «at» reads with a bare time; a weekday already says when.
+        let at_time = if when.contains(' ') { "" } else { "at " };
         Some(format!(
             "Resets {at_time}{when} (in {})",
             duration(at - now)
@@ -178,13 +179,14 @@ fn pace(length: i64, used: f64, resets_at: i64, now: i64) -> Option<String> {
     let left = (resets_at - now).clamp(0, length);
     let gone = length - left;
     let elapsed = gone as f64 * 100.0 / length as f64;
-    let delta = used - elapsed;
+    // Classified on the figure it prints, so «on track» and «ahead (+5%)» never share one.
+    let delta = (used - elapsed).round();
     let mut text = if delta.abs() <= PACE_MARGIN {
         "Pace: on track".to_owned()
     } else if delta > 0.0 {
-        format!("Pace: ahead (+{}%)", delta.round())
+        format!("Pace: ahead (+{delta}%)")
     } else {
-        format!("Pace: behind (−{}%)", (-delta).round())
+        format!("Pace: behind (−{}%)", -delta)
     };
     if gone > 0 && used > 0.0 {
         let to_full = ((100.0 - used) * gone as f64 / used) as i64;

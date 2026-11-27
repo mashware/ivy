@@ -10,6 +10,9 @@ mod wire;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use wire::bind_observation;
 
+/// The longest window a reading may name: a year and a day, in seconds.
+const MAX_WINDOW: i64 = 366 * 24 * 60 * 60;
+
 const SUPPORTED_PLATFORM: bool = cfg!(all(target_os = "linux", target_arch = "x86_64"));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,7 +175,7 @@ impl AllowanceView {
     /// What the chip reads: the 5-hour window is the one of 300 minutes and the weekly one the one
     /// of 10 080, in the first bucket that reports each; Codex labels neither.
     pub(super) fn chip_source(&self, now: i64) -> super::chip::Source {
-        use super::chip::{Allowance, Named, Reading, Source};
+        use super::chip::Source;
         if !SUPPORTED_PLATFORM {
             return Source::Unsupported;
         }
@@ -187,41 +190,7 @@ impl AllowanceView {
                 (None, None) => Source::Waiting(self.next_read_hint()),
             };
         };
-        let several = observation.buckets.len() > 1;
-        let windows = observation.buckets.iter().flat_map(|bucket| {
-            [&bucket.primary, &bucket.secondary]
-                .into_iter()
-                .flatten()
-                .map(move |window| {
-                    let name = match window.minutes {
-                        Some(300) => "5-hour session".to_owned(),
-                        Some(10_080) => "Weekly".to_owned(),
-                        Some(minutes) => format!("{minutes}-minute window"),
-                        None => "Window".to_owned(),
-                    };
-                    Named {
-                        name: if several {
-                            format!("{} · {name}", bucket.label)
-                        } else {
-                            name
-                        },
-                        length: window.minutes.unwrap_or_default() * 60,
-                        window: Allowance {
-                            used: window.used,
-                            resets_at: window.resets_at,
-                            expired: window.resets_at.is_some_and(|reset| reset <= now),
-                        },
-                    }
-                })
-        });
-        Source::Read(Reading {
-            observed_at: observation.observed_at,
-            windows: windows.collect(),
-            last_failure: self
-                .failure
-                .as_ref()
-                .map(|failure| format!("Last read failed: {}", failure_text(failure))),
-        })
+        Source::Read(reading_of(observation, self.failure.as_ref(), now))
     }
 
     fn next_read_hint(&self) -> String {
@@ -426,8 +395,11 @@ impl AllowanceView {
             return;
         }
         if self.pending.is_some() {
-            ui.label("Checking Codex account and allowances…");
-            return;
+            // A background read every five minutes must not hide the reading it will replace.
+            ui.small("Checking Codex account and allowances…");
+            if self.observation.is_none() {
+                return;
+            }
         }
         if let Some(failure) = &self.failure {
             ui.label(match failure {
@@ -441,6 +413,70 @@ impl AllowanceView {
         if let Some(observation) = &self.observation {
             observation.show(ui);
         }
+    }
+}
+
+/// The chip's reading of an observation. The client's default bucket — the one named `codex`, or
+/// the only one — comes first and is the chip's; any other bucket (code review, a model's own
+/// limit) is listed after it, named, and marked so the chip never takes it for the main allowance.
+/// Buckets otherwise arrive in their ids' alphabetical order, which says nothing about which is
+/// main.
+fn reading_of(
+    observation: &Observation,
+    failure: Option<&Failure>,
+    now: i64,
+) -> super::chip::Reading {
+    use super::chip::{Allowance, Named, Reading};
+    let is_main = |bucket: &Bucket| bucket.label == "codex" || bucket.label.ends_with("(codex)");
+    let main = observation
+        .buckets
+        .iter()
+        .position(is_main)
+        .unwrap_or_default();
+    let ordered = observation.buckets.get(main).into_iter().map(|bucket| (bucket, false)).chain(
+        observation
+            .buckets
+            .iter()
+            .enumerate()
+            .filter(move |(index, _)| *index != main)
+            .map(|(_, bucket)| (bucket, true)),
+    );
+    let windows = ordered.flat_map(|(bucket, extra)| {
+        [&bucket.primary, &bucket.secondary]
+            .into_iter()
+            .flatten()
+            .map(move |window| {
+                let name = match window.minutes {
+                    Some(300) => "5-hour session".to_owned(),
+                    Some(10_080) => "Weekly".to_owned(),
+                    Some(minutes) => format!("{minutes}-minute window"),
+                    None => "Window".to_owned(),
+                };
+                Named {
+                    name: if extra {
+                        format!("{} · {name}", bucket.label)
+                    } else {
+                        name
+                    },
+                    // Server data: an absurd length is no length, never an overflow.
+                    length: window
+                        .minutes
+                        .and_then(|minutes| minutes.checked_mul(60))
+                        .filter(|seconds| *seconds <= MAX_WINDOW)
+                        .unwrap_or_default(),
+                    extra,
+                    window: Allowance {
+                        used: window.used,
+                        resets_at: window.resets_at,
+                        expired: window.resets_at.is_some_and(|reset| reset <= now),
+                    },
+                }
+            })
+    });
+    Reading {
+        observed_at: observation.observed_at,
+        windows: windows.collect(),
+        last_failure: failure.map(|failure| format!("Last read failed: {}", failure_text(failure))),
     }
 }
 
@@ -564,6 +600,83 @@ mod tests {
             view.last_finished, None,
             "a revoked read is not a finished one"
         );
+    }
+
+    /// Takes `reply` the way a finished read is taken: through `poll`.
+    fn finish_with(view: &mut AllowanceView, reply: Reply) {
+        let (sender, result) = mpsc::sync_channel(1);
+        sender.send(reply).unwrap();
+        view.pending = Some(Pending {
+            result,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        view.poll(Instant::now());
+    }
+
+    /// A transient failure keeps the last reading, with the failure as its note, to grey with
+    /// age; only evidence of another account drops it.
+    #[test]
+    fn only_identity_failures_drop_the_reading_shown() {
+        let mut view = AllowanceView {
+            enabled: true,
+            ..AllowanceView::default()
+        };
+        finish_with(&mut view, Ok(observation("a")));
+        for transient in [
+            Failure::Unavailable,
+            Failure::Exited,
+            Failure::Rpc {
+                method: "account/rateLimits/read",
+                code: -32603,
+            },
+            Failure::Refused("Codex rejected excludeResetCreditDetails."),
+        ] {
+            finish_with(&mut view, Err(transient));
+            let super::super::chip::Source::Read(reading) = view.chip_source(100) else {
+                panic!("the last reading is kept");
+            };
+            assert!(reading.last_failure.is_some_and(|note| note.starts_with("Last read failed")));
+        }
+        finish_with(
+            &mut view,
+            Err(Failure::Identity("Codex answered for another workspace.")),
+        );
+        assert!(view.observation.is_none());
+        assert_eq!(
+            view.chip_source(100),
+            super::super::chip::Source::Failed("Codex answered for another workspace.".into())
+        );
+        finish_with(&mut view, Ok(observation("a")));
+        finish_with(&mut view, Err(Failure::SameAccount(account("b"))));
+        assert!(view.observation.is_none(), "another account's reading is not kept");
+    }
+
+    /// A read in flight — every five minutes in the background — keeps the reading on screen in
+    /// AI usage, with a small note, instead of replacing it with «Checking…».
+    #[test]
+    fn a_background_read_keeps_the_reading_in_view() {
+        let (_sender, result) = mpsc::sync_channel(1);
+        let mut view = AllowanceView {
+            enabled: true,
+            ..AllowanceView::default()
+        };
+        view.install(Ok(observation("a")));
+        view.pending = Some(Pending {
+            result,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        let mut output = egui::Context::default().run_ui(Default::default(), |ui| view.show(ui));
+        output.textures_delta.clear();
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.iter().any(|text| text == "Same workspace"), "{labels:?}");
+        assert!(labels.iter().any(|text| text == "Checking Codex account and allowances…"));
     }
 
     #[test]
@@ -731,11 +844,13 @@ mod chip_tests {
             enabled: true,
             ..AllowanceView::default()
         };
+        // Buckets arrive in their ids' alphabetical order: «code_review» before «codex», with a
+        // shorter and fuller window that must not stand in for the main allowance.
         view.observation = observation(vec![
             Bucket {
-                label: "other".into(),
-                primary: window(1.0, 60, 500),
-                secondary: None,
+                label: "code_review".into(),
+                primary: window(99.0, 300, 450),
+                secondary: window(1.0, 60, 500),
             },
             Bucket {
                 label: "codex".into(),
@@ -763,9 +878,10 @@ mod chip_tests {
         assert_eq!(
             names,
             [
-                "other · 60-minute window",
-                "codex · Weekly",
-                "codex · 5-hour session"
+                "Weekly",
+                "5-hour session",
+                "code_review · 5-hour session",
+                "code_review · 60-minute window"
             ]
         );
         assert_eq!(
@@ -782,12 +898,11 @@ mod chip_tests {
 
     /// The states before a figure arrives are told apart: a read in flight, a read that failed —
     /// which once read «waiting» and hid why nothing came — and the next scheduled read; and a
-    /// failure after a good reading keeps it with a note.
+    /// failure after a good reading keeps it with a note. Linux x86_64 only: elsewhere every
+    /// source is «unsupported» and there is no read to wait for.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn a_failed_read_is_said_and_never_shown_as_waiting() {
-        if !SUPPORTED_PLATFORM {
-            return;
-        }
         let mut view = AllowanceView {
             enabled: true,
             ..AllowanceView::default()
@@ -821,5 +936,41 @@ mod chip_tests {
             reading.last_failure.as_deref(),
             Some("Last read failed: Codex returned no verified reading.")
         );
+    }
+}
+
+/// Server lengths are bounded: an absurd one is no length, never an overflow or a window that
+/// would stand for the chip.
+#[cfg(test)]
+mod length_tests {
+    use super::*;
+
+    #[test]
+    fn an_absurd_window_length_is_no_length() {
+        let observation = Observation {
+            account: Account {
+                session: "s".into(),
+                user: "u".into(),
+                workspace: "w".into(),
+                label: "label".into(),
+            },
+            observed_at: 1,
+            buckets: vec![Bucket {
+                label: "codex".into(),
+                primary: Some(AllowanceWindow {
+                    used: Some(5.0),
+                    minutes: Some(i64::MAX),
+                    resets_at: None,
+                }),
+                secondary: Some(AllowanceWindow {
+                    used: Some(5.0),
+                    minutes: Some(300),
+                    resets_at: None,
+                }),
+            }],
+        };
+        let reading = reading_of(&observation, None, 0);
+        assert_eq!(reading.windows[0].length, 0);
+        assert_eq!(reading.windows[1].length, 5 * 60 * 60);
     }
 }
