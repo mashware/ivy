@@ -5,7 +5,49 @@
 //! every platform, while the sources that fill it stay behind their own platform gates.
 
 use chrono::{DateTime, TimeZone};
+use eframe::egui;
 use std::fmt::Display;
+
+mod surface;
+pub(crate) use surface::{Chip, paint};
+
+/// Rebuilds the chip from this frame's readings. Kept out of measured runs, where its work would
+/// land in the frame undeclared (D13).
+pub(super) fn begin_pass(view: &mut super::View, ctx: &egui::Context) {
+    let now = chrono::Utc::now().timestamp();
+    #[cfg(test)]
+    if let Some((claude, codex)) = view.chip.forced {
+        view.chip.update(ctx, claude, codex, now);
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    let claude = view.quota.chip_source();
+    #[cfg(not(target_os = "linux"))]
+    let claude = Source::Unsupported;
+    let codex = view.allowances.chip_source(now);
+    view.chip.update(ctx, claude, codex, now);
+}
+
+/// The next second at which the chip's text changes with no new reading: a reading turning stale
+/// or a window reaching its reset.
+pub(super) fn next_change(sources: &[Source], now: i64) -> Option<i64> {
+    sources
+        .iter()
+        .filter_map(|source| match source {
+            Source::Read(reading) => Some(reading),
+            _ => None,
+        })
+        .flat_map(|reading| {
+            [
+                Some(reading.observed_at + STALE_AFTER + 1),
+                reading.five_hour.and_then(|window| window.resets_at),
+                reading.weekly.and_then(|window| window.resets_at),
+            ]
+        })
+        .flatten()
+        .filter(|at| *at > now)
+        .min()
+}
 
 /// After this long a reading is shown as stale instead of as current: an old percentage read as
 /// today's is the failure the chip exists to avoid (#283).
@@ -372,7 +414,6 @@ fn pace(span: Span, used: f64, resets_at: i64, now: i64) -> &'static str {
 mod tests {
     use super::*;
     use chrono::FixedOffset;
-    use eframe::egui;
 
     const NOW: i64 = 1_800_000_000;
 
@@ -554,3 +595,6 @@ mod tests {
         output.textures_delta.clear();
     }
 }
+
+#[cfg(test)]
+mod bar_tests;

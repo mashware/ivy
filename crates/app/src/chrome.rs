@@ -12,6 +12,7 @@ pub(crate) fn strip(window: &Window, area: Rect) -> strip::Strip {
         sizes.bar_height(),
         sizes.tab_height(),
         connection::compact_reserve,
+        crate::usage::chip_slot(&window.usage),
     )
 }
 
@@ -300,6 +301,9 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             }
         }
         action = tools::show(window, ui, &geometry, hover, fg).or(action);
+        if let Some(rect) = geometry.chip {
+            crate::usage::paint_chip(window, ui, rect);
+        }
         for x in slots.separators.into_iter().filter(|x| x.is_finite()) {
             ui.painter().line_segment(
                 [

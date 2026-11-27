@@ -13,7 +13,13 @@ mod codex_controls;
 mod paint;
 mod report;
 use paint::paint_summary;
+pub(crate) use chip::paint as paint_chip;
 pub(crate) use report::configure_measurement;
+
+/// The title bar's slot for the allowance chip, in points; zero when there is no chip.
+pub(crate) fn chip_slot(view: &View) -> f32 {
+    view.chip.slot()
+}
 use report::{Measurement, Timing};
 
 #[cfg(target_os = "linux")]
@@ -49,6 +55,7 @@ pub(crate) struct View {
     measured: Option<Measurement>,
     /// A measured run starts no background read: its process would be work nobody declared (D13).
     measuring: bool,
+    chip: chip::Chip,
     #[cfg(target_os = "linux")]
     quota: quota_view::QuotaView,
 }
@@ -452,6 +459,7 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
         view.allowances.tick(&ctx, Instant::now(), true);
         #[cfg(target_os = "linux")]
         view.quota.chip_frame(true);
+        chip::begin_pass(view, &ctx);
     }
     if !view.blocks(&ctx) {
         return;

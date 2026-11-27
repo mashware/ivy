@@ -723,6 +723,14 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/usage/chip.rs", include_str!("../src/usage/chip.rs")),
     (
+        "src/usage/chip/surface.rs",
+        include_str!("../src/usage/chip/surface.rs"),
+    ),
+    (
+        "src/usage/chip/bar_tests.rs",
+        include_str!("../src/usage/chip/bar_tests.rs"),
+    ),
+    (
         "src/usage/codex_controls.rs",
         include_str!("../src/usage/codex_controls.rs"),
     ),

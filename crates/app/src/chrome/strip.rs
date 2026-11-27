@@ -30,6 +30,8 @@ pub(super) const COMPACT_MENU: f32 = 40.0;
 /// sliver of it.
 pub(crate) const DRAG_MIN: f32 = 48.0;
 const COMPACT_DRAG_MIN: f32 = 16.0;
+/// The space between the allowance chip and the Board.
+pub(super) const CHIP_GAP: f32 = 6.0;
 
 /// Where the platform's own window buttons leave room on the left.
 pub(super) fn left_offset() -> f32 {
@@ -122,7 +124,15 @@ pub(crate) fn slots(row: Rect) -> Slots {
 /// Whether a bar `width` points wide is compact: a full bar there would leave its tab band without
 /// room for one readable tab and the add button, and a band of zero hides every tab.
 pub(crate) fn is_compact(width: f32) -> bool {
-    width - left_offset() - LEFT_GROUP - right_reserve() - DRAG_MIN < crate::tab_bar::MIN_BAND
+    !fits(width, 0.0)
+}
+
+/// Whether a full bar `width` points wide keeps a readable tab band after `extra` more points on
+/// its right. The chip is one such extra, and it gives way before the bar turns compact: the
+/// boundary is the bar's, so it does not move with what the chip shows (#283).
+fn fits(width: f32, extra: f32) -> bool {
+    width - left_offset() - LEFT_GROUP - right_reserve() - extra - DRAG_MIN
+        >= crate::tab_bar::MIN_BAND
 }
 
 /// The title bar's partition.
@@ -137,6 +147,9 @@ pub(crate) struct Strip {
     pub(crate) tabs: Rect,
     /// Where the right-hand buttons start.
     pub(crate) right_start: f32,
+    /// The allowance chip's slot, left of the Board; absent in a compact bar, with nothing
+    /// enabled, or where it would leave the tabs no readable band.
+    pub(crate) chip: Option<Rect>,
 }
 
 impl Strip {
@@ -147,12 +160,14 @@ impl Strip {
 }
 
 /// The partition of a title bar `bar_height` tall at the top of `area`, with tabs `tab_height`
-/// tall; `compact_reserve` says what a compact bar keeps on the right of its row.
+/// tall; `compact_reserve` says what a compact bar keeps on the right of its row, and `chip` how
+/// wide the allowance chip's slot is (zero for none).
 pub(crate) fn within(
     area: Rect,
     bar_height: f32,
     tab_height: f32,
     compact_reserve: impl FnOnce(Rect) -> f32,
+    chip: f32,
 ) -> Strip {
     let row = Rect::from_min_max(
         area.min,
@@ -160,11 +175,18 @@ pub(crate) fn within(
     );
     let compact = is_compact(row.width());
     let left_end = row.left() + left_offset() + if compact { 0.0 } else { LEFT_GROUP };
+    let chip = (!compact && chip > 0.0 && fits(row.width(), chip + CHIP_GAP)).then(|| {
+        let board = slots(row).board;
+        Rect::from_min_max(
+            egui::pos2(board.left() - CHIP_GAP - chip, board.top()),
+            egui::pos2(board.left() - CHIP_GAP, board.bottom()),
+        )
+    });
     let right_start = row.right()
         - if compact {
             compact_reserve(row)
         } else {
-            right_reserve()
+            right_reserve() + chip.map_or(0.0, |chip| chip.width() + CHIP_GAP)
         };
     let logo = (!compact).then(|| slots(row).logo);
     let top = (row.bottom() - tab_height).max(row.top());
@@ -180,6 +202,7 @@ pub(crate) fn within(
         logo,
         tabs,
         right_start,
+        chip,
     }
 }
 
@@ -190,7 +213,7 @@ mod tests {
     #[test]
     fn tabs_sit_on_the_bars_bottom_edge_between_the_logo_and_a_draggable_gap() {
         let area = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1400.0, 800.0));
-        let strip = within(area, 40.0, 34.0, |_| 40.0);
+        let strip = within(area, 40.0, 34.0, |_| 40.0, 0.0);
         assert_eq!(strip.row.height(), 40.0);
         assert_eq!(strip.tabs.height(), 34.0);
         assert_eq!(strip.tabs.bottom(), 40.0);
@@ -200,7 +223,7 @@ mod tests {
         assert_eq!(strip.right_start - strip.tabs.right(), DRAG_MIN);
         for width in [240.0, 120.0, 30.0, 0.0] {
             let area = Rect::from_min_size(egui::pos2(5.0, 7.0), egui::vec2(width, 800.0));
-            let strip = within(area, 40.0, 34.0, |_| 40.0);
+            let strip = within(area, 40.0, 34.0, |_| 40.0, 0.0);
             assert!(strip.compact());
             assert!(strip.tabs.width() >= 0.0, "{width}");
             assert!(strip.row.contains_rect(strip.tabs), "{width}");
@@ -223,6 +246,7 @@ mod tests {
             40.0,
             34.0,
             |_| 40.0,
+            0.0,
         );
         assert!(s.files.right() <= strip.tabs.left());
         assert!(strip.right_start <= s.board.left());
@@ -258,7 +282,7 @@ mod tests {
         for width in 300..=640 {
             let width = width as f32;
             let area = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 800.0));
-            let strip = within(area, 40.0, 34.0, |_| 74.0);
+            let strip = within(area, 40.0, 34.0, |_| 74.0, 0.0);
             let card = crate::tab_bar::title_card(strip.tabs, 0, 1);
             let (label, _, _) = crate::tab_bar::title_label_dots_summary(card, 1, false);
             assert!(label.width() >= 12.0, "{width}: {label:?}");
@@ -286,5 +310,47 @@ mod tests {
         };
         assert!(is_compact(boundary - 1.0), "{boundary}");
         assert!(!is_compact(boundary), "{boundary}");
+    }
+
+    /// AC1 and the slot (#283): with no chip the bar is the one it was; with one, the chip sits
+    /// left of the Board and takes its width from the tabs' side, only where the tabs keep a
+    /// readable band — so a chip never moves the wide/compact boundary, and where it would leave
+    /// the tabs too narrow the bar is exactly the bar without it.
+    #[test]
+    fn the_chip_takes_its_slot_from_the_tabs_and_never_moves_the_compact_boundary() {
+        let strip = |width: f32, chip: f32| {
+            let area = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0));
+            within(area, 40.0, 34.0, |_| 74.0, chip)
+        };
+        const CHIP: f32 = 240.0;
+        let mut shown = 0;
+        let mut given_way = 0;
+        for width in 300..=1400 {
+            let width = width as f32;
+            let without = strip(width, 0.0);
+            assert_eq!(without.chip, None, "{width}");
+            let with = strip(width, CHIP);
+            assert_eq!(with.compact(), without.compact(), "{width}");
+            match with.chip {
+                Some(chip) => {
+                    shown += 1;
+                    assert_eq!(chip.width(), CHIP);
+                    assert_eq!(chip.right() + CHIP_GAP, slots(with.row).board.left());
+                    assert_eq!(with.right_start, chip.left(), "{width}");
+                    assert_eq!(
+                        with.tabs.right(),
+                        without.tabs.right() - CHIP - CHIP_GAP,
+                        "{width}"
+                    );
+                    assert!(with.tabs.width() >= crate::tab_bar::MIN_BAND, "{width}");
+                    assert!(chip.left() >= with.left_end, "{width}");
+                }
+                None => {
+                    given_way += usize::from(!with.compact());
+                    assert_eq!(with, without, "{width}");
+                }
+            }
+        }
+        assert!(shown > 0 && given_way > 0, "{shown} {given_way}");
     }
 }
