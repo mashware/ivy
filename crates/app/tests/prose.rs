@@ -2199,6 +2199,14 @@ const DOCUMENTS: &[(&str, &str)] = &[
         include_str!("../../../docs/05-roadmap.md"),
     ),
     (
+        "docs/05-roadmap-historical.md",
+        include_str!("../../../docs/05-roadmap-historical.md"),
+    ),
+    (
+        "docs/gentle-workspace-study.md",
+        include_str!("../../../docs/gentle-workspace-study.md"),
+    ),
+    (
         "docs/06-references.md",
         include_str!("../../../docs/06-references.md"),
     ),
