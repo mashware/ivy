@@ -47,15 +47,18 @@ pub(crate) fn configure_measurement(window: &mut Window, ctx: &egui::Context, me
     request_comparison(&mut window.usage);
 }
 
-/// The report's names for the series, by index.
-const SERIES: [&str; 2] = ["Usage snapshot", "Usage paint"];
+/// The report's names for the series, by index. The chip's work — reading the sources, scheduling
+/// the Codex read, painting the chip and its summary — is a series of its own, so it is never
+/// published as the integrated chrome's cost or the framework's (#283).
+const SERIES: [&str; 3] = ["Usage snapshot", "Usage paint", "Usage chip"];
+pub(super) const CHIP: usize = 2;
 
 #[derive(Default)]
 pub(super) struct Timing {
-    pub(super) pending: [Option<Duration>; 2],
-    series: [crate::measure::Series; 2],
-    totals: [Duration; 2],
-    frames: [usize; 2],
+    pub(super) pending: [Option<Duration>; 3],
+    series: [crate::measure::Series; 3],
+    totals: [Duration; 3],
+    frames: [usize; 3],
 }
 
 impl Timing {

@@ -29,6 +29,12 @@ pub(crate) fn chip_summary(view: &View) -> Option<egui::Rect> {
 pub(crate) fn close_summary(view: &mut View) {
     view.chip.close_summary();
 }
+
+/// Declares what painting the chip and its summary cost, under the chip's own series; the caller
+/// adds the returned cost to the window's set-aside work and takes it out of its own.
+pub(crate) fn declare_chip(view: &mut View, cost: Duration) -> Duration {
+    view.timing.record(report::CHIP, cost)
+}
 use report::{Measurement, Timing};
 
 #[cfg(target_os = "linux")]
@@ -464,11 +470,13 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
         window.timed_separately += view.timing.record(0, started.elapsed());
     }
     if !view.measuring {
+        let started = Instant::now();
         // Every enabled agent is on the chip until its items can be chosen (#283, PR 3).
-        view.allowances.tick(&ctx, Instant::now(), true);
+        view.allowances.tick(&ctx, started, true);
         #[cfg(target_os = "linux")]
         view.quota.chip_frame(true);
         chip::begin_pass(view, &ctx);
+        window.timed_separately += view.timing.record(report::CHIP, started.elapsed());
     }
     if !view.blocks(&ctx) {
         return;

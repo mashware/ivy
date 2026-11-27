@@ -246,7 +246,7 @@ fn hidden_receipt_and_expiry_do_not_wake_the_view() {
 }
 
 #[test]
-fn received_quota_is_painted_and_measured_only_in_the_open_usage_view() {
+fn received_quota_is_painted_only_in_the_open_view_and_the_chip_declares_its_reading() {
     use eframe::egui;
 
     let wake = Wake::new(|| {});
@@ -289,16 +289,21 @@ fn received_quota_is_painted_and_measured_only_in_the_open_usage_view() {
     assert!(has_quota(&visible.shapes, "0.0% used"));
     assert!(has_quota(&visible.shapes, "account unverified"));
     let paint_cost = window.usage.timing.pending[1].unwrap();
+    let chip_cost = window.usage.timing.pending[super::super::report::CHIP].unwrap();
     assert!(paint_cost > Duration::ZERO);
-    assert_eq!(window.timed_separately - before, paint_cost);
+    assert_eq!(window.timed_separately - before, paint_cost + chip_cost);
     window.usage.close_frame();
 
+    // Closed, the view paints nothing; what the chip still reads is declared under its own series
+    // and nothing else is set aside (D132).
     window.usage.close(&ctx);
     let before = window.timed_separately;
     let mut hidden = ctx.run_ui(input(), |ui| crate::usage::begin_pass(&mut window, ui));
     hidden.textures_delta.clear();
     assert!(!has_quota(&hidden.shapes, "0.0% used"));
-    assert_eq!(window.timed_separately, before);
+    assert_eq!(window.usage.timing.pending[1], None);
+    let chip_cost = window.usage.timing.pending[super::super::report::CHIP].unwrap();
+    assert_eq!(window.timed_separately - before, chip_cost);
     window.usage.close_frame();
     let mut report = Vec::new();
     window.usage.publish(&mut report).unwrap();

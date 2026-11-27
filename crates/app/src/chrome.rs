@@ -269,6 +269,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         Stroke::new(1.0, roles.line),
     );
     let mut action = None;
+    // Declared under the chip's own series and taken out of the chrome's (D13, #283).
+    let mut chip_cost = Duration::ZERO;
     let compact = geometry.compact();
     if let Some(logo) = geometry.logo {
         branding::paint_logo(ui, logo);
@@ -302,7 +304,9 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         }
         action = tools::show(window, ui, &geometry, hover, fg).or(action);
         if let Some(rect) = geometry.chip {
+            let painting = Instant::now();
             crate::usage::paint_chip(window, ui, rect);
+            chip_cost += painting.elapsed();
         }
         for x in slots.separators.into_iter().filter(|x| x.is_finite()) {
             ui.painter().line_segment(
@@ -372,8 +376,12 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     let (menu_rect, menu_action) = menu::show(window, ui, row, area, compact);
     action = menu_action.or(action);
+    let summarizing = Instant::now();
     if crate::usage::show_summary(window, &ctx, geometry.chip) {
         action = Some(Action::Usage);
+    }
+    if geometry.chip.is_some() {
+        chip_cost += summarizing.elapsed();
     }
     let summary = crate::usage::chip_summary(&window.usage);
     let frame = ctx.cumulative_frame_nr();
@@ -435,7 +443,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         });
     }
     let elapsed = started.elapsed();
-    window.chrome.record_work(elapsed);
+    window.chrome.record_work(elapsed.saturating_sub(chip_cost));
+    if geometry.chip.is_some() {
+        window.timed_separately += crate::usage::declare_chip(&mut window.usage, chip_cost);
+    }
     if window.settings_editor.is_open()
         || window.pane_view.is_modal()
         || window.usage.blocks(&ctx)

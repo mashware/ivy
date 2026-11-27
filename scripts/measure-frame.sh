@@ -280,9 +280,13 @@ check_usage_report() {
     snapshots=$(sed -n 's/^Usage snapshot: frames=\([0-9]*\),.*/\1/p' "$REPORT")
     paint=$(sed -n 's/^Usage paint: frames=\([0-9]*\),.*/\1/p' "$REPORT")
     allowance_windows=$(sed -n 's/^allowance fixture windows: //p' "$REPORT")
-    case "$snapshots:$paint" in
-        *[!0-9:]*|:*|*:) invalidate "usage report lacks one count per usage series" ;;
+    chip=$(sed -n 's/^Usage chip: frames=\([0-9]*\),.*/\1/p' "$REPORT")
+    case "$snapshots:$paint:$chip" in
+        *[!0-9:]*|:*|*:|*::*) invalidate "usage report lacks one count per usage series" ;;
     esac
+    # The title bar's allowance chip never works in a measured run (#283): a non-zero count means
+    # a background read or a chip landed in frames nobody asked it to measure.
+    [ "$chip" = 0 ] || invalidate "the allowance chip worked in a measured run"
     if [ "${USAGE:-}" = open ]; then
         [ "$mode" = open ] && [ "$snapshots" -gt 0 ] && [ "$paint" -gt 0 ] ||
             invalidate "usage-open did not measure the visible view"

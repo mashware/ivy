@@ -109,3 +109,61 @@ fn a_reading_paints_the_chip_in_the_wide_bar_and_never_in_the_compact_one() {
     assert!(crate::chrome::strip(&window, compact).compact());
     assert!(!texts(&shapes).iter().any(|text| text == "5h 42%"));
 }
+
+/// AC9 (D13): the chip's work is declared under a series of its own — what it reads in
+/// `usage::begin_pass` and what it paints inside the title bar — and the chrome's own figure no
+/// longer holds the painting, so nothing is counted twice or published as the framework's.
+#[test]
+fn the_chip_declares_its_work_under_its_own_series_and_not_as_the_chromes() {
+    use crate::usage::report::CHIP;
+    let (mut window, ctx) = integrated();
+    window.usage.chip.forced = Some(codex());
+    let wide = area(1400.0);
+    for _ in 0..2 {
+        painted(&mut window, &ctx, wide, vec![]);
+    }
+    window.usage.timing = Default::default();
+    let metrics =
+        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    window.chrome.take_cost();
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(wide),
+            ..Default::default()
+        },
+        |ui| {
+            crate::usage::begin_pass(&mut window, ui);
+            let read = window.usage.timing.pending[CHIP].expect("the chip's reading is declared");
+            let set_aside = window.timed_separately;
+            let started = std::time::Instant::now();
+            crate::chrome::before_keys(&mut window, ui, &metrics);
+            let wall = started.elapsed();
+            let painted = window.usage.timing.pending[CHIP].unwrap() - read;
+            assert!(painted > std::time::Duration::ZERO, "the chip's paint is declared");
+            assert_eq!(window.timed_separately - set_aside, painted);
+            let chrome = window.chrome.take_cost();
+            assert!(chrome + painted <= wall, "{chrome:?} + {painted:?} > {wall:?}");
+        },
+    );
+    output.textures_delta.clear();
+    window.usage.close_frame();
+    let mut report = Vec::new();
+    window.usage.publish(&mut report).unwrap();
+    let report = String::from_utf8(report).unwrap();
+    assert!(report.contains("Usage chip: frames=1,"), "{report}");
+}
+
+/// A measured run reads nothing for the chip and paints no chip, so its series stays at zero —
+/// the number the measurement script requires of every batch.
+#[test]
+fn a_measured_run_does_no_chip_work() {
+    let (mut window, ctx) = integrated();
+    window.usage.measuring = true;
+    window.usage.chip.forced = Some(codex());
+    let wide = area(1400.0);
+    for _ in 0..3 {
+        painted(&mut window, &ctx, wide, vec![]);
+    }
+    assert_eq!(window.usage.timing.pending[crate::usage::report::CHIP], None);
+    assert_eq!(crate::chrome::strip(&window, wide).chip, None);
+}
