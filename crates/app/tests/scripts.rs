@@ -1093,6 +1093,27 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/usage/paint.rs",
         include_str!("../src/usage/paint.rs"),
     ),
+    ("app/src/usage/chip.rs", include_str!("../src/usage/chip.rs")),
+    (
+        "app/src/usage/chip/bar_tests.rs",
+        include_str!("../src/usage/chip/bar_tests.rs"),
+    ),
+    (
+        "app/src/usage/chip/popover.rs",
+        include_str!("../src/usage/chip/popover.rs"),
+    ),
+    (
+        "app/src/usage/chip/summary_tests.rs",
+        include_str!("../src/usage/chip/summary_tests.rs"),
+    ),
+    (
+        "app/src/usage/chip/surface.rs",
+        include_str!("../src/usage/chip/surface.rs"),
+    ),
+    (
+        "app/src/usage/report.rs",
+        include_str!("../src/usage/report.rs"),
+    ),
     (
         "app/src/restoration.rs",
         include_str!("../src/restoration.rs"),
