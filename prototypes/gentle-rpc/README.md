@@ -28,6 +28,6 @@ The observed selection request contains `type`, `id`, `method`, `title` and `opt
 
 An initial Ivy dialog can safely name the owning session. Showing a specific helper requires an explicit association from the runtime. A title or a nearby activity event cannot establish it when helpers overlap. The test notification is an observation inside the fixture. Production must not treat writing the reply to stdin as proof of continuation.
 
-## Remaining acceptance
+## Desktop acceptance
 
-Task-mode routing is verified at the process boundary with a scripted child command. The exact helper name requires an upstream correlation field. The native interaction still needs a desktop check while another pane has a diff open. This experiment is separate from Ivy startup and contains no production settings or UI changes. [Task #286](https://github.com/mashware/ivy/issues/286)
+Task-mode routing is verified at the process boundary with a scripted child command. The exact helper name requires an upstream correlation field. The Linux desktop check used **New Gentle task** in two projects. While project A showed the second hunk of its diff, choosing an option for B produced a receipt only in B; cancelling A then produced its own receipt. The visible diff row remained at the same pixel through both interactions. This experiment is separate from Ivy startup and contains no production settings or UI changes. [Task #286](https://github.com/mashware/ivy/issues/286)

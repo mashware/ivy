@@ -19,7 +19,7 @@ Gentle is an opt-in integration in Settings. With it disabled, Ivy skips discove
 
 | Phase | State | Depends on |
 |---|---|---|
-| Native question and reply | in progress | |
+| Native question and reply | done | |
 | Native Gentle session | pending | Native question and reply |
 | Cross-project review | pending | Native Gentle session |
 | Client and platform validation | pending | Cross-project review |
@@ -28,10 +28,12 @@ Gentle is an opt-in integration in Settings. With it disabled, Ivy skips discove
 
 [First runtime experiment (#286)](../prototypes/gentle-rpc/README.md)
 
-- [ ] Capture a real question, reply and continuation from the documented interactive RPC host. Record runtime version, request lifetime and available acknowledgements.
-- [ ] Exercise two sessions asking simultaneously. Submit from the inactive project, switch focus, cancel a question and disconnect during a reply. Keep uncertain delivery visible and suppress repeat submissions.
+- [x] Capture a real question, reply and continuation from the documented interactive RPC host. Record runtime version, request lifetime and available acknowledgements.
+- [x] Exercise two sessions asking simultaneously. Submit from the inactive project, switch focus, cancel a question and disconnect during a reply. Keep uncertain delivery visible and suppress repeat submissions.
 
 Done when: the intended helper continues once, the other remains waiting, and the reviewer retains the same file, hunk and position. Record any upstream limitation that prevents this result before scheduling dependent work.
+
+Verified on Linux with Gentle Shell 5.1.0 and Pi 1.6.1. Two independently delegated helpers asked identical questions. Replying to project B and cancelling project A produced separate child receipts while the same line of the second diff hunk stayed at the same pixel. Gentle identifies the owning session and dialog; displaying the helper name requires an upstream identity field. [Routing experiment](../prototypes/gentle-rpc/README.md)
 
 ## Native Gentle session
 
