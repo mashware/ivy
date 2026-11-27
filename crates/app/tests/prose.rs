@@ -392,6 +392,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/chrome/gentle.rs",
+        include_str!("../src/chrome/gentle.rs"),
+        0,
+    ),
+    (
         "src/chrome/menu.rs",
         include_str!("../src/chrome/menu.rs"),
         0,

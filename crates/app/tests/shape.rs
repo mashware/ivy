@@ -260,6 +260,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/project_view/tests.rs",
         include_str!("../src/project_view/tests.rs"),
     ),
+    (
+        "src/chrome/gentle.rs",
+        include_str!("../src/chrome/gentle.rs"),
+    ),
     ("src/chrome/menu.rs", include_str!("../src/chrome/menu.rs")),
     (
         "src/chrome/updates.rs",

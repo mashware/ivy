@@ -295,6 +295,7 @@ fn initial_window(
         keymap: keyboard::Keymap::default(),
         copy_enabled: true,
         ligatures: false,
+        gentle_enabled: false,
         ligature_measurement: None,
         blink: alarms::BlinkState::default(),
         font_size: DEFAULT_FONT_SIZE,
@@ -663,7 +664,6 @@ fn failed_window(
 ) -> term_core::Result<Window> {
     // D125: recovery here leaves the directory and saved-client retry paths their errors.
     let failure = error.downcast::<crate::launch::StartupFailure>()?;
-    crate::pty_output::say(&format!("console could not be started: {failure}"));
     let control = control::WindowActivity::default();
     let (process, output) = crate::launch::Process::failed(*failure);
     let pane = assemble_pane(ctx, 0, control.read_activity(), None, None, process, output);
@@ -677,6 +677,21 @@ fn failed_window(
         size,
         control,
     )
+}
+
+pub(crate) fn failed_pane(
+    ctx: &egui::Context,
+    name: usize,
+    reads: control::ReadActivity,
+    program: &str,
+    error: term_core::Error,
+) -> Pane {
+    let failure = match error.downcast::<crate::launch::StartupFailure>() {
+        Ok(failure) => *failure,
+        Err(error) => crate::launch::StartupFailure::new(program, error),
+    };
+    let (process, output) = crate::launch::Process::failed(failure);
+    assemble_pane(ctx, name, reads, None, None, process, output)
 }
 
 /// Which layout the environment variable asks for, if it asks for a valid one.

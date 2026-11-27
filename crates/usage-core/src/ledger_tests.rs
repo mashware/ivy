@@ -304,6 +304,53 @@ fn page_limit_failure_recovers_without_eviction() {
     assert_eq!(ledger.info().unwrap().published_epoch, 1);
 }
 
+// A real Claude history filled the 192 MiB store at 169 223 events (≈1.19 KB each, two
+// observations per event), a sixth of the event ceiling: the page ceiling must be sized from the
+// bytes an event really takes, never assumed. D127.
+#[test]
+fn page_ceiling_fits_the_event_ceiling_at_the_bytes_an_event_takes() {
+    const EVENTS: u32 = 20_000;
+    const FIELD_BYTES_PER_EVENT: u64 = 1_190;
+    let fixture = Fixture::new();
+    let path = fixture.path();
+    let mut ledger = Ledger::open_writer(&path).unwrap();
+    let source = [7; 32];
+    ledger.begin(source).unwrap();
+    ledger
+        .stage(&[observation(0, source, 0, Some(100), 20)])
+        .unwrap();
+    publish(&mut ledger, [1; 32]);
+    let before = pragma_number(&ledger.connection, "page_count").unwrap();
+
+    ledger.begin(source).unwrap();
+    for chunk in (1..=EVENTS).collect::<Vec<_>>().chunks(500) {
+        let batch: Vec<_> = chunk
+            .iter()
+            .flat_map(|&id| {
+                [
+                    observation(id, source, 2 * id, Some(100), 20),
+                    observation(id, source, 2 * id + 1, Some(100), 20),
+                ]
+            })
+            .collect();
+        ledger.stage(&batch).unwrap();
+    }
+    publish(&mut ledger, [2; 32]);
+    let after = pragma_number(&ledger.connection, "page_count").unwrap();
+
+    let measured = (after - before) * PAGE_SIZE / u64::from(EVENTS);
+    let per_event = measured.max(FIELD_BYTES_PER_EVENT);
+    assert!(
+        MAX_PAGES * PAGE_SIZE >= per_event * MAX_EVENTS as u64,
+        "{MAX_PAGES} pages hold {} events of {per_event} bytes, not {MAX_EVENTS}",
+        MAX_PAGES * PAGE_SIZE / per_event
+    );
+    assert_eq!(
+        pragma_number(&ledger.connection, "max_page_count").unwrap(),
+        MAX_PAGES
+    );
+}
+
 #[test]
 fn no_spill_delete_journal_stays_inside_its_original_page_envelope() {
     let fixture = Fixture::new();

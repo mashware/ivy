@@ -118,6 +118,7 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 
 mod branding;
 mod connection;
+mod gentle;
 mod menu;
 pub(crate) mod strip;
 mod tools;
@@ -133,6 +134,7 @@ enum Action {
     SplitRight,
     SplitDown,
     Search,
+    Gentle,
     Connect,
     Updates(bool),
     Menu,
@@ -441,6 +443,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                     | Action::Connect
                     | Action::Updates(_)
                     | Action::Search
+                    | Action::Gentle
             )
         );
     if board_handoff {
@@ -481,6 +484,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             }
         }
         Some(Action::Connect) => connection::open(window, &ctx, board_handoff),
+        Some(Action::Gentle) => gentle::open(window, &ctx),
         Some(Action::Updates(check)) => updates::open(window, &ctx, check, board_handoff),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
         Some(Action::Preferences) => {

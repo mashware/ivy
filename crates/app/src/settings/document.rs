@@ -48,6 +48,7 @@ fn canonical(key: &str) -> Option<String> {
     [
         "startup.restore",
         "board.arrangement",
+        "gentle.enabled",
         "agent.claude.enabled",
         "agent.codex.enabled",
         "agent.opencode.enabled",
@@ -74,6 +75,7 @@ impl Document {
         let mut keys: Vec<String> = [
             "startup.restore",
             "board.arrangement",
+            "gentle.enabled",
             "agent.claude.enabled",
             "agent.codex.enabled",
             "agent.opencode.enabled",
@@ -129,16 +131,18 @@ impl Document {
                 && let Some(key) = canonical(key)
                 && let Some(field) = fields.iter_mut().find(|f| f.key == key)
             {
-                let displayed =
-                    if matches!(key.as_str(), "theme" | "cursor.blink" | "font.ligatures")
-                        || (key.starts_with("key.") && value.eq_ignore_ascii_case("none"))
-                    {
-                        value.to_ascii_lowercase()
-                    } else if !points && is_font_size(&key) {
-                        logical_to_points(value.parse().expect("validated size")).to_string()
-                    } else {
-                        value.to_owned()
-                    };
+                let displayed = if matches!(
+                    key.as_str(),
+                    "theme" | "cursor.blink" | "font.ligatures" | "gentle.enabled"
+                ) || (key.starts_with("key.")
+                    && value.eq_ignore_ascii_case("none"))
+                {
+                    value.to_ascii_lowercase()
+                } else if !points && is_font_size(&key) {
+                    logical_to_points(value.parse().expect("validated size")).to_string()
+                } else {
+                    value.to_owned()
+                };
                 field.value = displayed.clone();
                 field.original = displayed;
             }
@@ -673,6 +677,38 @@ mod tests {
             assert!(doc.errors().iter().any(|(key, _)| key == "size"));
         }
     }
+    #[test]
+    fn gentle_opt_in_round_trips_and_defaults_off() {
+        let mut doc = Document::new("# keep\nfuture=yes\ngentle.enabled=ON\n".into());
+        assert_eq!(
+            doc.fields
+                .iter()
+                .find(|f| f.key == "gentle.enabled")
+                .unwrap()
+                .value,
+            "on"
+        );
+        assert!(
+            super::super::interpret(&doc.text())
+                .unwrap()
+                .0
+                .gentle_enabled
+        );
+        set(&mut doc, "gentle.enabled", "off");
+        let saved = doc.text();
+        assert!(saved.contains("# keep\nfuture=yes\n"));
+        assert!(!super::super::interpret(&saved).unwrap().0.gentle_enabled);
+        set(&mut doc, "gentle.enabled", "invalid");
+        assert!(doc.errors().iter().any(|(key, _)| key == "gentle.enabled"));
+        doc.defaults();
+        assert!(
+            !super::super::interpret(&doc.text())
+                .unwrap()
+                .0
+                .gentle_enabled
+        );
+    }
+
     #[test]
     fn agent_preferences_round_trip_without_losing_other_lines() {
         let source = "# keep me\nsize=18\nagent.codex.enabled=false\nunknown.future=value\n";

@@ -10,6 +10,7 @@ pub(crate) mod image;
 mod load;
 pub(crate) mod markdown;
 mod origin;
+pub(crate) use origin::console_directory;
 mod palette;
 mod review;
 mod selection_scroll;

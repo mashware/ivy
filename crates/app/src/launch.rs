@@ -32,6 +32,20 @@ impl std::error::Error for StartupFailure {
     }
 }
 
+impl StartupFailure {
+    fn report(&self) {
+        crate::pty_output::say(&format!("console could not be started: {self}"));
+    }
+
+    pub(crate) fn new(program: &str, error: term_core::Error) -> Self {
+        Self {
+            program: program.into(),
+            reason: error.to_string(),
+            source: error,
+        }
+    }
+}
+
 struct Ready {
     spawned: Spawned,
     startup: Vec<u8>,
@@ -143,6 +157,24 @@ impl Process {
     }
 }
 
+fn with_fallback(
+    program: &str,
+    args: &[&str],
+    fallback: bool,
+    spawn: impl Fn(&str, &[&str]) -> term_core::Result<Spawned>,
+) -> term_core::Result<Spawned> {
+    match spawn(program, args) {
+        Err(error) if fallback && program != crate::shell_integration::fallback_shell() => {
+            let shell = crate::shell_integration::fallback_shell();
+            crate::pty_output::say(&format!(
+                "'{program}' could not be launched ({error}); opening {shell}"
+            ));
+            spawn(shell, &[])
+        }
+        result => result,
+    }
+}
+
 pub(crate) struct Request<'a> {
     pub program: &'a str,
     pub args: &'a [&'a str],
@@ -206,32 +238,30 @@ impl Process {
                     .and_then(|(_, value)| value.as_ref())
                     .map(|v| v.to_string_lossy())
                     .unwrap_or_else(|| "console".into());
-                let spawn = |program, args: &[&str]| match scope_launcher.as_deref() {
-                    Some(launcher) => Pty::spawn_with_launcher_in(
-                        launcher,
-                        &identity,
-                        program,
-                        args,
-                        size,
-                        &borrowed,
-                        directory.as_deref(),
-                    ),
-                    None => {
-                        Pty::spawn_with_env_in(program, args, size, &borrowed, directory.as_deref())
+                let spawn = |program: &str, args: &[&str]| {
+                    match scope_launcher.as_deref() {
+                        Some(launcher) => Pty::spawn_with_launcher_in(
+                            launcher,
+                            &identity,
+                            program,
+                            args,
+                            size,
+                            &borrowed,
+                            directory.as_deref(),
+                        ),
+                        None => Pty::spawn_with_env_in(
+                            program,
+                            args,
+                            size,
+                            &borrowed,
+                            directory.as_deref(),
+                        ),
                     }
+                    .map_err(|error| -> term_core::Error {
+                        Box::new(StartupFailure::new(program, error))
+                    })
                 };
-                let result = match spawn(&program, &args) {
-                    Err(error)
-                        if fallback && program != crate::shell_integration::fallback_shell() =>
-                    {
-                        let fallback = crate::shell_integration::fallback_shell();
-                        crate::pty_output::say(&format!(
-                            "'{program}' could not be launched ({error}); opening {fallback}"
-                        ));
-                        spawn(fallback, &[])
-                    }
-                    result => result,
-                };
+                let result = with_fallback(&program, &args, fallback, spawn);
                 if let Some(startup) = quota {
                     match &result {
                         Ok((pty, _)) => startup.bind(pty),
@@ -258,24 +288,12 @@ impl Process {
                     })
                 })
         };
-        let (pty, output) = match spawn(request.program, request.args) {
-            Err(error)
-                if request.fallback
-                    && request.program != crate::shell_integration::fallback_shell() =>
-            {
-                let fallback = crate::shell_integration::fallback_shell();
-                crate::pty_output::say(&format!(
-                    "'{}' could not be launched ({error}); opening {fallback}",
-                    request.program,
-                ));
-                spawn(fallback, &[])?
-            }
-            result => result?,
-        };
+        let (pty, output) = with_fallback(request.program, request.args, request.fallback, spawn)?;
         Ok((pty.into(), output))
     }
 
     pub(crate) fn failed(error: StartupFailure) -> (Self, Receiver<Vec<u8>>) {
+        error.report();
         let (sender, output) = std::sync::mpsc::channel();
         drop(sender);
         let process = Self {
@@ -428,7 +446,14 @@ impl Process {
                 Some((output, startup, pending.reads))
             }
             Err(error) => {
-                self.failure = Some(error.to_string());
+                match error.downcast::<StartupFailure>() {
+                    Ok(failure) => {
+                        failure.report();
+                        self.failure = Some(failure.to_string());
+                        self.startup_failure = Some(*failure);
+                    }
+                    Err(error) => self.failure = Some(error.to_string()),
+                }
                 self.input.clear();
                 None
             }

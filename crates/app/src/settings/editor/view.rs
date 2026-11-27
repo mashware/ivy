@@ -9,7 +9,7 @@ mod footer;
 mod palette;
 pub(super) mod typography;
 
-const SECTIONS: [&str; 4] = ["Appearance", "Cursor", "Shortcuts", "Startup"];
+const SECTIONS: [&str; 5] = ["Appearance", "Cursor", "Shortcuts", "Startup", "Gentle"];
 
 pub(super) fn show(
     editor: &mut Editor,
@@ -279,13 +279,14 @@ fn main_column(
             .max_rect(heading),
     );
     head_ui.set_clip_rect(heading.intersect(ui.clip_rect()));
-    head_ui.heading(SECTIONS[editor.section.min(3)]);
+    head_ui.heading(SECTIONS[editor.section.min(4)]);
     head_ui.label(
         egui::RichText::new(match editor.section {
             0 => "Your theme, colors and type.",
             1 => "Keep your place in the terminal.",
             2 => "Make familiar actions your own.",
-            _ => "Choose what opens next time.",
+            3 => "Choose what opens next time.",
+            _ => "Adds New Gentle session to the application menu.",
         })
         .size(14.0)
         .color(ui.visuals().weak_text_color()),
@@ -313,7 +314,8 @@ fn main_column(
                         0 => appearance::show(editor, ui, discoverer, errors),
                         1 => cursor(editor, ui),
                         2 => shortcuts(editor, ui, errors),
-                        _ => startup(editor, ui),
+                        3 => startup(editor, ui),
+                        _ => gentle(editor, ui),
                     }
                 });
             });
@@ -420,6 +422,21 @@ fn cursor(editor: &mut Editor, ui: &mut egui::Ui) {
     }
     ui.add_space(10.0);
     ui.weak("Blinking still stops after 15 seconds without typing and only runs in the focused console and window.");
+}
+
+fn gentle(editor: &mut Editor, ui: &mut egui::Ui) {
+    let field = editor
+        .draft
+        .as_mut()
+        .unwrap()
+        .fields
+        .iter_mut()
+        .find(|field| field.key == "gentle.enabled")
+        .expect("Gentle setting exists");
+    let mut enabled = matches!(field.value.as_str(), "on" | "true");
+    if ui.checkbox(&mut enabled, "Enable Gentle").changed() {
+        field.value = if enabled { "on" } else { "off" }.into();
+    }
 }
 
 fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
