@@ -72,12 +72,20 @@ pub(crate) fn shutdown() {
     for worker in &workers {
         let _ = worker.stop.send(());
     }
-    for worker in workers {
-        // A PATH scan may wait on a remote mount. Claim a pre-launch worker before
-        // abandoning that scan; a worker that already owns a child must retire it.
-        if worker.launch_claimed.swap(true, Ordering::AcqRel) {
-            let _ = worker.handle.join();
+    // Abandon a slow pre-launch lookup after reserving its slot, so it cannot start a child.
+    let active: Vec<_> = workers
+        .into_iter()
+        .filter(|w| w.launch_claimed.swap(true, Ordering::AcqRel))
+        .collect();
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while active.iter().any(|w| !w.handle.is_finished()) {
+        if Instant::now() >= deadline {
+            crate::pty_output::say(
+                "Gentle task cleanup exceeded its deadline. A worker may still be retiring its process.",
+            );
+            break;
         }
+        thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

@@ -84,16 +84,22 @@ pub(super) fn spawn(command: &mut Command) -> io::Result<(Child, OwnedHandle)> {
         resume(&child)
     };
     if let Err(error) = result {
-        let _ = child.kill();
-        let _ = child.wait();
+        if let Err(cleanup) = super::stop_and_reap(&mut child) {
+            crate::pty_output::say(&format!(
+                "Gentle startup failed and the suspended process could not be retired: {cleanup}"
+            ));
+        }
         return Err(error);
     }
     Ok((child, job))
 }
 
-pub(super) fn terminate(job: &OwnedHandle) {
+pub(super) fn terminate(job: &OwnedHandle) -> io::Result<()> {
     // SAFETY: the caller owns the job; closing its last handle is a second termination path.
-    unsafe { TerminateJobObject(job.as_raw_handle(), 1) };
+    if unsafe { TerminateJobObject(job.as_raw_handle(), 1) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -138,6 +144,17 @@ mod tests {
         thread::sleep(Duration::from_secs(120));
     }
 
+    fn exit_status(child: &mut Child) -> std::process::ExitStatus {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "Windows child did not exit");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn stopping_a_job_retires_children_with_a_live_or_exited_launcher() {
         for role in ["stay", "exit"] {
@@ -164,16 +181,16 @@ mod tests {
             let descendant = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) }).unwrap();
             let wait = |ms| unsafe { WaitForSingleObject(descendant.as_raw_handle(), ms) };
             if role == "exit" {
-                assert!(launcher.wait().unwrap().success());
+                assert!(exit_status(&mut launcher).success());
                 assert_eq!(wait(0), WAIT_TIMEOUT);
                 drop(job);
             } else {
                 assert!(launcher.try_wait().unwrap().is_none());
                 assert_eq!(wait(0), WAIT_TIMEOUT);
-                terminate(&job);
+                terminate(&job).unwrap();
             }
             assert_eq!(wait(5000), WAIT_OBJECT_0);
-            launcher.wait().unwrap();
+            exit_status(&mut launcher);
         }
     }
 }

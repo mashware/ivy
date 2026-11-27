@@ -226,20 +226,57 @@ impl Drop for Owned {
             // The official launcher forwards termination to Pi. Sending it directly to both
             // would deliver two signals and force Pi to skip graceful shutdown.
             // SAFETY: the unreaped PID belongs to our launcher.
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
+            let result = unsafe { libc::kill(pid, libc::SIGTERM) };
+            report_signal_error(result);
             // A launcher can exit before the client or its pipes. Keep its PID reserved
             // through the grace period, then reach any surviving group members.
             thread::sleep(Duration::from_millis(750));
             // SAFETY: this child has not been reaped, so its process group ID cannot be recycled.
-            unsafe {
-                libc::kill(-pid, libc::SIGKILL);
-            }
+            let result = unsafe { libc::kill(-pid, libc::SIGKILL) };
+            report_signal_error(result);
         }
         #[cfg(windows)]
-        windows::terminate(&self.job);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Err(error) = windows::terminate(&self.job) {
+            crate::pty_output::say(&format!("Could not terminate the Gentle task job: {error}"));
+        }
+        if let Err(error) = stop_and_reap(&mut self.child) {
+            crate::pty_output::say(&format!(
+                "Gentle task cleanup could not confirm exit: {error}"
+            ));
+        }
+    }
+}
+
+#[cfg(unix)]
+fn report_signal_error(result: libc::c_int) {
+    if result == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            crate::pty_output::say(&format!(
+                "Could not signal the Gentle task process: {error}"
+            ));
+        }
+    }
+}
+
+fn stop_and_reap(child: &mut Child) -> std::io::Result<()> {
+    if child.try_wait()?.is_some() {
+        return Ok(());
+    }
+    let kill = child.kill();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(kill.err().unwrap_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the client did not exit before its retirement deadline",
+                )
+            }));
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
