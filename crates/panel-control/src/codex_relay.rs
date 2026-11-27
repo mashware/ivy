@@ -1828,7 +1828,10 @@ mod tests {
 
     #[test]
     fn exit_cancels_epoch_without_waiting_for_a_held_route() {
-        let home = std::env::temp_dir().join(format!("ivy-cancel-exit-{}", nonce().unwrap()));
+        // A cancel record for a 64-hex epoch is a 135-character name, and Windows refuses a path
+        // over 260 without the verbatim prefix (ERROR_PATH_NOT_FOUND under the runner's temp
+        // directory), so this home keeps a short name.
+        let home = std::env::temp_dir().join(format!("ivy-cancel-{}", &nonce().unwrap()[..16]));
         std::fs::create_dir(&home).unwrap();
         let registry = Registry::for_home(&home).unwrap();
         let route = registry.pending().unwrap();
