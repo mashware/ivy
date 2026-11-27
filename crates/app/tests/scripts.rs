@@ -848,6 +848,14 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),
+    (
+        "app/src/console_input/navigation.rs",
+        include_str!("../src/console_input/navigation.rs"),
+    ),
+    (
+        "app/src/console_input/navigation/interaction_tests.rs",
+        include_str!("../src/console_input/navigation/interaction_tests.rs"),
+    ),
     ("app/src/board.rs", include_str!("../src/board.rs")),
     (
         "app/src/board/input.rs",
@@ -864,6 +872,14 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/board/view.rs",
         include_str!("../src/board/view.rs"),
+    ),
+    (
+        "app/src/board/view/hint.rs",
+        include_str!("../src/board/view/hint.rs"),
+    ),
+    (
+        "app/src/board/view/state.rs",
+        include_str!("../src/board/view/state.rs"),
     ),
     (
         "app/src/board/probe.rs",
@@ -1089,6 +1105,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/settings/store.rs",
         include_str!("../src/settings/store.rs"),
+    ),
+    (
+        "app/src/settings/window.rs",
+        include_str!("../src/settings/window.rs"),
     ),
     ("app/src/lib.rs", include_str!("../src/lib.rs")),
     (

@@ -12667,7 +12667,20 @@ Direct account access is unnecessary for local history.
 
 **Discarded.** Automatic executable discovery at startup would turn an installed command into an implicit preference. An always-visible empty task section would reserve workspace space before a producer had anything to publish. Making Ivy's own authentication a prerequisite would break D4.
 
-## D132 — Start a native Gentle task explicitly and keep review replies with its session
+## D132 — Keyboard focus follows visible neighbors and Board owns its directions
+
+Directional shortcuts move focus within the active tab. At a split with several neighbors,
+prefer the nearest facing edge, then the widest shared span and the nearest center. A maximized
+console keeps the keyboard until restored. Maximizing and restoring use the same shortcut and
+the same view as the header control.
+
+Board directions have independent bindings. Plain arrows can navigate cards while a shell or
+editor still receives its own arrows. The existing previous-tab and next-tab bindings keep
+their meaning. Discarded a shared directional binding because it would force a user who wants
+plain arrows on Board to change the way they type in a terminal. Cycling panes in tree order
+would make the same gesture jump in different visual directions after a split.
+
+## D133 — Start a native Gentle task explicitly and keep review replies with its session
 
 **Decision.** Offer an initial prompt through **New Gentle task** when the integration is enabled. Keep **New Gentle session** for interactive console use. The task runs in the selected project's directory in its own Gentle process. Use that process and the exact dialog ID to answer or cancel. A pending question may announce itself during another project's review. Opening it is an explicit action. Preserve the file, hunk and reading position throughout.
 

@@ -1,4 +1,12 @@
 //! A native, scrollable kanban; each painted card retains the console's stable identity.
+mod hint;
+mod state;
+
+#[cfg(test)]
+pub(crate) use hint::HINT;
+use hint::{HINT_HEIGHT, paint_hint};
+pub(super) use state::ViewState;
+
 use super::{
     cards,
     layout::{Geometry, Slot, reveal_offset},
@@ -9,59 +17,6 @@ use crate::{Window, agent_signals::View};
 use eframe::egui::{self, Rect, Vec2};
 use std::collections::HashMap;
 use std::time::{Instant, SystemTime};
-
-#[derive(Default)]
-pub(super) struct ViewState {
-    pub(super) milestones: super::milestones::state::Reader,
-    pub(super) cards: std::collections::HashMap<usize, cards::Reader>,
-    pub(super) child_hits: Vec<(Rect, cards::Command)>,
-    pub(super) child_pressed: Option<(Rect, cards::Command)>,
-    pub(super) link_to_open: Option<String>,
-    pub(super) document_to_open: Option<(usize, std::path::PathBuf)>,
-    pub(super) painted: Vec<(usize, Rect)>,
-    pub(super) pressed: Option<(usize, Rect)>,
-}
-
-impl ViewState {
-    pub(super) fn apply_card_command(
-        &mut self,
-        command: &cards::Command,
-        timing: &mut crate::measure::Board,
-    ) {
-        let pane = match command {
-            cards::Command::Body(pane, _)
-            | cards::Command::Expand(pane)
-            | cards::Command::Compact(pane) => *pane,
-            cards::Command::Bar(_) => return,
-            cards::Command::Source(pane, path) => {
-                self.document_to_open = Some((*pane, path.clone()));
-                return;
-            }
-            cards::Command::Milestone(action) => {
-                self.milestones.apply(action);
-                return;
-            }
-        };
-        if !self.cards.contains_key(&pane) {
-            return;
-        }
-        match command {
-            cards::Command::Body(_, crate::panel::body::Action::Link(target)) => {
-                self.link_to_open = Some(target.clone())
-            }
-            cards::Command::Body(_, crate::panel::body::Action::Fold(..)) => {
-                self.cards.get_mut(&pane).unwrap().apply(command);
-                timing.folded();
-            }
-            cards::Command::Expand(_) => {
-                self.cards.get_mut(&pane).unwrap().apply(command);
-                timing.expanded();
-            }
-            cards::Command::Compact(_) => self.cards.get_mut(&pane).unwrap().apply(command),
-            cards::Command::Bar(_) | cards::Command::Milestone(_) | cards::Command::Source(..) => {}
-        }
-    }
-}
 
 fn column(entry: &Entry, signals: &HashMap<usize, View>, now: SystemTime) -> Column {
     observation::classify(
@@ -377,7 +332,12 @@ fn paint_contents(
                 .push((*rect, cards::Command::Milestone(action.clone())));
         }
     }
-    paint_hint(&mut ui, window.board.remember_error.as_deref(), &roles);
+    paint_hint(
+        &mut ui,
+        window.board.remember_error.as_deref(),
+        &roles,
+        &window.keymap,
+    );
     geometry.viewport = output.inner_rect;
     geometry.offset = offset;
     geometry.next_offset = output.state.offset;
@@ -394,39 +354,6 @@ fn paint_contents(
         .iter()
         .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
-}
-
-const HINT_HEIGHT: f32 = 26.0;
-pub(crate) const HINT: &str = "Enter go to console  ·  Arrows move between cards  ·  Esc close";
-
-/// The keys, named once at the foot of the Board instead of in every card.
-fn paint_hint(ui: &mut egui::Ui, refused: Option<&str>, roles: &crate::theme::Roles) {
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), HINT_HEIGHT),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, roles.chrome);
-    ui.painter().line_segment(
-        [rect.left_top(), rect.right_top()],
-        egui::Stroke::new(1.0, roles.line),
-    );
-    // A refusal takes the hint's place: the two on one line overlap in a narrow window.
-    let (text, ink) = match refused {
-        Some(reason) => (
-            format!("This arrangement will not be remembered: {reason}"),
-            roles.wait,
-        ),
-        None => (HINT.to_owned(), roles.tx3),
-    };
-    ui.painter()
-        .with_clip_rect(rect.intersect(ui.clip_rect()))
-        .text(
-            egui::pos2(rect.left() + 16.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            text,
-            egui::FontId::proportional(11.5),
-            ink,
-        );
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -468,6 +468,14 @@ const MODULES: &[(&str, &str)] = &[
         "src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),
+    (
+        "src/console_input/navigation.rs",
+        include_str!("../src/console_input/navigation.rs"),
+    ),
+    (
+        "src/console_input/navigation/interaction_tests.rs",
+        include_str!("../src/console_input/navigation/interaction_tests.rs"),
+    ),
     ("src/board.rs", include_str!("../src/board.rs")),
     (
         "src/board/branches.rs",
@@ -528,6 +536,14 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/board/model.rs", include_str!("../src/board/model.rs")),
     ("src/board/view.rs", include_str!("../src/board/view.rs")),
+    (
+        "src/board/view/hint.rs",
+        include_str!("../src/board/view/hint.rs"),
+    ),
+    (
+        "src/board/view/state.rs",
+        include_str!("../src/board/view/state.rs"),
+    ),
     ("src/board/probe.rs", include_str!("../src/board/probe.rs")),
     (
         "src/panel/summary.rs",
@@ -725,6 +741,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "src/settings/store.rs",
         include_str!("../src/settings/store.rs"),
+    ),
+    (
+        "src/settings/window.rs",
+        include_str!("../src/settings/window.rs"),
     ),
     ("src/lib.rs", include_str!("../src/lib.rs")),
     (

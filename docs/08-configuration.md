@@ -265,7 +265,7 @@ It is the same thing Kitty and Ghostty do.
 
 When enabled, **New Gentle session** launches an installed `gentle-shell` in a new console using the focused console's working directory. Ivy searches absolute directories in its own desktop `PATH`, then the official `~/.gentle-shell/bin` bundle on Unix. Shell startup files can give an interactive shell a different `PATH` from Ivy's. On Windows Ivy accepts an executable found in an absolute `PATH` directory; the official bundled `.cmd` launcher and npm `.cmd` shims cannot currently be launched by Ivy. Open those installations in an ordinary console instead. If the client or the active directory is unavailable, the new console shows the reason.
 
-Use **New Gentle task** to write the initial request in Ivy. This starts a separate native task in the selected project. Questions identify their project and session, so you can answer while reviewing a different project. The installed Gentle client supplies its own authentication. See [D132](02-decisions.md#d132--start-a-native-gentle-task-explicitly-and-keep-review-replies-with-its-session).
+Use **New Gentle task** to write the initial request in Ivy. This starts a separate native task in the selected project. Questions identify their project and session, so you can answer while reviewing a different project. The installed Gentle client supplies its own authentication. See [D133](02-decisions.md#d133--start-a-native-gentle-task-explicitly-and-keep-review-replies-with-its-session).
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
@@ -431,7 +431,7 @@ colour of a finished task nobody has looked at.
 
 ## The shortcuts
 
-The terminal's thirteen shortcuts are changed with `key.` and the name of what they do:
+Change a shortcut in Settings or write `key.` followed by its name in the configuration file.
 
 ```
 key.split-right = ctrl+shift+e
@@ -446,14 +446,24 @@ key.close-pane = none
 | `new-tab` | opens a tab | `ctrl+shift+t` |
 | `close-tab` | closes the tab | `ctrl+shift+w` |
 | `previous-tab` · `next-tab` | moves between tabs | `ctrl+shift+←` · `ctrl+shift+→` |
+| `focus-left` · `focus-right` | focuses a neighboring console horizontally | `alt+shift+←` · `alt+shift+→` |
+| `focus-up` · `focus-down` | focuses a neighboring console vertically | `alt+shift+↑` · `alt+shift+↓` |
+| `maximize-pane` | maximizes the focused console or restores its layout | `ctrl+shift+m` |
 | `scroll-page-up` · `scroll-page-down` | goes up and down the scrollback | `shift+pageup` · `shift+pagedown` |
 | `scroll-to-top` · `scroll-to-bottom` | goes to the ends of the scrollback | `shift+home` · `shift+end` |
 | `search` | searches the focused console's scrollback; pressed again, closes the search | `ctrl+shift+f` |
 | `board` | opens or closes the board of every console, grouped by project | `ctrl+shift+o` |
+| `board-left` · `board-right` | moves the Board selection horizontally | `←` · `→` |
+| `board-up` · `board-down` | moves the Board selection vertically | `↑` · `↓` |
 
 **A chord is written with `+`**, in any order and regardless of case: `ctrl+shift+e`, `shift+prior`,
-`alt+f4`. `ctrl`, `shift` and `alt` are valid, and **at least one is required**: without one you
-would be taking a letter away from yourself.
+`alt+f4`. Console shortcuts require at least one of `ctrl`, `shift` and `alt`. The four Board
+directions can also use a plain key. They apply when the Board has keyboard focus in either view.
+For example, setting `key.board-left = h` leaves the console's left shortcut and its typing alone.
+Board reserves Tab, Enter, Escape, Space, Home and End for its existing controls.
+
+Directional focus stays within the active tab. At an outer edge, or while the console is maximized,
+the focus stays in place. Press the maximize shortcut again to restore the previous layout.
 
 Keys are written the way the keyboard calls them: `e`, `f4`, `space`, `delete`, `home`, `end`,
 `pageup`, `pagedown`, `left`, `right`, `up`, `down`. The usual abbreviations work too (`prior`,
@@ -474,7 +484,9 @@ From then on that chord **reaches the program running inside**. It is what lets 
 
 ### If two shortcuts tread on each other
 
-**The last one you write wins**, and you are told which one is left with no chord:
+A console action and a Board direction may share a chord. Within one context, **the last one
+you write wins**, and you are told which action lost its binding. The Board open/close shortcut
+is active in both contexts.
 
 ```
 ivy: 'close-pane' is left without a shortcut: its chord goes to 'split-right', which comes later
