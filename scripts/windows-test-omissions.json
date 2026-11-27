@@ -494,7 +494,7 @@
   {
     "binary": "app/app:lib",
     "name": "panel::overlay::tests::apply_refuses_stale_or_revoked_authority_and_reports_each_once",
-    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    "reason": "unix-only: the Windows channel opens with no hook authority to refuse (#278)"
   },
   {
     "binary": "app/app:lib",
@@ -1773,12 +1773,12 @@
   {
     "binary": "panel-control/panel-mcp:bin",
     "name": "tests::idle_revocation_disconnects_the_producer_without_another_tool_call",
-    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    "reason": "unix-only: a routed bridge exists only where the shared Codex relay runs, Linux and macOS"
   },
   {
     "binary": "panel-control/panel-mcp:bin",
     "name": "tests::route_reassociation_moves_an_existing_bridge_between_real_panes",
-    "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    "reason": "unix-only: a routed bridge exists only where the shared Codex relay runs, Linux and macOS"
   },
   {
     "binary": "panel-control/panel_control:lib",
@@ -1834,21 +1834,6 @@
     "binary": "panel-control/panel_control:lib",
     "name": "client::tests::an_image_open_travels_with_its_path_and_its_text_comes_back",
     "reason": "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_relay::tests::empty_config_requires_complete_inventory_before_accepting_resume",
-    "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_relay::tests::exit_cancels_epoch_without_waiting_for_a_held_route",
-    "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "codex_relay::tests::loaded_resume_success_is_held_until_the_running_mcp_proves_its_route",
-    "reason": "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
   },
   {
     "binary": "panel-control/panel_control:lib",
@@ -2004,21 +1989,6 @@
     "binary": "panel-control/panel_control:lib",
     "name": "listener::tests::what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written",
     "reason": "unix-only: requires Unix-domain socket transport from producer to window inbox"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "session::tests::hook_discards_content_and_update_refuses_it",
-    "reason": "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "session::tests::literal_requests_round_trip_and_unknown_authority_is_refused",
-    "reason": "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "session::tests::metadata_fields_and_complete_request_are_bounded",
-    "reason": "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
   },
   {
     "binary": "panel-control/panel_control:lib",
