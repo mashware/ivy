@@ -718,6 +718,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/settings/store.rs",
         include_str!("../src/settings/store.rs"),
     ),
+    (
+        "src/settings/window.rs",
+        include_str!("../src/settings/window.rs"),
+    ),
     ("src/lib.rs", include_str!("../src/lib.rs")),
     (
         "src/startup/migration.rs",

@@ -1011,6 +1011,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         3,
     ),
     (
+        "src/settings/window.rs",
+        include_str!("../src/settings/window.rs"),
+        17,
+    ),
+    (
         "src/settings/store.rs",
         include_str!("../src/settings/store.rs"),
         2,
@@ -1183,7 +1188,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/tests/header_controls.rs"),
         1,
     ),
-    ("src/settings.rs", include_str!("../src/settings.rs"), 599),
+    ("src/settings.rs", include_str!("../src/settings.rs"), 596),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs"), 985),
     ("src/painter.rs", include_str!("../src/painter.rs"), 746),
     (
