@@ -12584,6 +12584,18 @@ the needed staging space. A standalone append journal would need separate
 indexed replay and date queries. A per-console or Board view would imply a
 usage association the local logs cannot prove.
 
+**Amended (#281, November 2026) — the store's ceiling and what the screen shows first.** The page
+ceiling was 192 MiB, sized without measuring an event. A real Claude history (9.7 GB of logs) filled
+it at 169 223 events, about 1.19 KB each with two observations per event, a sixth of the
+one-million-event ceiling, and the first import stopped with «limit reached» and no success time.
+The store may now grow to 1.25 GiB, which holds one million events at the measured size; a test
+sizes the ceiling from the bytes an event takes. The rollback journal's bound scales with it, so a
+write can transiently need up to the same space again. Discarded: keeping 192 MiB and importing the
+newest events first, which hides most of a large history; a configurable ceiling, a setting nobody
+would know to change before the screen looked empty. And the figures now come first in the window,
+above allowances and folders: painted last, they sat below a scroll area whose bar shows only on
+hover, and the screen looked empty while it held the whole partial result.
+
 ## D128 — Claude allowance reporting is scoped to a previewed launch
 
 **Decision.** AI usage has a separate, window-local opt-in for Claude

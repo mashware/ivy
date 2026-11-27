@@ -312,10 +312,6 @@ impl View {
         if self.service.is_none() {
             return;
         }
-        let clearing = self
-            .snapshot
-            .as_ref()
-            .is_some_and(|s| s.status == Status::WaitingToClear);
         if let Some(snapshot) = &self.snapshot {
             ui.label(status_label(snapshot.status));
         }
@@ -376,8 +372,8 @@ impl View {
             return;
         }
         if !self.hide_result
-            && !clearing
             && let Some(snapshot) = &self.snapshot
+            && snapshot.status != Status::WaitingToClear
             && self.snapshot_matches_range(snapshot)
             && (snapshot.has_history
                 || snapshot.last_success_at_ms.is_some()
