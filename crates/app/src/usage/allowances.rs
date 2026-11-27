@@ -217,6 +217,15 @@ impl AllowanceView {
         }
     }
 
+    /// Reads enabled and the last one failed as an unsupported client does, with no reading
+    /// before it: what a person with a newer Codex sees.
+    #[cfg(test)]
+    pub(super) fn fail_for_test(&mut self) {
+        self.enabled = true;
+        self.failure = Some(Failure::Unsupported);
+        self.last_finished = Some(Instant::now());
+    }
+
     pub(super) fn measured_windows(&self) -> usize {
         self.painted_fixture_windows.unwrap_or_default()
     }

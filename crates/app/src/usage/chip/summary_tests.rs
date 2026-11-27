@@ -276,3 +276,119 @@ fn the_summary_opens_on_the_chips_first_agent_and_forgets_a_picked_tab_once_clos
     let summary = open_summary(&mut window, &ctx, area);
     assert_eq!(header(&mut window, summary).as_deref(), Some("Codex"));
 }
+
+/// The owner's case through the window's own sources, not a forced reading: Codex reads enabled
+/// and failed, no Claude reporting. The chip shows only Codex, so the summary opens on Codex.
+/// Linux x86_64 only: elsewhere Codex reads are unsupported and there is no chip to click.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn a_failed_codex_read_alone_opens_the_summary_on_codex() {
+    let (mut window, ctx) = integrated();
+    let area = area(1400.0);
+    window.usage.allowances.fail_for_test();
+    for _ in 0..2 {
+        painted(&mut window, &ctx, area, vec![]);
+    }
+    let summary = open_summary(&mut window, &ctx, area);
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    let below_tabs = summary.top() + 10.0 + 44.0;
+    let header = shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Text(text)
+            if text.pos.y > below_tabs
+                && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
+        {
+            Some(text.galley.text().to_owned())
+        }
+        _ => None,
+    });
+    assert_eq!(header.as_deref(), Some("Codex"));
+    let texts = super::bar_tests::texts(&shapes);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "Could not read Codex allowances."),
+        "{texts:?}"
+    );
+}
+
+/// The owner's case again (failed Codex read, no Claude reporting), through every way the summary
+/// closes: a tab picked before closing is forgotten, and it reopens on Codex each time.
+/// Linux x86_64 only: elsewhere Codex reads are unsupported and there is no chip to click.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn every_way_of_closing_forgets_the_picked_tab_on_the_real_sources() {
+    fn header(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        summary: egui::Rect,
+    ) -> Option<String> {
+        let shapes = painted(window, ctx, area, vec![]);
+        let below_tabs = summary.top() + 10.0 + 44.0;
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text)
+                if text.pos.y > below_tabs
+                    && ["Claude Code", "Codex"].contains(&text.galley.text()) =>
+            {
+                Some(text.galley.text().to_owned())
+            }
+            _ => None,
+        })
+    }
+    for way in ["chip", "console", "board", "open AI usage"] {
+        let (mut window, ctx) = integrated();
+        let area = area(1400.0);
+        window.usage.allowances.fail_for_test();
+        for _ in 0..2 {
+            painted(&mut window, &ctx, area, vec![]);
+        }
+        let summary = open_summary(&mut window, &ctx, area);
+        assert_eq!(
+            header(&mut window, &ctx, area, summary).as_deref(),
+            Some("Codex"),
+            "{way}"
+        );
+        let claude_tab = egui::pos2(summary.left() + 60.0, summary.top() + 30.0);
+        click(&mut window, &ctx, area, claude_tab);
+        assert_eq!(
+            header(&mut window, &ctx, area, summary).as_deref(),
+            Some("Claude Code"),
+            "{way}"
+        );
+        match way {
+            "chip" => {
+                let chip = crate::chrome::strip(&window, area).chip.unwrap();
+                let chip = window.usage.chip.hugged(chip).center();
+                click(&mut window, &ctx, area, chip);
+            }
+            "console" => click(&mut window, &ctx, area, egui::pos2(100.0, 500.0)),
+            "board" => {
+                let row = crate::chrome::strip(&window, area).row;
+                let board = crate::chrome::strip::slots(row).board.center();
+                click(&mut window, &ctx, area, board);
+                click(&mut window, &ctx, area, board);
+            }
+            _ => {
+                let open = egui::pos2(summary.left() + 40.0, summary.bottom() - 26.0);
+                click(&mut window, &ctx, area, open);
+                let escape = egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                painted(&mut window, &ctx, area, vec![escape]);
+                painted(&mut window, &ctx, area, vec![]);
+            }
+        }
+        assert!(crate::usage::chip_summary(&window.usage).is_none(), "{way}");
+        assert!(!window.usage.blocks(&ctx), "{way}");
+        let summary = open_summary(&mut window, &ctx, area);
+        assert_eq!(
+            header(&mut window, &ctx, area, summary).as_deref(),
+            Some("Codex"),
+            "{way}"
+        );
+    }
+}
