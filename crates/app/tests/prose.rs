@@ -2195,6 +2195,18 @@ const DOCUMENTS: &[(&str, &str)] = &[
         include_str!("../../../docs/04-panel-contract.md"),
     ),
     (
+        "docs/05-roadmap-historical.md",
+        include_str!("../../../docs/05-roadmap-historical.md"),
+    ),
+    (
+        "docs/gentle-workspace-study.md",
+        include_str!("../../../docs/gentle-workspace-study.md"),
+    ),
+    (
+        "prototypes/gentle-rpc/README.md",
+        include_str!("../../../prototypes/gentle-rpc/README.md"),
+    ),
+    (
         "docs/05-roadmap.md",
         include_str!("../../../docs/05-roadmap.md"),
     ),
@@ -2603,6 +2615,21 @@ fn no_document_mixes_the_two_languages() {
 /// their Spanish past every guard until the tree was swept by hand.
 // Per-file floors preserve coverage without imposing the older prototypes' size on the 88-line chrome demo.
 const PROTOTYPES: &[(&str, &str, usize)] = &[
+    (
+        "prototypes/gentle-rpc/delegated.ts",
+        include_str!("../../../prototypes/gentle-rpc/delegated.ts"),
+        50,
+    ),
+    (
+        "prototypes/gentle-rpc/probe.py",
+        include_str!("../../../prototypes/gentle-rpc/probe.py"),
+        95,
+    ),
+    (
+        "prototypes/gentle-rpc/probe.ts",
+        include_str!("../../../prototypes/gentle-rpc/probe.ts"),
+        10,
+    ),
     (
         "prototypes/settings-appearance.html",
         include_str!("../../../prototypes/settings-appearance.html"),

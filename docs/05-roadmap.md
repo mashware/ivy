@@ -13,16 +13,20 @@ This is the active delivery sequence. The previous plan remains available for mi
 
 # Part II — How it gets built
 
+Gentle is an opt-in integration in Settings. With it disabled, Ivy skips discovery and launch and shows no Gentle controls outside Settings. Enabling it exposes a session launcher. Tasks, helpers and questions appear when a session publishes them.
+
 ## Phase order and state
 
 | Phase | State | Depends on |
 |---|---|---|
-| Native question and reply | pending | |
+| Native question and reply | in progress | |
 | Native Gentle session | pending | Native question and reply |
 | Cross-project review | pending | Native Gentle session |
 | Client and platform validation | pending | Cross-project review |
 
 ## Native question and reply
+
+[First runtime experiment (#286)](../prototypes/gentle-rpc/README.md)
 
 - [ ] Capture a real question, reply and continuation from the documented interactive RPC host. Record runtime version, request lifetime and available acknowledgements.
 - [ ] Exercise two sessions asking simultaneously. Submit from the inactive project, switch focus, cancel a question and disconnect during a reply. Keep uncertain delivery visible and suppress repeat submissions.
