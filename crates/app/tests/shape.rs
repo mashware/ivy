@@ -508,6 +508,14 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/board/model.rs", include_str!("../src/board/model.rs")),
     ("src/board/view.rs", include_str!("../src/board/view.rs")),
+    (
+        "src/board/view/hint.rs",
+        include_str!("../src/board/view/hint.rs"),
+    ),
+    (
+        "src/board/view/state.rs",
+        include_str!("../src/board/view/state.rs"),
+    ),
     ("src/board/probe.rs", include_str!("../src/board/probe.rs")),
     (
         "src/panel/summary.rs",

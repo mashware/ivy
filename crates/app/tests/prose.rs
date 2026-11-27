@@ -729,6 +729,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/board/view.rs", include_str!("../src/board/view.rs"), 1),
     (
+        "src/board/view/hint.rs",
+        include_str!("../src/board/view/hint.rs"),
+        1,
+    ),
+    (
+        "src/board/view/state.rs",
+        include_str!("../src/board/view/state.rs"),
+        0,
+    ),
+    (
         "src/board/probe.rs",
         include_str!("../src/board/probe.rs"),
         1,
