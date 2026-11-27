@@ -1,4 +1,7 @@
 //! Pipe IO, launch and process retirement live off the GUI thread.
+#[cfg(windows)]
+mod windows;
+
 use super::wire::{self, Incoming};
 use super::{Answer, Dialogs, Event, Inbox, Message};
 use serde_json::json;
@@ -61,14 +64,17 @@ pub(super) fn run(
         }
     }
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
+    let (child, job) =
+        windows::spawn(&mut command).map_err(|e| format!("Could not start Gentle: {e}"))?;
+    #[cfg(not(windows))]
     let child = command
         .spawn()
         .map_err(|e| format!("Could not start Gentle: {e}"))?;
-    let mut owned = Owned { child };
+    let mut owned = Owned {
+        child,
+        #[cfg(windows)]
+        job,
+    };
     let stdout = owned.child.stdout.take().expect("piped stdout");
     let mut stdin = owned.child.stdin.take().expect("piped stdin");
     let reader = inbox.clone();
@@ -126,6 +132,9 @@ pub(super) fn run(
             }
         };
         match msg {
+            Message::Incoming(Incoming::Handled) => {
+                emit(Event::Handled);
+            }
             Message::Incoming(Incoming::Completed) => {
                 emit(Event::Completed);
                 break Ok(());
@@ -175,6 +184,8 @@ pub(super) fn run(
 
 struct Owned {
     child: Child,
+    #[cfg(windows)]
+    job: std::os::windows::io::OwnedHandle,
 }
 
 impl Owned {
@@ -227,29 +238,7 @@ impl Drop for Owned {
             }
         }
         #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            if let Some(root) = std::env::var_os("SystemRoot")
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-            {
-                let cleaner = Command::new(root.join("System32/taskkill.exe"))
-                    .args(["/T", "/F", "/PID", &self.child.id().to_string()])
-                    .creation_flags(0x0800_0000)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
-                if let Ok(mut cleaner) = cleaner {
-                    let deadline = Instant::now() + Duration::from_secs(3);
-                    while Instant::now() < deadline && matches!(cleaner.try_wait(), Ok(None)) {
-                        thread::sleep(Duration::from_millis(20));
-                    }
-                    let _ = cleaner.kill();
-                    let _ = cleaner.wait();
-                }
-            }
-        }
+        windows::terminate(&self.job);
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

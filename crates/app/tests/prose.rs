@@ -417,6 +417,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/chrome/gentle_task/transport/process/windows.rs",
+        include_str!("../src/chrome/gentle_task/transport/process/windows.rs"),
+        0,
+    ),
+    (
         "src/chrome/gentle.rs",
         include_str!("../src/chrome/gentle.rs"),
         0,

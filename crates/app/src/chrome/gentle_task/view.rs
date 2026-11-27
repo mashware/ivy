@@ -52,7 +52,7 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
                     task.issue = None;
                     task.dialogs.retain(|d| d.status != Status::Uncertain);
                 }
-                state.prune();
+                state.prune(&ctx);
             }
             Some(Action::End(id)) => {
                 if let Some(task) = state.sessions.get_mut(&id) {
@@ -219,12 +219,7 @@ fn dialog(
                     }
                     let mut visible = false;
                     for (&task_id, task) in &mut state.sessions {
-                        let attention = task.issue.is_some()
-                            || task
-                                .dialogs
-                                .iter()
-                                .any(|d| matches!(d.status, Status::Waiting | Status::Uncertain));
-                        if !compose && !attention {
+                        if !compose && !task.needs_attention() {
                             continue;
                         }
                         visible = true;
@@ -251,6 +246,9 @@ fn entry(ui: &mut egui::Ui, task: &mut Task, task_id: u64, compose: bool) -> Opt
     let project = task.directory.display();
     ui.separator();
     ui.strong(format!("Session #{task_id} · {project}"));
+    if compose && task.initial_handled {
+        ui.label("Initial command handled");
+    }
     if let Some(issue) = &task.issue {
         ui.label(issue);
     }

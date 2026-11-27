@@ -5,6 +5,7 @@ mod wire;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
@@ -37,6 +38,7 @@ pub(super) enum Answer {
 
 #[derive(Debug)]
 pub(super) enum Event {
+    Handled,
     Question(Question),
     Sent(String),
     Uncertain(String),
@@ -57,6 +59,7 @@ type Wake = Arc<dyn Fn() + Send + Sync>;
 type Inbox = mpsc::SyncSender<Message>;
 
 struct Worker {
+    launch_claimed: Arc<AtomicBool>,
     stop: mpsc::Sender<()>,
     handle: thread::JoinHandle<()>,
 }
@@ -70,7 +73,11 @@ pub(crate) fn shutdown() {
         let _ = worker.stop.send(());
     }
     for worker in workers {
-        let _ = worker.handle.join();
+        // A PATH scan may wait on a remote mount. Claim a pre-launch worker before
+        // abandoning that scan; a worker that already owns a child must retire it.
+        if worker.launch_claimed.swap(true, Ordering::AcqRel) {
+            let _ = worker.handle.join();
+        }
     }
 }
 
@@ -82,17 +89,29 @@ pub(super) struct Session {
 }
 
 impl Session {
+    pub(super) fn start_installed(cwd: PathBuf, task: String, wake: Wake) -> io::Result<Self> {
+        Self::start_with(cwd, task, wake, || {
+            super::super::gentle::resolve().map_err(|e| e.to_string())
+        })
+    }
+
+    #[cfg(all(test, unix))]
     pub(super) fn start(
         program: PathBuf,
         cwd: PathBuf,
         task: String,
         wake: Wake,
     ) -> io::Result<Self> {
-        if !program.is_absolute()
-            || !cwd.is_absolute()
-            || task.trim().is_empty()
-            || task.len() > MAX_TEXT
-        {
+        Self::start_with(cwd, task, wake, move || Ok(program))
+    }
+
+    fn start_with(
+        cwd: PathBuf,
+        task: String,
+        wake: Wake,
+        resolve: impl FnOnce() -> Result<PathBuf, String> + Send + 'static,
+    ) -> io::Result<Self> {
+        if !cwd.is_absolute() || task.trim().is_empty() || task.len() > MAX_TEXT {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Invalid Gentle client, project or task",
@@ -102,6 +121,15 @@ impl Session {
         let (send, events) = mpsc::sync_channel(16);
         let (stop, stopped) = mpsc::channel();
         let sender = inbox.clone();
+        let mut workers = WORKERS.lock().unwrap_or_else(|e| e.into_inner());
+        workers.retain(|worker| !worker.handle.is_finished());
+        if workers.len() >= 16 {
+            return Err(io::Error::other(
+                "Gentle is still starting or retiring other tasks. Try again.",
+            ));
+        }
+        let launch_claimed = Arc::new(AtomicBool::new(false));
+        let worker_claim = launch_claimed.clone();
         let handle = thread::Builder::new()
             .name("gentle-task".into())
             .spawn(move || {
@@ -112,15 +140,24 @@ impl Session {
                     }
                     delivered
                 };
-                if let Err(reason) =
+                if stopped.try_recv().is_ok() {
+                    return;
+                }
+                let result = resolve().and_then(|program| {
+                    if worker_claim.swap(true, Ordering::AcqRel) {
+                        return Ok(());
+                    }
+                    if !program.is_absolute() {
+                        return Err("Gentle needs an absolute executable path.".into());
+                    }
                     process::run(program, cwd, task, sender, requests, stopped, &emit)
-                {
+                });
+                if let Err(reason) = result {
                     emit(Event::Closed(reason));
                 }
             })?;
-        let mut workers = WORKERS.lock().unwrap_or_else(|e| e.into_inner());
-        workers.retain(|worker| !worker.handle.is_finished());
         workers.push(Worker {
+            launch_claimed,
             stop: stop.clone(),
             handle,
         });
@@ -243,6 +280,28 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn client_lookup_runs_outside_the_frame_and_delivers_its_failure() {
+        let frame_thread = thread::current().id();
+        let (woke, wake) = mpsc::channel();
+        let mut session = Session::start_with(
+            std::env::temp_dir(),
+            "task".into(),
+            Arc::new(move || {
+                let _ = woke.send(());
+            }),
+            move || {
+                assert_ne!(thread::current().id(), frame_thread);
+                Err("No installed client".into())
+            },
+        )
+        .unwrap();
+        wake.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            matches!(session.try_event(), Some(Event::Closed(reason)) if reason=="No installed client")
+        );
+    }
+
+    #[test]
     fn an_expired_or_foreign_choice_is_never_queued() {
         let (inbox, messages) = mpsc::sync_channel(2);
         let (tx, events) = mpsc::sync_channel(2);
@@ -335,13 +394,22 @@ mod tests {
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         let program = root.join("fixture");
         fs::write(&program, r#"#!/usr/bin/env python3
-import json, os, pathlib, sys
+import json, os, pathlib, signal, sys
 assert sys.argv[1:] == ["--mode", "rpc"]
 assert os.environ.get("GENTLE_SHELL_INTERACTIVE_HOST") == "1"
 prompt = json.loads(sys.stdin.readline())
 assert prompt["type"] == "prompt"
+print(json.dumps(dict(type="response", id=prompt["id"], command="prompt", success=True, data=dict(disposition="handled"))), flush=True)
+def retired(*_):
+    pathlib.Path("ended").write_text("closed without replying")
+    sys.exit(0)
+if prompt["message"] == "retire":
+    signal.signal(signal.SIGTERM, retired)
 print(json.dumps(dict(type="extension_ui_request",method="select",id="same-id",title="Pick",options=["Left","Right"])),flush=True)
-reply = json.loads(sys.stdin.readline())
+line = sys.stdin.readline()
+if prompt["message"] == "retire" and not line:
+    retired()
+reply = json.loads(line)
 assert reply["id"] == "same-id" and reply["type"] == "extension_ui_response"
 pathlib.Path(prompt["message"]).write_text("cancel" if reply.get("cancelled") else reply["value"])
 print(json.dumps(dict(type="agent_settled",aborted=False)),flush=True)
@@ -375,6 +443,20 @@ print(json.dumps(dict(type="agent_settled",aborted=False)),flush=True)
         left.reply("same-id", Answer::Cancel).unwrap();
         await_event(&mut left, true);
         assert_eq!(fs::read_to_string(root.join("left")).unwrap(), "cancel");
+        let mut handled = start("retire");
+        await_event(&mut handled, false);
+        drop(handled);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fs::read_to_string(root.join("ended")).unwrap_or_default()
+            != "closed without replying"
+        {
+            assert!(
+                Instant::now() < deadline,
+                "explicit End did not retire the handled task"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!root.join("retire").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

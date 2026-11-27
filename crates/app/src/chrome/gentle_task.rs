@@ -42,6 +42,7 @@ struct Task {
     session: Option<Session>,
     dialogs: Vec<Dialog>,
     issue: Option<String>,
+    initial_handled: bool,
 }
 
 struct Dialog {
@@ -59,6 +60,14 @@ enum Status {
 }
 
 impl Task {
+    fn needs_attention(&self) -> bool {
+        self.issue.is_some()
+            || self
+                .dialogs
+                .iter()
+                .any(|d| matches!(d.status, Status::Waiting | Status::Uncertain))
+    }
+
     fn receive(&mut self, event: Event) {
         match event {
             Event::Question(question) => {
@@ -78,6 +87,7 @@ impl Task {
             Event::Sent(id) => self.set_status(&id, Status::Sent),
             Event::Uncertain(id) => self.set_status(&id, Status::Uncertain),
             Event::Expired(id) => self.dialogs.retain(|d| d.question.id != id),
+            Event::Handled => self.initial_handled = true,
             Event::Completed => {
                 self.session = None;
                 self.dialogs.retain(|d| d.status == Status::Uncertain);
@@ -127,10 +137,14 @@ impl GentleTasks {
         ctx.request_repaint();
     }
 
-    fn prune(&mut self) {
-        self.sessions.retain(|_, task| {
-            task.session.is_some() || task.issue.is_some() || !task.dialogs.is_empty()
-        });
+    fn prune(&mut self, ctx: &egui::Context) {
+        self.sessions
+            .retain(|_, task| task.session.is_some() || task.needs_attention());
+        if matches!(self.surface, Some(Surface::Questions))
+            && !self.sessions.values().any(Task::needs_attention)
+        {
+            self.close(ctx);
+        }
     }
 
     fn launch(&mut self, ctx: &egui::Context) {
@@ -149,17 +163,12 @@ impl GentleTasks {
             return;
         }
         let wake = ctx.clone();
-        let result = super::gentle::resolve()
-            .map_err(|err| err.to_string())
-            .and_then(|program| {
-                Session::start(
-                    program,
-                    directory.clone(),
-                    prompt.clone(),
-                    Arc::new(move || wake.request_repaint()),
-                )
-                .map_err(|err| err.to_string())
-            });
+        let result = Session::start_installed(
+            directory.clone(),
+            prompt.clone(),
+            Arc::new(move || wake.request_repaint()),
+        )
+        .map_err(|err| err.to_string());
         match result {
             Ok(session) => {
                 self.next += 1;
@@ -170,6 +179,7 @@ impl GentleTasks {
                         session: Some(session),
                         dialogs: Vec::new(),
                         issue: None,
+                        initial_handled: false,
                     },
                 );
                 self.close(ctx);
@@ -249,7 +259,7 @@ pub(crate) fn poll(window: &mut Window, ctx: &egui::Context) {
             ctx.request_repaint();
         }
     }
-    state.prune();
+    state.prune(ctx);
 }
 
 pub(crate) use view::before_keys;
@@ -265,6 +275,7 @@ mod tests {
             session: None,
             dialogs: Vec::new(),
             issue: None,
+            initial_handled: false,
         };
         for id in ["sent", "waiting"] {
             task.receive(Event::Question(Question {
@@ -280,6 +291,59 @@ mod tests {
         assert_eq!(task.dialogs[0].question.id, "sent");
         assert!(task.dialogs[0].status == Status::Uncertain);
         assert_eq!(task.issue.as_deref(), Some("Lost contact."));
+    }
+
+    #[test]
+    fn expiry_of_the_last_question_returns_keyboard_focus_without_closing_a_new_task() {
+        let ctx = egui::Context::default();
+        let editor = egui::Id::new("review-note");
+        let mut state = GentleTasks {
+            surface: Some(Surface::Questions),
+            previous_focus: Some(editor),
+            ..Default::default()
+        };
+        let mut task = Task {
+            directory: "B".into(),
+            session: None,
+            dialogs: vec![],
+            issue: None,
+            initial_handled: false,
+        };
+        for id in ["one", "two"] {
+            task.receive(Event::Question(Question {
+                id: id.into(),
+                title: "Pick".into(),
+                kind: Kind::Select(vec!["a".into()]),
+                deadline: None,
+            }));
+        }
+        state.sessions.insert(1, task);
+        state
+            .sessions
+            .get_mut(&1)
+            .unwrap()
+            .receive(Event::Expired("one".into()));
+        state.prune(&ctx);
+        assert!(matches!(state.surface, Some(Surface::Questions)));
+        state
+            .sessions
+            .get_mut(&1)
+            .unwrap()
+            .receive(Event::Expired("two".into()));
+        state.prune(&ctx);
+        assert!(state.surface.is_none());
+        assert_eq!(ctx.memory(|m| m.focused()), Some(editor));
+        assert!(state.blocks(&ctx), "dismissal frame must still claim input");
+        state.surface = Some(Surface::Compose {
+            cwd: None,
+            prompt: "unfinished".into(),
+            focus: false,
+            error: String::new(),
+        });
+        state.prune(&ctx);
+        assert!(
+            matches!(state.surface,Some(Surface::Compose{prompt,..}) if prompt == "unfinished")
+        );
     }
 
     #[cfg(unix)]
@@ -441,18 +505,7 @@ mod tests {
             frame(&mut window, &ctx, vec![]);
         }
         let labels = frame(&mut window, &ctx, vec![]);
-        let pos = point(&labels, "b-review");
-        eprintln!(
-            "click {pos:?}, layer {:?}, expected {:?}",
-            ctx.layer_id_at(pos),
-            egui::Id::new(("document-viewer", "git-viewer"))
-        );
-        click(&mut window, &ctx, pos);
-        eprintln!(
-            "clicked, layer {:?}, frame {}",
-            ctx.layer_id_at(pos),
-            ctx.cumulative_frame_nr()
-        );
+        click(&mut window, &ctx, point(&labels, "b-review"));
         let labels = wait(&mut window, &ctx, "first change");
         let line = point(&labels, "first change");
         assert!(
@@ -505,6 +558,7 @@ printf '%s\n' '{"type":"agent_settled"}'
                     session: Some(session),
                     dialogs: vec![],
                     issue: None,
+                    initial_handled: false,
                 },
             );
         }

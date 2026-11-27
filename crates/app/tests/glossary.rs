@@ -267,6 +267,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/chrome/gentle_task/transport/wire.rs",
     "app/src/chrome/gentle_task/view.rs",
     "app/src/chrome/gentle_task.rs",
+    "app/src/chrome/gentle_task/transport/process/windows.rs",
     "app/src/chrome/gentle.rs",
     "app/src/chrome/menu.rs",
     "app/src/chrome/updates.rs",
@@ -577,6 +578,10 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/chrome/gentle_task/transport/wire.rs", "app"),
     ("app/src/chrome/gentle_task/view.rs", "app"),
     ("app/src/chrome/gentle_task.rs", "app"),
+    (
+        "app/src/chrome/gentle_task/transport/process/windows.rs",
+        "app",
+    ),
     ("app/src/chrome/gentle.rs", "app"),
     ("app/src/chrome/menu.rs", "app"),
     ("app/src/chrome/updates.rs", "app"),

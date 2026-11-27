@@ -8,6 +8,7 @@ const MAX_LINE: usize = 2 * 1024 * 1024;
 pub(super) const PROMPT_ID: &str = "ivy-initial-task";
 
 pub(super) enum Incoming {
+    Handled,
     Question(Question),
     Completed,
 }
@@ -56,7 +57,7 @@ fn decode(line: &[u8], assistant_failed: &mut bool) -> Result<Option<Incoming>, 
             if v["success"] != true {
                 return Err("Gentle rejected the task.".into());
             }
-            Ok((v["data"]["disposition"] == "handled").then_some(Incoming::Completed))
+            Ok((v["data"]["disposition"] == "handled").then_some(Incoming::Handled))
         }
         "message_end" if v["message"]["role"] == "assistant" => {
             *assistant_failed = matches!(
