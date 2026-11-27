@@ -4,13 +4,24 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::time::{Duration, Instant};
 
+mod stop;
+pub(super) use stop::Stop;
+
 const MAX_LINE: usize = 2 * 1024 * 1024;
 pub(super) const PROMPT_ID: &str = "ivy-initial-task";
 
 pub(super) enum Incoming {
-    Handled,
+    PromptResponse {
+        id: String,
+        handled: bool,
+        success: bool,
+    },
     Question(Question),
     Completed,
+    Aborted,
+    Rejected(String),
+    StopControl(Value),
+    CommandError,
 }
 
 pub(super) fn receive(stdout: impl Read, target: &Inbox) -> Result<(), String> {
@@ -44,20 +55,48 @@ fn decode(line: &[u8], assistant_failed: &mut bool) -> Result<Option<Incoming>, 
         .as_str()
         .ok_or("Gentle sent an untyped RPC event.")?
     {
-        "extension_ui_request" => dialog(&v).map(|q| q.map(Incoming::Question)),
-        "extension_error" if v["event"] == "command" => {
-            Err("Gentle could not run the task command.".into())
+        "extension_ui_request"
+            if v["method"] == "setWidget" && v["widgetKey"] == "gentle-desktop-rpc" =>
+        {
+            let Some(lines) = v["widgetLines"].as_array() else {
+                return Ok(None);
+            };
+            if let [line] = lines.as_slice()
+                && let Some(line) = line.as_str().filter(|s| s.len() <= 128 * 1024)
+                && let Ok(envelope) = serde_json::from_str::<Value>(line)
+                && envelope["schema"] == stop::SCHEMA
+                && envelope["kind"] == "response"
+                && stop::our_id(&envelope["requestId"])
+            {
+                return Ok(Some(Incoming::StopControl(envelope)));
+            }
+            Ok(None)
         }
-        "agent_settled" if v["aborted"] == true => Err("Gentle aborted the task.".into()),
+        "response" if stop::our_id(&v["id"]) => Ok(Some(Incoming::StopControl(v))),
+        "extension_ui_request" => dialog(&v).map(|q| q.map(Incoming::Question)),
+        "extension_error" if v["event"] == "command" => Ok(Some(Incoming::CommandError)),
+        "agent_settled" if v["aborted"] == true => {
+            *assistant_failed = false;
+            Ok(Some(Incoming::Aborted))
+        }
         "agent_settled" if *assistant_failed => {
-            Err("The Gentle provider could not finish the task.".into())
+            *assistant_failed = false;
+            Ok(Some(Incoming::Rejected(
+                "The Gentle provider could not finish the task.".into(),
+            )))
         }
         "agent_settled" => Ok(Some(Incoming::Completed)),
-        "response" if v["id"] == PROMPT_ID && v["command"] == "prompt" => {
-            if v["success"] != true {
-                return Err("Gentle rejected the task.".into());
-            }
-            Ok((v["data"]["disposition"] == "handled").then_some(Incoming::Handled))
+        "response"
+            if v["command"] == "prompt"
+                && v["id"]
+                    .as_str()
+                    .is_some_and(|id| id == PROMPT_ID || id.starts_with("ivy-follow-up-")) =>
+        {
+            Ok(Some(Incoming::PromptResponse {
+                id: v["id"].as_str().expect("matched prompt id").into(),
+                success: v["success"] == true,
+                handled: v["data"]["disposition"] == "handled",
+            }))
         }
         "message_end" if v["message"]["role"] == "assistant" => {
             *assistant_failed = matches!(
@@ -187,7 +226,10 @@ mod tests {
         let settled = br#"{"type":"agent_settled","aborted":false}"#;
         let mut failed = false;
         assert!(decode(failure, &mut failed).unwrap().is_none());
-        assert!(decode(settled, &mut failed).is_err());
+        assert!(matches!(
+            decode(settled, &mut failed),
+            Ok(Some(Incoming::Rejected(_)))
+        ));
         assert!(decode(recovered, &mut failed).unwrap().is_none());
         assert!(matches!(
             decode(settled, &mut failed),
@@ -195,6 +237,31 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn only_a_correlated_desktop_widget_carries_control_data() {
+        let record =
+            json!({"schema":stop::SCHEMA,"kind":"response","requestId":"ivy-stop-17","ok":true});
+        let mut envelope = json!({"type":"extension_ui_request","method":"setWidget","widgetKey":"gentle-desktop-rpc","widgetLines":[record.to_string()]});
+        let mut failed = false;
+        assert!(
+            matches!(decode(&serde_json::to_vec(&envelope).unwrap(), &mut failed), Ok(Some(Incoming::StopControl(v))) if v == record)
+        );
+        envelope["widgetKey"] = "transcript".into();
+        assert!(
+            decode(&serde_json::to_vec(&envelope).unwrap(), &mut failed)
+                .unwrap()
+                .is_none()
+        );
+        envelope["widgetKey"] = "gentle-desktop-rpc".into();
+        envelope["widgetLines"] = json!([
+            json!({"schema":stop::SCHEMA,"requestId":"another-host","kind":"response"}).to_string()
+        ]);
+        assert!(
+            decode(&serde_json::to_vec(&envelope).unwrap(), &mut failed)
+                .unwrap()
+                .is_none()
+        );
+    }
     #[test]
     fn oversized_or_partial_wire_records_fail_closed() {
         let (inbox, _rx) = std::sync::mpsc::sync_channel(1);

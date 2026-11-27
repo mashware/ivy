@@ -40,6 +40,8 @@ Verified on Linux with Gentle Shell 5.1.0 and Pi 1.6.1. Two independently delega
 - [ ] Add a native session view with a composer, transcript, streamed activity and explicit ended/disconnected states.
 - [ ] Expose tasks, helpers, questions and supported stop controls. Show missing capabilities and offer the appropriate client interaction for restricted permissions.
 
+[Stop and follow up (#296)](https://github.com/mashware/ivy/issues/296) covers interrupting the selected assignment, checking its visible helpers and jobs, and continuing the same conversation. The transcript and delegated-work views are still pending.
+
 Done when: a user can assign work, observe delegation, handle a question and see completion from Ivy. A noisy or terminated session leaves the neighboring console responsive.
 
 ## Cross-project review

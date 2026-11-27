@@ -31,3 +31,13 @@ An initial Ivy dialog can safely name the owning session. Showing a specific hel
 ## Desktop acceptance
 
 Task-mode routing is verified at the process boundary with a scripted child command. The exact helper name requires an upstream correlation field. The Linux desktop check used **New Gentle task** in two projects. While project A showed the second hunk of its diff, choosing an option for B produced a receipt only in B; cancelling A then produced its own receipt. The visible diff row remained at the same pixel through both interactions. This experiment is separate from Ivy startup and contains no production settings or UI changes. [Task #286](https://github.com/mashware/ivy/issues/286)
+
+## Stop a delegated helper
+
+With the same installation, run `python3 stop.py "$probe_dir"` on Linux. A deterministic HTTP model bound to loopback asks each parent to call Gentle's built-in `subagent_run` tool and holds both child requests open. Each isolated home provides its own model configuration. The probe exercises Gentle's production desktop RPC, task store and runner.
+
+While both parents awaited their children, B refused A's helper ID with `not_found`. A accepted the same ID and initially reported `running`. A later `list_subagents` returned `cancelled` for that ID and the child's held model connection closed. B remained `running` and completed when its own model replied. The parent can continue after its helper exits. The list describes the owning session's bounded helper projection. It does not establish that the root prompt or a separate background job has stopped. [Desktop protocol](https://github.com/Gentleman-Programming/gentle-shell/blob/v5.1.0/docs/desktop-rpc.md)
+
+Add `--background` to hold the parent in a separate turn after its background delegation returns. An acknowledged parent `abort` leaves A’s helper and its HTTP stream active. Only the subsequent helper cancellation settles that helper. The same run starts a real background shell job in each session, verifies that stopping A’s job leaves B’s running, and completes a follow-up in A under the original session ID with the initial request still present in its message history.
+
+In a separate Linux check, the launcher received `SIGTERM`, followed by a group `SIGKILL` after the 750 ms grace period. With one owned background helper, the launcher exited, the detached Pi child’s pidfd became readable, its model connection closed, and B continued to completion. This observation covers that installed client’s shutdown path. Reaping the launcher alone cannot confirm what happened to every helper.

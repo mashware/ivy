@@ -38,16 +38,22 @@ pub(super) enum Answer {
 
 #[derive(Debug)]
 pub(super) enum Event {
+    PromptAccepted,
+    Notice(String),
     Handled,
     Question(Question),
     Sent(String),
     Uncertain(String),
     Expired(String),
     Completed,
+    TurnFailed(String),
     Closed(String),
+    StopOutcome { message: String, can_continue: bool },
 }
 
 enum Message {
+    StopTask(Vec<String>),
+    FollowUp(String),
     Submit(String, Answer),
     Incoming(wire::Incoming),
     Written(String),
@@ -89,7 +95,23 @@ pub(crate) fn shutdown() {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Turn {
+    Working,
+    Stopping,
+    BeforePrompt,
+    Ready,
+    Disconnected,
+}
+
+struct Initial {
+    task: String,
+    claimed: Arc<AtomicBool>,
+}
+
 pub(super) struct Session {
+    initial_claimed: Arc<AtomicBool>,
+    turn: Turn,
     inbox: Inbox,
     events: mpsc::Receiver<Event>,
     stop: mpsc::Sender<()>,
@@ -138,6 +160,11 @@ impl Session {
         }
         let launch_claimed = Arc::new(AtomicBool::new(false));
         let worker_claim = launch_claimed.clone();
+        let initial_claimed = Arc::new(AtomicBool::new(false));
+        let initial = Initial {
+            task,
+            claimed: initial_claimed.clone(),
+        };
         let handle = thread::Builder::new()
             .name("gentle-task".into())
             .spawn(move || {
@@ -158,7 +185,7 @@ impl Session {
                     if !program.is_absolute() {
                         return Err("Gentle needs an absolute executable path.".into());
                     }
-                    process::run(program, cwd, task, sender, requests, stopped, &emit)
+                    process::run(program, cwd, initial, sender, requests, stopped, &emit)
                 });
                 if let Err(reason) = result {
                     emit(Event::Closed(reason));
@@ -170,6 +197,8 @@ impl Session {
             handle,
         });
         Ok(Self {
+            initial_claimed,
+            turn: Turn::Working,
             inbox,
             events,
             stop,
@@ -177,8 +206,62 @@ impl Session {
         })
     }
 
+    pub(super) fn request_stop(&mut self) -> Result<(), String> {
+        if matches!(self.turn, Turn::Stopping | Turn::BeforePrompt) {
+            return Ok(());
+        }
+        if self.turn == Turn::Disconnected {
+            return Err("The Gentle session has ended.".into());
+        }
+        // The launcher can still start the empty conversation after a slow lookup.
+        if !self.initial_claimed.swap(true, Ordering::AcqRel) {
+            self.turn = Turn::BeforePrompt;
+            return Ok(());
+        }
+        self.enqueue(Message::StopTask(self.available.keys().cloned().collect()))?;
+        self.turn = Turn::Stopping;
+        Ok(())
+    }
+
+    pub(super) fn follow_up(&mut self, message: &str) -> Result<(), String> {
+        if self.turn != Turn::Ready {
+            return Err("Gentle has not confirmed it can accept the next prompt.".into());
+        }
+        if message.trim().is_empty() || message.len() > MAX_TEXT {
+            return Err("Enter a nonempty prompt within the size limit.".into());
+        }
+        self.enqueue(Message::FollowUp(message.to_owned()))?;
+        self.turn = Turn::Working;
+        Ok(())
+    }
+
+    fn enqueue(&self, message: Message) -> Result<(), String> {
+        self.inbox.try_send(message).map_err(|e| match e {
+            mpsc::TrySendError::Full(_) => "Gentle is busy. Try again.".into(),
+            mpsc::TrySendError::Disconnected(_) => "The Gentle session has ended.".into(),
+        })
+    }
+
     pub(super) fn try_event(&mut self) -> Option<Event> {
-        let event = self.events.try_recv().ok()?;
+        if self.turn == Turn::Disconnected {
+            return None;
+        }
+        let event = loop {
+            match self.events.try_recv() {
+                // A queued natural completion can race the click. The supervisor sends at most
+                // one terminal turn event before the next prompt is accepted.
+                Ok(Event::Completed | Event::TurnFailed(_)) if self.turn == Turn::Stopping => continue,
+                Ok(event) => break event,
+                Err(mpsc::TryRecvError::Disconnected) =>
+                    break Event::Closed("The Gentle connection closed.".into()),
+                Err(mpsc::TryRecvError::Empty) if self.turn == Turn::BeforePrompt =>
+                    break Event::StopOutcome {
+                        message: "The initial prompt was never sent. Follow-ups will use this session when Gentle starts.".into(),
+                        can_continue: true,
+                    },
+                Err(mpsc::TryRecvError::Empty) => return None,
+            }
+        };
         match &event {
             Event::Question(q) => {
                 self.available.insert(q.id.clone(), q.clone());
@@ -186,13 +269,30 @@ impl Session {
             Event::Expired(id) => {
                 self.available.remove(id);
             }
-            Event::Completed | Event::Closed(_) => self.available.clear(),
+            Event::Completed | Event::TurnFailed(_) => self.turn = Turn::Ready,
+            Event::StopOutcome { can_continue, .. } => {
+                self.turn = if *can_continue {
+                    Turn::Ready
+                } else {
+                    Turn::Working
+                };
+            }
+            Event::Closed(_) => {
+                self.turn = Turn::Disconnected;
+                self.available.clear();
+            }
             _ => {}
         }
         Some(event)
     }
 
     pub(super) fn reply(&mut self, id: &str, answer: Answer) -> Result<(), &'static str> {
+        if matches!(
+            self.turn,
+            Turn::BeforePrompt | Turn::Stopping | Turn::Disconnected
+        ) {
+            return Err("The Gentle question cannot be answered now.");
+        }
         let q = self
             .available
             .get(id)
@@ -235,6 +335,7 @@ impl Question {
 }
 
 struct Dialogs {
+    visible_at_stop: Vec<String>,
     seen: BTreeSet<String>,
     pending: BTreeMap<String, Question>,
     writing: BTreeSet<String>,
@@ -243,6 +344,7 @@ struct Dialogs {
 impl Dialogs {
     fn new() -> Self {
         Self {
+            visible_at_stop: Vec::new(),
             seen: BTreeSet::new(),
             pending: BTreeMap::new(),
             writing: BTreeSet::new(),
@@ -263,7 +365,7 @@ impl Dialogs {
             return Ok(false);
         }
         if self.seen.len() >= MAX_DIALOGS {
-            return Err("This Gentle task exceeded the 64-question limit.".into());
+            return Err("This Gentle session reached its 64-question limit. Start a new Gentle session to continue.".into());
         }
         self.seen.insert(q.id.clone());
         self.pending.insert(q.id.clone(), q);
@@ -315,6 +417,8 @@ mod tests {
         let (tx, events) = mpsc::sync_channel(2);
         let (stop, _) = mpsc::channel();
         let mut session = Session {
+            initial_claimed: Arc::new(AtomicBool::new(true)),
+            turn: Turn::Working,
             inbox,
             events,
             stop,
@@ -407,6 +511,53 @@ assert sys.argv[1:] == ["--mode", "rpc"]
 assert os.environ.get("GENTLE_SHELL_INTERACTIVE_HOST") == "1"
 prompt = json.loads(sys.stdin.readline())
 assert prompt["type"] == "prompt"
+if prompt["message"] == "persistent":
+    def send(event):
+        print(json.dumps(event), flush=True)
+    def ack(command, data):
+        send(dict(type="response", id=command["id"], command=command["type"], success=True, data=data))
+    def record(name, message):
+        with pathlib.Path(name).open("a") as f:
+            f.write(str(message) + "\n")
+    def ask(dialog):
+        send(dict(type="extension_ui_request", id=dialog, method="select", title="Work?",options=["Yes"]))
+    record("prompt-pids", os.getpid())
+    ack(prompt, dict(disposition="started"))
+    ask("initial-dialog")
+    for line in sys.stdin:
+        command = json.loads(line)
+        kind = command["type"]
+        if kind == "abort":
+            record("aborts", command["id"])
+            ask("late-" + command["id"])
+            ack(command, {})
+        elif kind == "extension_ui_response":
+            assert command["id"].startswith("late-")
+            record("late-answers", command["value"])
+        elif kind == "get_state":
+            ack(command, dict(isStreaming=False, isCompacting=False, pendingMessageCount=0))
+        elif kind == "get_commands":
+            ack(command, dict(commands=[dict(name="gentle:desktop", source="extension")]))
+        elif kind == "prompt" and command["message"].startswith("/gentle:desktop "):
+            inner = json.loads(command["message"].split(" ",1)[1])
+            method = inner["method"]
+            data = {"capabilities":dict(methods=["list_subagents","cancel_subagent","list_jobs","cancel_job"]),
+                    "list_subagents":dict(agents=[]),"list_jobs":dict(jobs=[])}[method]
+            record("desktop-methods", method)
+            receipt = dict(schema=inner["schema"],kind="response",requestId=inner["requestId"],ok=True,data=data)
+            send(dict(type="extension_ui_request", method="setWidget", widgetKey="gentle-desktop-rpc",widgetLines=[json.dumps(receipt)]))
+        else:
+            assert kind == "prompt" and command["message"] in ("next", "finish")
+            record("prompt-pids", os.getpid())
+            record("user-prompts", command["message"])
+            send(dict(type="response", id="ivy-follow-up-99", command="prompt",success=False))
+            send(dict(type="agent_settled",aborted=False))
+            ack(command, dict(disposition="started"))
+            if command["message"] == "finish":
+                send(dict(type="agent_settled",aborted=False))
+            else:
+                ask("next-dialog")
+    sys.exit(0)
 print(json.dumps(dict(type="response", id=prompt["id"], command="prompt", success=True, data=dict(disposition="handled"))), flush=True)
 def retired(*_):
     pathlib.Path("ended").write_text("closed without replying")
@@ -451,6 +602,108 @@ print(json.dumps(dict(type="agent_settled",aborted=False)),flush=True)
         left.reply("same-id", Answer::Cancel).unwrap();
         await_event(&mut left, true);
         assert_eq!(fs::read_to_string(root.join("left")).unwrap(), "cancel");
+        let (lookup_entered, entered) = mpsc::channel();
+        let (allow_lookup, lookup) = mpsc::channel();
+        let executable = program.clone();
+        let mut deferred = Session::start_with(
+            root.clone(),
+            "must never run".into(),
+            Arc::new(|| {}),
+            move || {
+                lookup_entered.send(()).unwrap();
+                lookup.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok(executable)
+            },
+        )
+        .unwrap();
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        deferred.request_stop().unwrap();
+        assert!(
+            matches!(deferred.try_event(), Some(Event::StopOutcome {can_continue:true,message}) if message.contains("never sent"))
+        );
+        deferred.follow_up("first after lookup").unwrap();
+        allow_lookup.send(()).unwrap();
+        await_event(&mut deferred, false);
+        deferred
+            .reply("same-id", Answer::Value("Left".into()))
+            .unwrap();
+        await_event(&mut deferred, true);
+        assert_eq!(
+            fs::read_to_string(root.join("first after lookup")).unwrap(),
+            "Left"
+        );
+        assert!(!root.join("must never run").exists());
+
+        let mut kept = start("persistent");
+        let mut neighbor = start("neighbor");
+        await_event(&mut neighbor, false);
+        let next = |session: &mut Session| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(event) = session.try_event() {
+                    return event;
+                }
+                assert!(Instant::now() < deadline, "missing session event");
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        for prompt in ["next", "finish"] {
+            assert!(matches!(next(&mut kept), Event::PromptAccepted));
+            let Event::Question(prior) = next(&mut kept) else {
+                panic!("missing active question");
+            };
+            kept.request_stop().unwrap();
+            kept.request_stop().unwrap();
+            assert!(kept.follow_up("too soon").is_err());
+            let Event::Question(late) = next(&mut kept) else {
+                panic!("missing late question");
+            };
+            assert!(matches!(next(&mut kept), Event::Expired(id) if id == prior.id));
+            assert!(
+                matches!(next(&mut kept), Event::StopOutcome {can_continue:true, message} if message.contains("none active"))
+            );
+            assert!(kept.reply(&prior.id, Answer::Cancel).is_err());
+            kept.reply(&late.id, Answer::Value("Yes".into())).unwrap();
+            assert!(matches!(next(&mut kept), Event::Sent(id) if id == late.id));
+            kept.follow_up(prompt).unwrap();
+            assert!(kept.follow_up("duplicate").is_err());
+        }
+        assert!(matches!(next(&mut kept), Event::PromptAccepted));
+        assert!(matches!(next(&mut kept), Event::Completed));
+        neighbor
+            .reply("same-id", Answer::Value("Left".into()))
+            .unwrap();
+        await_event(&mut neighbor, true);
+        assert_eq!(fs::read_to_string(root.join("neighbor")).unwrap(), "Left");
+        assert_eq!(
+            fs::read_to_string(root.join("user-prompts")).unwrap(),
+            "next\nfinish\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("aborts"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("late-answers")).unwrap(),
+            "Yes\nYes\n"
+        );
+        let methods = fs::read_to_string(root.join("desktop-methods")).unwrap();
+        assert_eq!(
+            methods
+                .lines()
+                .filter(|method| *method == "capabilities")
+                .count(),
+            2,
+            "both stops verified delegation"
+        );
+        let pids = fs::read_to_string(root.join("prompt-pids")).unwrap();
+        let mut pids = pids.lines();
+        let first = pids.next().unwrap();
+        assert_eq!(pids.collect::<Vec<_>>(), [first, first]);
+        drop(kept);
         let mut handled = start("retire");
         await_event(&mut handled, false);
         drop(handled);

@@ -267,6 +267,8 @@ When enabled, **New Gentle session** launches an installed `gentle-shell` in a n
 
 Use **New Gentle task** to write the initial request in Ivy. This starts a separate native task in the selected project. Questions identify their project and session, so you can answer while reviewing a different project. The installed Gentle client supplies its own authentication. See [D133](02-decisions.md#d133--start-a-native-gentle-task-explicitly-and-keep-review-replies-with-its-session).
 
+Choose **Stop task** to interrupt the current assignment in its session. Ivy reports what Gentle confirmed about the turn and its delegated work. Once Gentle confirms the conversation is idle, use **Send follow-up** to give it another assignment with its history intact. If work left by an earlier assignment cannot be distinguished from the current one, Ivy limits the stop to the current turn and explains which work it left alone. **Close session** ends the client. **Cancel question** dismisses only that question. The private reply channel accepts up to 64 distinct question IDs over the life of a native session. Start a new task if the session reaches that limit.
+
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
 

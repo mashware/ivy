@@ -7,7 +7,10 @@ enum Action {
     Launch,
     Reply(u64, String, Answer),
     Dismiss(u64),
-    End(u64),
+    DiscardDraft(u64),
+    Stop(u64),
+    FollowUp(u64),
+    CloseSession(u64),
 }
 
 pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui) -> bool {
@@ -54,13 +57,37 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
                 }
                 state.prune(&ctx);
             }
-            Some(Action::End(id)) => {
+            Some(Action::Stop(id)) => {
                 if let Some(task) = state.sessions.get_mut(&id) {
-                    task.disconnect("Task ended by you.".into());
-                    if task.dialogs.is_empty() {
+                    task.request_stop();
+                    ctx.request_repaint();
+                }
+            }
+            Some(Action::FollowUp(id)) => {
+                if state
+                    .sessions
+                    .get_mut(&id)
+                    .is_some_and(Task::send_follow_up)
+                {
+                    state.close(&ctx);
+                }
+            }
+            Some(Action::DiscardDraft(id)) => {
+                if let Some(task) = state.sessions.get_mut(&id)
+                    && task.session.is_none()
+                {
+                    task.follow_up.clear();
+                }
+                state.prune(&ctx);
+            }
+            Some(Action::CloseSession(id)) => {
+                if let Some(task) = state.sessions.get_mut(&id) {
+                    task.disconnect("Session closed.".into());
+                    if task.dialogs.is_empty() && task.follow_up.is_empty() {
                         state.sessions.remove(&id);
                     }
                 }
+                state.prune(&ctx);
             }
             None => {}
         }
@@ -118,7 +145,7 @@ fn indicator(sessions: &BTreeMap<u64, Task>) -> Option<String> {
     let mut waiting = sessions.iter().flat_map(|(&id, task)| {
         task.dialogs
             .iter()
-            .filter(|d| d.status == Status::Waiting)
+            .filter(|d| task.turn != Turn::Stopping && d.status == Status::Waiting)
             .map(move |_| (id, task))
     });
     let (id, task, label) = if let Some((id, task)) = waiting.next() {
@@ -128,9 +155,7 @@ fn indicator(sessions: &BTreeMap<u64, Task>) -> Option<String> {
         }
         (id, task, "Gentle question")
     } else {
-        let (&id, task) = sessions.iter().find(|(_, task)| {
-            task.issue.is_some() || task.dialogs.iter().any(|d| d.status == Status::Uncertain)
-        })?;
+        let (&id, task) = sessions.iter().find(|(_, task)| task.needs_attention())?;
         (id, task, "Gentle task status")
     };
     let project = task
@@ -159,6 +184,7 @@ fn dialog(
     let compose = matches!(surface, Surface::Compose { .. });
     let mut action = None;
     let bounds = ctx.content_rect().size();
+    let body_height = (bounds.y - 145.0).max(40.);
     let layer = egui::Id::new(("gentle-task-dialog", compose));
     egui::Modal::new(layer)
         .area(egui::Modal::default_area(layer).order(egui::Order::Tooltip))
@@ -177,7 +203,12 @@ fn dialog(
             }
             egui::ScrollArea::vertical()
                 .id_salt("gentle-task-body")
-                .max_height((bounds.y - 145.0).max(40.0))
+                .max_height(body_height)
+                .min_scrolled_height(if state.sessions.is_empty() {
+                    40.
+                } else {
+                    body_height.min(560.)
+                })
                 .show(ui, |ui| {
                     if let Surface::Compose {
                         cwd,
@@ -247,7 +278,7 @@ fn entry(ui: &mut egui::Ui, task: &mut Task, task_id: u64, compose: bool) -> Opt
     ui.separator();
     ui.strong(format!("Session #{task_id} · {project}"));
     if compose && task.initial_handled {
-        ui.label("Initial command handled");
+        ui.label("Command handled");
     }
     if let Some(issue) = &task.issue {
         ui.label(issue);
@@ -255,7 +286,7 @@ fn entry(ui: &mut egui::Ui, task: &mut Task, task_id: u64, compose: bool) -> Opt
     for dialog in &mut task.dialogs {
         if dialog.status == Status::Uncertain {
             ui.label(format!("Delivery uncertain · {}", dialog.question.title));
-        } else if !compose && dialog.status == Status::Waiting {
+        } else if !compose && task.turn != Turn::Stopping && dialog.status == Status::Waiting {
             let response = ui
                 .push_id(egui::Id::new((task_id, &dialog.question.id)), |ui| {
                     question(ui, dialog)
@@ -266,13 +297,64 @@ fn entry(ui: &mut egui::Ui, task: &mut Task, task_id: u64, compose: bool) -> Opt
             }
         }
     }
-    if (task.issue.is_some() || task.dialogs.iter().any(|d| d.status == Status::Uncertain))
+    if task.turn != Turn::Stopping
+        && (task.issue.is_some() || task.dialogs.iter().any(|d| d.status == Status::Uncertain))
         && ui.button("Dismiss status").clicked()
     {
         action = Some(Action::Dismiss(task_id));
     }
-    if compose && task.session.is_some() && ui.button("End task").clicked() {
-        action = Some(Action::End(task_id));
+    if task.session.is_none() {
+        if !task.follow_up.is_empty() {
+            ui.label("Follow-up draft");
+            ui.add(egui::Label::new(&task.follow_up).selectable(true));
+            if ui.button("Discard draft").clicked() {
+                action = Some(Action::DiscardDraft(task_id));
+            }
+        }
+        return action;
+    }
+    ui.horizontal_wrapped(|ui| {
+        if task.turn == Turn::Stopping {
+            ui.label("Stopping task…");
+        } else {
+            let label = if task.turn == Turn::StopUnconfirmed {
+                "Retry stop"
+            } else {
+                "Stop task"
+            };
+            if ui.button(label).clicked() {
+                action = Some(Action::Stop(task_id));
+            }
+        }
+        if ui.button("Close session").clicked() {
+            action = Some(Action::CloseSession(task_id));
+        }
+    });
+    if task.turn == Turn::Ready {
+        if ui
+            .add(
+                egui::TextEdit::multiline(&mut task.follow_up)
+                    .hint_text("Continue this conversation…")
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(2),
+            )
+            .changed()
+        {
+            task.awaiting_prompt_receipt = false;
+        }
+        let fits = task.follow_up.len() <= transport::MAX_TEXT;
+        if !fits {
+            ui.label("This message is too long to send.");
+        }
+        if ui
+            .add_enabled(
+                fits && !task.follow_up.trim().is_empty(),
+                egui::Button::new("Send follow-up"),
+            )
+            .clicked()
+        {
+            action = Some(Action::FollowUp(task_id));
+        }
     }
     action
 }
