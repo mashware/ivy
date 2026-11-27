@@ -41,22 +41,22 @@ impl Account {
 pub(super) fn bind_observation(
     before: Account,
     after: Account,
-    result: Result<Value, i64>,
+    response: Value,
     observed_at: i64,
 ) -> Result<Observation, Failure> {
     if !before.matches(&after) {
-        return Err(Failure::Unavailable);
+        return Err(Failure::Refused("Codex's account changed during the read."));
     }
-    let response = result.map_err(|code| match code {
-        -32601 => Failure::Unsupported,
-        _ => Failure::Unavailable,
-    })?;
-    // In the admitted client this field, including false, survives only when the backend's
-    // account AND user match active auth. accountId alone would accept another user in the workspace.
-    if response["accountId"].as_str() != Some(after.workspace.as_str())
-        || !response["ordinaryUsageAllowed"].is_boolean()
-    {
-        return Err(Failure::Unavailable);
+    if response["accountId"].as_str() != Some(after.workspace.as_str()) {
+        return Err(Failure::Refused("Codex answered for another workspace."));
+    }
+    // In 0.167.2 this field, including false, survives only when the backend's account AND user
+    // match active auth; accountId alone would accept another user in the workspace. With no
+    // release pinned it is the evidence every read must carry, and its absence is a refusal.
+    if !response["ordinaryUsageAllowed"].is_boolean() {
+        return Err(Failure::Refused(
+            "Codex sent no identity witness (ordinaryUsageAllowed).",
+        ));
     }
     let buckets = parse_buckets(&response).map_err(|_| Failure::SameAccount(after.clone()))?;
     Ok(Observation {
@@ -184,9 +184,16 @@ mod tests {
         })
     }
 
+    fn refusal(result: Result<Observation, Failure>) -> &'static str {
+        match result {
+            Err(Failure::Refused(reason)) => reason,
+            other => panic!("a refusal was expected: {other:?}"),
+        }
+    }
+
     #[test]
     fn preserves_bucket_identity_and_distinguishes_zero_from_unreported() {
-        let snapshot = bind_observation(account("a"), account("a"), Ok(quotas()), 1729).unwrap();
+        let snapshot = bind_observation(account("a"), account("a"), quotas(), 1729).unwrap();
         assert_eq!(snapshot.observed_at, 1729);
         assert_eq!(snapshot.buckets.len(), 2);
         assert_eq!(
@@ -197,22 +204,30 @@ mod tests {
         assert_eq!(snapshot.buckets[1].secondary.as_ref().unwrap().used, None);
     }
 
+    /// The identity evidence is the gate, whatever the release: a changed user, another
+    /// workspace, or a missing witness is refused with what was missing — never a reading. A
+    /// witness of `false` is still a witness.
     #[test]
-    fn rejects_changed_user_and_unbound_quota_even_when_workspace_matches() {
-        assert!(matches!(
-            bind_observation(account("a"), account("b"), Ok(quotas()), 1),
-            Err(Failure::Unavailable)
-        ));
-        let mut unknown = quotas();
-        unknown["ordinaryUsageAllowed"] = Value::Null;
-        assert!(matches!(
-            bind_observation(account("a"), account("a"), Ok(unknown), 1),
-            Err(Failure::Unavailable)
-        ));
-        assert!(matches!(
-            bind_observation(account("a"), account("a"), Err(-32600), 1),
-            Err(Failure::Unavailable)
-        ));
+    fn refuses_a_changed_user_another_workspace_or_a_missing_witness_by_name() {
+        assert_eq!(
+            refusal(bind_observation(account("a"), account("b"), quotas(), 1)),
+            "Codex's account changed during the read."
+        );
+        let mut elsewhere = quotas();
+        elsewhere["accountId"] = json!("other");
+        assert_eq!(
+            refusal(bind_observation(account("a"), account("a"), elsewhere, 1)),
+            "Codex answered for another workspace."
+        );
+        for missing in [Value::Null, json!("false")] {
+            let mut unknown = quotas();
+            unknown["ordinaryUsageAllowed"] = missing;
+            assert_eq!(
+                refusal(bind_observation(account("a"), account("a"), unknown, 1)),
+                "Codex sent no identity witness (ordinaryUsageAllowed)."
+            );
+        }
+        assert!(bind_observation(account("a"), account("a"), quotas(), 1).is_ok());
     }
 
     #[test]
@@ -220,7 +235,7 @@ mod tests {
         let mut invalid = quotas();
         invalid["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = json!(101);
         assert!(matches!(
-            bind_observation(account("a"), account("a"), Ok(invalid), 1),
+            bind_observation(account("a"), account("a"), invalid, 1),
             Err(Failure::SameAccount(_))
         ));
     }

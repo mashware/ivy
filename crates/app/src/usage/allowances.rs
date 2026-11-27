@@ -56,6 +56,10 @@ enum Failure {
     Unavailable,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     SameAccount(Account),
+    /// The client answered, but without the evidence a verified reading needs; the text names
+    /// what was missing or what the client refused (D132).
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    Refused(&'static str),
 }
 
 type Reply = Result<Observation, Failure>;
@@ -63,7 +67,9 @@ type Reply = Result<Observation, Failure>;
 /// What a failed read tells a person, in AI usage and under the chip alike.
 fn failure_text(failure: &Failure) -> &'static str {
     match failure {
-        Failure::Unsupported => "This Codex version cannot do verified reads.",
+        Failure::Unsupported => "No Codex client that can do verified reads.",
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        Failure::Refused(reason) => reason,
         _ => "Codex returned no verified reading.",
     }
 }

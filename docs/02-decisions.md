@@ -12650,7 +12650,8 @@ protocol semantics and native evidence initially cover Linux x86_64 and that rel
 **Amended by [D132](#d132--the-title-bar-chip-reads-allowances-with-ai-usage-closed) (#283):**
 closing the view no longer invalidates the result or cancels the request; only disabling allowance
 reads does. While reads are enabled and the chip shows Codex, Ivy reads again five minutes after
-the last read finished.
+the last read finished. No release is pinned any more: the identity evidence of every read is
+the gate.
 
 ## D130 — Codex history joins local usage through separate consent
 
@@ -12680,7 +12681,7 @@ Direct account access is unnecessary for local history.
 ## D132 — The title bar chip reads allowances with AI usage closed
 
 **Decision.** A chip in the wide title bar shows the subscription allowances a person has enabled
-in this window (#283). It amends D128 and D129 in three places:
+in this window (#283). It amends D128 and D129 in four places:
 
 - Closing AI usage no longer revokes Codex allowance reads. Only «Disable allowance reads» does,
   and it still clears the observation and cancels a request in flight at once.
@@ -12689,6 +12690,16 @@ in this window (#283). It amends D128 and D129 in three places:
   most, and a read that was revoked does not start the clock.
 - While the chip shows Claude, a launch's broker wakes the window when the windows it reports
   change. A frame that repeats the same values does not wake it.
+- The Codex read no longer requires release 0.167.2. Any `codex-cli <semver>` is read, and the
+  app-server must report the same release. Every read must still carry D129's identity
+  evidence:
+  - the complete, stable session, user and workspace tuple before and after;
+  - the response's workspace ID matching that tuple;
+  - the `ordinaryUsageAllowed` binding witness.
+
+  Missing evidence is refused with a reason naming what was missing, never shown as a reading.
+  A release that refuses `--disable plugins`, `excludeResetCreditDetails` or a method fails with
+  that reason. Codex CLI 0.172.0 returned every witness on 27 November 2026.
 
 The chip shows the most recently updated Claude launch. A reading older than 30 minutes, or none
 yet, is greyed as stale rather than shown as a figure. «Shows» means the agent is one of the chip's
@@ -12702,8 +12713,15 @@ disappear the moment it was read. Five minutes keeps a 5-hour window's figure wi
 while starting the official client about twelve times an hour. Timing from the end of a read,
 rather than its start, keeps a slow client from overlapping itself. Waking on a change in value
 alone keeps a statusline that repeats itself on every keystroke from repainting the window.
+The release pin refused every person whose client had updated: the installed 0.172.0 could not
+be read at all. What protects the reading is the identity evidence, which is checked on every
+read, whatever release produced it.
 
 **Discarded.**
+- Pinning one admitted release per version: each Codex update would break reads until Ivy
+  shipped again.
+- Reading Codex's local session logs: they hold only the last session's figures, not a current
+  account-bound observation.
 - Keeping revoke-on-close and reading only while AI usage is open: the chip would be stale
   whenever it is useful.
 - A shorter cadence: it spawns the client more often for a figure that moves slowly.

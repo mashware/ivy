@@ -10,11 +10,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-const VERSION: &str = "0.167.2";
 const NAME: &str = "ivy_allowances";
 const MAX_LINE: usize = 256 * 1024;
 const MAX_EXCHANGE: usize = 2 * 1024 * 1024;
+/// JSON-RPC's codes for a method the server does not have and for parameters it rejects.
+const NO_METHOD: i64 = -32601;
+const BAD_PARAMS: i64 = -32602;
 
+/// Any release is read; what admits a reading is the evidence each read returns (D132 amends
+/// D129's pin to 0.167.2): the account tuple before and after, the response's workspace and the
+/// binding witness, checked in `bind_observation`.
 pub(super) fn read(cancelled: Arc<AtomicBool>) -> Result<Observation, Failure> {
     let deadline = Instant::now() + Duration::from_secs(8);
     let program = native_codex().map_err(|_| Failure::Unsupported)?;
@@ -22,10 +27,20 @@ pub(super) fn read(cancelled: Arc<AtomicBool>) -> Result<Observation, Failure> {
     let mut version = AllowanceProcess::start(&program, &args, false, deadline, cancelled.clone())?;
     let version_line = version.line(256)?;
     version.finish()?;
-    require_version(&version_line)?;
+    let version = client_version(&version_line)?;
 
     let args = ["app-server", "--listen", "stdio://", "--disable", "plugins"];
     let mut server = AllowanceProcess::start(&program, &args, true, deadline, cancelled)?;
+    handshake(&mut server, &version)?;
+    let before = account(&mut server, 2)?;
+    let quotas = rate_limits(&mut server);
+    let observed_at = chrono::Utc::now().timestamp();
+    let after = account(&mut server, 4)?;
+    server.finish()?;
+    bind_observation(before, after, quotas?, observed_at)
+}
+
+fn handshake(server: &mut AllowanceProcess, version: &str) -> Result<(), Failure> {
     let hello = server
         .request(
             1,
@@ -34,35 +49,60 @@ pub(super) fn read(cancelled: Arc<AtomicBool>) -> Result<Observation, Failure> {
                 "clientInfo": {"name": NAME, "version": env!("CARGO_PKG_VERSION")},
                 "capabilities": {"experimentalApi": true}
             }),
+        )
+        // A server that exits before answering is most likely refusing a flag of this launch.
+        .map_err(|_| Failure::Refused("Codex app-server did not start with --disable plugins."))?
+        .map_err(|_| Failure::Refused("Codex refused the app-server handshake."))?;
+    require_agent(&hello, version)?;
+    server.send(json!({"method": "initialized"}))
+}
+
+fn rate_limits(server: &mut AllowanceProcess) -> Result<serde_json::Value, Failure> {
+    server
+        .request(
+            3,
+            "account/rateLimits/read",
+            json!({"excludeResetCreditDetails": true}),
         )?
-        .map_err(|_| Failure::Unsupported)?;
+        .map_err(|code| match code {
+            NO_METHOD => Failure::Refused("Codex has no account/rateLimits/read method."),
+            BAD_PARAMS => Failure::Refused("Codex rejected excludeResetCreditDetails."),
+            _ => Failure::Unavailable,
+        })
+}
+
+/// The release the client reports, any `codex-cli <major>.<minor>.<patch>[suffix]`.
+fn client_version(line: &[u8]) -> Result<String, Failure> {
+    let version = std::str::from_utf8(line)
+        .ok()
+        .and_then(|line| line.trim().strip_prefix("codex-cli "))
+        .filter(|version| {
+            let core = version.split(['-', '+']).next().unwrap_or_default();
+            let parts: Vec<_> = core.split('.').collect();
+            parts.len() == 3
+                && parts
+                    .iter()
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+                && version.len() <= 64
+                && !version.chars().any(char::is_whitespace)
+        });
+    version
+        .map(str::to_owned)
+        .ok_or(Failure::Refused("Codex reported no codex-cli version."))
+}
+
+/// The server that answers is the release that reported its version: its user agent names this
+/// client and that release.
+fn require_agent(hello: &serde_json::Value, version: &str) -> Result<(), Failure> {
     let user_agent = hello["userAgent"]
         .as_str()
         .and_then(|agent| agent.split_whitespace().next());
-    if user_agent.and_then(|agent| agent.split_once('/')) != Some((NAME, VERSION)) {
-        return Err(Failure::Unsupported);
-    }
-    server.send(json!({"method": "initialized"}))?;
-    let before = account(&mut server, 2)?;
-    let quotas = server.request(
-        3,
-        "account/rateLimits/read",
-        json!({"excludeResetCreditDetails": true}),
-    )?;
-    let observed_at = chrono::Utc::now().timestamp();
-    let after = account(&mut server, 4)?;
-    server.finish()?;
-    bind_observation(before, after, quotas, observed_at)
-}
-
-fn require_version(line: &[u8]) -> Result<(), Failure> {
-    let version = std::str::from_utf8(line)
-        .ok()
-        .and_then(|line| line.trim().strip_prefix("codex-cli "));
-    if version == Some(VERSION) {
+    if user_agent.and_then(|agent| agent.split_once('/')) == Some((NAME, version)) {
         Ok(())
     } else {
-        Err(Failure::Unsupported)
+        Err(Failure::Refused(
+            "Codex's app-server version differs from codex-cli.",
+        ))
     }
 }
 
@@ -73,14 +113,13 @@ fn account(server: &mut AllowanceProcess, id: u32) -> Result<Account, Failure> {
             "accountSession/list",
             json!({"refreshWorkspaceMetadata": false}),
         )?
-        .map_err(|code| {
-            if code == -32601 {
-                Failure::Unsupported
-            } else {
-                Failure::Unavailable
-            }
+        .map_err(|code| match code {
+            NO_METHOD => Failure::Refused("Codex has no accountSession/list method."),
+            BAD_PARAMS => Failure::Refused("Codex rejected accountSession/list's parameters."),
+            _ => Failure::Unavailable,
         })?;
     Account::from_response(value)
+        .map_err(|_| Failure::Refused("Codex gave no complete session, user and workspace."))
 }
 
 struct AllowanceProcess {
@@ -308,13 +347,134 @@ fn check(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Failure> {
 mod tests {
     use super::*;
 
+    fn refusal<T: std::fmt::Debug>(result: Result<T, Failure>) -> &'static str {
+        match result {
+            Err(Failure::Refused(reason)) => reason,
+            other => panic!("a refusal was expected: {other:?}"),
+        }
+    }
+
+    /// No release is pinned (D132): any `codex-cli <semver>` is read, and the evidence of each
+    /// read decides. What does not name a release is refused by name.
     #[test]
-    fn accepts_only_the_admitted_protocol_version() {
-        assert!(require_version(b"codex-cli 0.167.2").is_ok());
-        assert!(matches!(
-            require_version(b"codex-cli 0.167.20"),
-            Err(Failure::Unsupported)
-        ));
+    fn any_codex_cli_release_is_accepted_and_a_missing_one_is_named() {
+        for (line, version) in [
+            ("codex-cli 0.167.2", "0.167.2"),
+            ("codex-cli 0.172.0\n", "0.172.0"),
+            ("codex-cli 1.0.0-alpha.3", "1.0.0-alpha.3"),
+        ] {
+            assert_eq!(client_version(line.as_bytes()).unwrap(), version);
+        }
+        for line in [
+            "codex 0.172.0",
+            "codex-cli 0.172",
+            "codex-cli",
+            "codex-cli 0.x.1",
+        ] {
+            assert_eq!(
+                refusal(client_version(line.as_bytes())),
+                "Codex reported no codex-cli version."
+            );
+        }
+        let hello = json!({"userAgent": "ivy_allowances/0.172.0 (Linux; x86_64)"});
+        assert!(require_agent(&hello, "0.172.0").is_ok());
+        assert_eq!(
+            refusal(require_agent(&hello, "0.167.2")),
+            "Codex's app-server version differs from codex-cli."
+        );
+    }
+
+    fn scripted(script: &str) -> AllowanceProcess {
+        AllowanceProcess::start(
+            Path::new("/bin/sh"),
+            &["-c", script],
+            true,
+            Instant::now() + Duration::from_secs(2),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap()
+    }
+
+    /// A release that refuses a flag or a parameter of this read says which, instead of a
+    /// generic «version»: a server that exits before the handshake is refusing its launch flags,
+    /// and an «invalid params» answer to the quota read is the excluded detail it does not know.
+    #[test]
+    fn a_refused_flag_or_parameter_is_named() {
+        let _serial = crate::client_attestation::CHILD_TEST_SERIAL.lock().unwrap();
+        let mut exits = scripted("read request\nexit 2");
+        assert_eq!(
+            refusal(handshake(&mut exits, "0.172.0")),
+            "Codex app-server did not start with --disable plugins."
+        );
+        let mut params = scripted(
+            "read request\nprintf '%s\\n' '{\"id\":3,\"error\":{\"code\":-32602,\"message\":\"unknown field\"}}'",
+        );
+        assert_eq!(
+            refusal(rate_limits(&mut params)),
+            "Codex rejected excludeResetCreditDetails."
+        );
+        let mut method = scripted(
+            "read request\nprintf '%s\\n' '{\"id\":3,\"error\":{\"code\":-32601,\"message\":\"no\"}}'",
+        );
+        assert_eq!(
+            refusal(rate_limits(&mut method)),
+            "Codex has no account/rateLimits/read method."
+        );
+    }
+
+    /// One read against the installed client and the person's own account, run by hand with
+    /// `--ignored`: it prints which evidence the release returned, never an identifier.
+    #[test]
+    #[ignore = "reads the installed Codex client with the person's own account"]
+    fn installed_codex_returns_the_identity_evidence() {
+        let program = native_codex().expect("an installed native Codex");
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut probe =
+            AllowanceProcess::start(&program, &["--version"], false, deadline, cancelled.clone())
+                .unwrap();
+        let line = probe.line(256).unwrap();
+        probe.finish().unwrap();
+        let version = client_version(&line).unwrap();
+        eprintln!("EVIDENCE version={version}");
+        let args = ["app-server", "--listen", "stdio://", "--disable", "plugins"];
+        let mut server =
+            AllowanceProcess::start(&program, &args, true, deadline, cancelled).unwrap();
+        let handshake = handshake(&mut server, &version);
+        eprintln!("EVIDENCE handshake_and_user_agent={:?}", handshake.is_ok());
+        handshake.unwrap();
+        let before = account(&mut server, 2);
+        eprintln!("EVIDENCE complete_account_before={}", before.is_ok());
+        let quotas = rate_limits(&mut server);
+        match &quotas {
+            Ok(value) => eprintln!(
+                "EVIDENCE rate_limits=ok accountId_present={} ordinaryUsageAllowed_is_bool={} keys={:?}",
+                value["accountId"].is_string(),
+                value["ordinaryUsageAllowed"].is_boolean(),
+                value
+                    .as_object()
+                    .map(|map| map.keys().cloned().collect::<Vec<_>>())
+            ),
+            Err(failure) => eprintln!("EVIDENCE rate_limits_failed={failure:?}"),
+        }
+        let after = account(&mut server, 4);
+        eprintln!("EVIDENCE complete_account_after={}", after.is_ok());
+        server.finish().unwrap();
+        let result = bind_observation(before.unwrap(), after.unwrap(), quotas.unwrap(), 0);
+        match &result {
+            Ok(observation) => eprintln!(
+                "EVIDENCE bound=true buckets={} windows={}",
+                observation.buckets.len(),
+                observation
+                    .buckets
+                    .iter()
+                    .map(|bucket| usize::from(bucket.primary.is_some())
+                        + usize::from(bucket.secondary.is_some()))
+                    .sum::<usize>()
+            ),
+            Err(failure) => eprintln!("EVIDENCE bound=false {failure:?}"),
+        }
+        result.unwrap();
     }
 
     #[test]
