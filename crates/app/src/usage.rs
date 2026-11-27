@@ -9,6 +9,7 @@ use std::{
 use usage_core::{DateRange, Granularity, Provider, Service, Snapshot, Status};
 
 mod allowances;
+mod chip;
 mod codex_controls;
 mod paint;
 use paint::paint_summary;

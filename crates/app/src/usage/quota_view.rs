@@ -298,6 +298,45 @@ impl QuotaView {
         self.disconnected = false;
     }
 
+    /// What the chip reads: the most recently updated launch's snapshot, since several launches can
+    /// report and none of them is verified to be the account the person means.
+    pub(super) fn chip_source(&self) -> super::chip::Source {
+        use super::chip::{Reading, Source, Window};
+        if !self.enabled.load(Ordering::Acquire) {
+            return Source::Off;
+        }
+        let window = |state: WindowState| match state {
+            WindowState::Absent => None,
+            WindowState::Expired => Some(Window {
+                used: None,
+                resets_at: None,
+                expired: true,
+            }),
+            WindowState::Reported(window) => Some(Window {
+                used: window.used_percentage,
+                resets_at: window.resets_at,
+                expired: false,
+            }),
+        };
+        let latest = self
+            .brokers
+            .iter()
+            .filter_map(|(_, broker)| match broker.snapshot() {
+                Snapshot::Observed {
+                    received_at,
+                    five_hour,
+                    seven_day,
+                } => Some(Reading {
+                    observed_at: received_at,
+                    five_hour: window(five_hour),
+                    weekly: window(seven_day),
+                }),
+                _ => None,
+            })
+            .max_by_key(|reading| reading.observed_at);
+        latest.map_or(Source::Waiting, Source::Read)
+    }
+
     pub(super) fn install(&mut self, name: usize, broker: Arc<Broker>) {
         self.brokers.push((name, broker));
     }
@@ -473,6 +512,41 @@ mod tests {
         view.open(&ctx);
         wake.changed();
         assert_eq!(repaints.load(Ordering::Relaxed), 2);
+    }
+
+    /// Several launches can report; the chip shows the one heard from last, and nothing once the
+    /// reporting is disabled.
+    #[test]
+    fn the_chip_reads_the_most_recently_updated_launch() {
+        use super::super::chip::Source;
+        use panel_control::quota::Window;
+        let wake = Wake::new(|| {});
+        let observed = |received_at, used| Snapshot::Observed {
+            received_at,
+            five_hour: WindowState::Reported(Window {
+                used_percentage: Some(used),
+                resets_at: Some(i64::MAX / 2),
+            }),
+            seven_day: WindowState::Expired,
+        };
+        let mut view = QuotaView::default();
+        assert_eq!(view.chip_source(), Source::Off);
+        let waiting = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+        view.install_fixture(Arc::clone(&waiting), Arc::clone(&wake));
+        assert_eq!(view.chip_source(), Source::Waiting);
+        for (received_at, used) in [(200, 20.0), (300, 30.0), (100, 10.0)] {
+            let broker = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+            broker.observe_for_test(observed(received_at, used));
+            view.install(1, broker);
+        }
+        let Source::Read(reading) = view.chip_source() else {
+            panic!("a reading was expected");
+        };
+        assert_eq!(reading.observed_at, 300);
+        assert_eq!(reading.five_hour.unwrap().used, Some(30.0));
+        assert!(reading.weekly.unwrap().expired);
+        view.disable();
+        assert_eq!(view.chip_source(), Source::Off);
     }
 
     #[test]

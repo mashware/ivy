@@ -284,6 +284,11 @@ impl Broker {
         snapshot
     }
 
+    #[cfg(test)]
+    pub(super) fn observe_for_test(&self, snapshot: Snapshot) {
+        self.state.model.lock().unwrap().snapshot = snapshot;
+    }
+
     pub(super) fn startup_failed(&self) {
         self.finish(Snapshot::ProducerError);
     }

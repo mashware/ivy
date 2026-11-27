@@ -108,6 +108,40 @@ impl AllowanceView {
         });
     }
 
+    /// What the chip reads: the 5-hour window is the one of 300 minutes and the weekly one the one
+    /// of 10 080, in the first bucket that reports each; Codex labels neither.
+    pub(super) fn chip_source(&self, now: i64) -> super::chip::Source {
+        use super::chip::{Reading, Source, Window};
+        if !SUPPORTED_PLATFORM {
+            return Source::Unsupported;
+        }
+        if !self.enabled {
+            return Source::Off;
+        }
+        let Some(observation) = &self.observation else {
+            return Source::Waiting;
+        };
+        let find = |minutes: i64| {
+            let windows = observation
+                .buckets
+                .iter()
+                .flat_map(|bucket| [&bucket.primary, &bucket.secondary]);
+            windows
+                .flatten()
+                .find(|window| window.minutes == Some(minutes))
+                .map(|window| Window {
+                    used: window.used,
+                    resets_at: window.resets_at,
+                    expired: window.resets_at.is_some_and(|reset| reset <= now),
+                })
+        };
+        Source::Read(Reading {
+            observed_at: observation.observed_at,
+            five_hour: find(300),
+            weekly: find(10_080),
+        })
+    }
+
     pub(super) fn measured_windows(&self) -> usize {
         self.painted_fixture_windows.unwrap_or_default()
     }
@@ -397,5 +431,78 @@ mod tests {
         assert!(labels.contains(&"Same workspace"));
         assert!(labels.contains(&"Stale · Could not refresh the last successful reading."));
         assert!(labels.contains(&"Primary · 0% used · 300 min · expired"));
+    }
+}
+
+/// What the chip is handed, on every platform: where reads exist, the windows found by length;
+/// where they do not, «unsupported», which is what the popover turns into its sentence.
+#[cfg(test)]
+mod chip_tests {
+    use super::super::chip::{Reading, Source, Window};
+    use super::*;
+
+    fn window(used: f64, minutes: i64, resets_at: i64) -> Option<AllowanceWindow> {
+        Some(AllowanceWindow {
+            used: Some(used),
+            minutes: Some(minutes),
+            resets_at: Some(resets_at),
+        })
+    }
+
+    #[test]
+    fn the_chip_takes_the_three_hundred_minute_window_as_five_hours() {
+        let mut view = AllowanceView {
+            enabled: true,
+            ..AllowanceView::default()
+        };
+        let enabled = view.chip_source(100);
+        view.observation = Some(Observation {
+            account: Account {
+                session: "s".into(),
+                user: "u".into(),
+                workspace: "w".into(),
+                label: "label".into(),
+            },
+            observed_at: 90,
+            buckets: vec![
+                Bucket {
+                    label: "other".into(),
+                    primary: window(1.0, 60, 500),
+                    secondary: None,
+                },
+                Bucket {
+                    label: "codex".into(),
+                    primary: window(10_080.0, 10_080, 50),
+                    secondary: window(42.0, 300, 400),
+                },
+            ],
+        });
+        let read = view.chip_source(100);
+        view.enabled = false;
+        let off = view.chip_source(100);
+        if !SUPPORTED_PLATFORM {
+            for source in [enabled, read, off] {
+                assert_eq!(source, Source::Unsupported);
+            }
+            return;
+        }
+        assert_eq!(enabled, Source::Waiting);
+        assert_eq!(off, Source::Off);
+        assert_eq!(
+            read,
+            Source::Read(Reading {
+                observed_at: 90,
+                five_hour: Some(Window {
+                    used: Some(42.0),
+                    resets_at: Some(400),
+                    expired: false,
+                }),
+                weekly: Some(Window {
+                    used: Some(10_080.0),
+                    resets_at: Some(50),
+                    expired: true,
+                }),
+            })
+        );
     }
 }
