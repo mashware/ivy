@@ -58,43 +58,6 @@ fn hint_label(full: &str, full_width: f32, room: f32) -> (&str, bool) {
     }
 }
 
-#[cfg(test)]
-mod hint_tests {
-    use super::*;
-    use crate::keyboard::{Action, Chord, Keymap};
-
-    #[test]
-    fn movement_hint_follows_rebound_and_disabled_directions() {
-        let mut map = Keymap::default();
-        assert_eq!(movement_hint(&map), HINT);
-        map.bind(
-            Action::BoardRight,
-            Some(Chord {
-                ctrl: false,
-                alt: false,
-                shift: false,
-                key: egui::Key::L,
-            }),
-        );
-        map.bind(Action::BoardLeft, None);
-        let hint = movement_hint(&map);
-        assert!(hint.contains("L right"));
-        assert!(!hint.contains("Arrows"));
-        assert!(!hint.contains("left"));
-        for action in [Action::BoardRight, Action::BoardUp, Action::BoardDown] {
-            map.bind(action, None);
-        }
-        assert_eq!(movement_hint(&map), "Enter go to console  ·  Esc close");
-    }
-
-    #[test]
-    fn clipped_hint_uses_a_discoverable_compact_label() {
-        let full = "Enter go to console · Ctrl+Shift+Right right · Esc close";
-        assert_eq!(hint_label(full, 400.0, 100.0), ("Keys (hover)", true));
-        assert_eq!(hint_label(full, 400.0, 400.0), (full, false));
-    }
-}
-
 pub(super) fn paint_hint(
     ui: &mut egui::Ui,
     refused: Option<&str>,
@@ -137,4 +100,41 @@ pub(super) fn paint_hint(
             font,
             ink,
         );
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+    use crate::keyboard::{Action, Chord, Keymap};
+
+    #[test]
+    fn movement_hint_follows_rebound_and_disabled_directions() {
+        let mut map = Keymap::default();
+        assert_eq!(movement_hint(&map), HINT);
+        map.bind(
+            Action::BoardRight,
+            Some(Chord {
+                ctrl: false,
+                alt: false,
+                shift: false,
+                key: egui::Key::L,
+            }),
+        );
+        map.bind(Action::BoardLeft, None);
+        let hint = movement_hint(&map);
+        assert!(hint.contains("L right"));
+        assert!(!hint.contains("Arrows"));
+        assert!(!hint.contains("left"));
+        for action in [Action::BoardRight, Action::BoardUp, Action::BoardDown] {
+            map.bind(action, None);
+        }
+        assert_eq!(movement_hint(&map), "Enter go to console  ·  Esc close");
+    }
+
+    #[test]
+    fn clipped_hint_uses_a_discoverable_compact_label() {
+        let full = "Enter go to console · Ctrl+Shift+Right right · Esc close";
+        assert_eq!(hint_label(full, 400.0, 100.0), ("Keys (hover)", true));
+        assert_eq!(hint_label(full, 400.0, 400.0), (full, false));
+    }
 }
