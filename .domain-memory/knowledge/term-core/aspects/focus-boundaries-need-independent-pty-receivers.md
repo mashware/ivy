@@ -21,7 +21,11 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-The final focused console cannot prove where intermediate keystrokes went. In #288, the sequence text → directional focus → text → next tab → text sent the last two text events to the same PTY when the queued tab switch was applied only at the following navigation boundary. Test the receiving side with a separate file written by each child and assert the exact contents of every file. Terminal echo can satisfy a screen-only assertion.
+The final focused console cannot prove where intermediate keystrokes went.
+In #288, typing before and after a tab switch sent both text events to the same PTY when the switch was applied only at the next navigation boundary.
+
+Give each child its own output file and check the exact contents after the entire input batch.
+Checking only the screen can produce a false positive because the terminal driver echoes input.
 
 ## Where it lives
 
