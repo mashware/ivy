@@ -1155,7 +1155,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"]
+    #[ignore = "unix-only: a routed bridge exists only where the shared Codex relay runs, Linux and macOS"]
     fn idle_revocation_disconnects_the_producer_without_another_tool_call() {}
 
     #[cfg(unix)]
@@ -1277,7 +1277,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"]
+    #[ignore = "unix-only: a routed bridge exists only where the shared Codex relay runs, Linux and macOS"]
     fn route_reassociation_moves_an_existing_bridge_between_real_panes() {}
 
     #[cfg(unix)]

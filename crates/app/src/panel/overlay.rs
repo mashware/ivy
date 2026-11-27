@@ -400,7 +400,7 @@ mod tests {
 
     crate::windows_unix_omission!(
         apply_refuses_stale_or_revoked_authority_and_reports_each_once,
-        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+        "unix-only: the Windows channel opens with no hook authority to refuse (#278)"
     );
     #[test]
     #[cfg(unix)]

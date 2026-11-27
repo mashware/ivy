@@ -3,6 +3,15 @@ use super::*;
 
 const UUID: &str = "11111111-1111-4111-8111-111111111111";
 
+/// An absolute session directory written the way this platform writes one. A Unix `/tmp` is only
+/// rooted on Windows, where `validate_cwd` rightly refuses it, so a fixture that hard-codes it
+/// tests the fixture instead of the request.
+const ROOT: &str = if cfg!(windows) { r"C:\" } else { "/" };
+
+fn absolute(tail: &str) -> String {
+    format!("{ROOT}{tail}")
+}
+
 #[cfg(windows)]
 mod sockets {
     crate::windows_unix_omission!(
@@ -42,20 +51,13 @@ fn exact_ids_are_client_typed_and_never_shell_text() {
     );
 }
 
-// Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
-// Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
-crate::windows_unix_omission!(
-    literal_requests_round_trip_and_unknown_authority_is_refused,
-    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
-);
-#[cfg(unix)]
 #[test]
 fn literal_requests_round_trip_and_unknown_authority_is_refused() {
     let requests = [
         Request::Observe {
             client: Client::Codex,
             session_id: UUID.into(),
-            cwd: "/tmp".into(),
+            cwd: absolute("tmp"),
             event: "SessionStart".into(),
             source: "resume".into(),
         },
@@ -99,20 +101,23 @@ fn literal_requests_round_trip_and_unknown_authority_is_refused() {
     }
 }
 
-// Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
-// Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
-crate::windows_unix_omission!(
-    metadata_fields_and_complete_request_are_bounded,
-    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
-);
-#[cfg(unix)]
 #[test]
 fn metadata_fields_and_complete_request_are_bounded() {
-    for bad in ["relative", "/tmp/\ncommand", "/tmp/\0nul"] {
-        assert!(validate_cwd(bad).is_err());
+    for bad in [
+        "relative".to_owned(),
+        absolute("tmp\ncommand"),
+        absolute("tmp\0nul"),
+    ] {
+        assert!(validate_cwd(&bad).is_err(), "accepted {bad:?}");
     }
-    assert!(validate_cwd(&format!("/{}", "a".repeat(4095))).is_ok());
-    assert!(validate_cwd(&format!("/{}", "a".repeat(4096))).is_err());
+    #[cfg(windows)]
+    assert!(
+        validate_cwd(r"\tmp").is_err(),
+        "a rooted directory with no drive is not absolute on Windows"
+    );
+    // The ceiling is 4 096 bytes counted with the root, whatever the root's length.
+    assert!(validate_cwd(&absolute(&"a".repeat(4096 - ROOT.len()))).is_ok());
+    assert!(validate_cwd(&absolute(&"a".repeat(4097 - ROOT.len()))).is_err());
     let over = format!(
         "{{\"tool\":\"session_probe\",\"generation\":\"g\"}}{}",
         " ".repeat(MAX_REQUEST)
@@ -134,17 +139,10 @@ fn metadata_fields_and_complete_request_are_bounded() {
     );
 }
 
-// Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
-// Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
-crate::windows_unix_omission!(
-    hook_discards_content_and_update_refuses_it,
-    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
-);
-#[cfg(unix)]
 #[test]
 fn hook_discards_content_and_update_refuses_it() {
     let hook = serde_json::json!({
-        "session_id":UUID,"cwd":"/tmp","hook_event_name":"SessionStart","source":"resume",
+        "session_id":UUID,"cwd":absolute("tmp"),"hook_event_name":"SessionStart","source":"resume",
         "transcript_path":"/private/transcript", "prompt":"private prompt", "pid":1234,
         "model_output":{"secret":"do not forward"}
     });
