@@ -4,7 +4,7 @@ Two independent Gentle Shell 5.1.0 processes on Linux received identical selecti
 
 ## Reproduce
 
-Use Python 3.11+, npm and a compatible Node runtime (tested with Node 24.14.1 and Pi 1.6.1). From this directory run:
+Use Linux with pidfd support, Python 3.11+, npm and a compatible Node runtime (tested with Node 24.14.1 and Pi 1.6.1). From this directory run:
 
 ```sh
 probe_dir=$(mktemp -d)
@@ -12,7 +12,15 @@ npm install --prefix "$probe_dir" --ignore-scripts --no-audit --no-fund gentle-p
 python3 probe.py "$probe_dir"
 ```
 
-Each process gets a fresh temporary home, project and private stdio channel. The test command invokes Gentle's installed helper dialog relay and reports its returned answer to the test host. The command replaces the model-generated request. The probe exits after observing the answer from each relay and removes the temporary session homes. The npm installation stays in the supplied directory.
+Each session gets a fresh temporary home, project and private stdio channel.
+The first command exercises the dialog relay in the parent.
+The second command uses Gentle's installed task runner to spawn a real Pi child in each session.
+A deterministic extension asks the same question in each child, without contacting a model.
+After the host responds, only the resumed child emits its answer over the private child-process channel.
+The host verifies the choice in one session and cancellation in the other.
+A Linux process handle separately verifies that the fixture child exits after its waiting parent is killed.
+The fixture installs its own disconnect handler for this check.
+The npm installation stays in the supplied directory.
 
 ## What Ivy can display
 
@@ -22,4 +30,4 @@ An initial Ivy dialog can safely name the owning session. Showing a specific hel
 
 ## Remaining acceptance
 
-Exercise a delegated task-mode helper through the full runner, establish a supported link between dialog and helper, and confirm the child resumes. Then validate the opt-in native interaction while another pane has a diff open. This experiment is separate from Ivy startup and contains no production settings or UI changes. [Task #286](https://github.com/mashware/ivy/issues/286)
+Task-mode routing is verified at the process boundary with a scripted child command. The exact helper name requires an upstream correlation field. The native interaction still needs a desktop check while another pane has a diff open. This experiment is separate from Ivy startup and contains no production settings or UI changes. [Task #286](https://github.com/mashware/ivy/issues/286)
