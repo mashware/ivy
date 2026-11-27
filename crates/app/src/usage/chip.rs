@@ -265,7 +265,9 @@ pub(super) fn templates(claude: &Source, codex: &Source) -> Vec<Item> {
             continue;
         }
         for &span in spans(agent) {
-            let text = format!("{} 100% · back Wed 88:88", span.short());
+            // A 5-hour window resets within the day, so its reset never carries a weekday.
+            let day = if span == Span::Weekly { "Wed " } else { "" };
+            let text = format!("{} 100% · back {day}88:88", span.short());
             out.push(Item {
                 agent,
                 text,
@@ -585,12 +587,17 @@ mod tests {
                 })
             };
             let slot = width(&templates(&Source::Waiting, &Source::Waiting), &mut measure);
+            // A 5-hour window resets within five hours; a week's within seven days.
+            let five_hours = [NOW + 60, NOW + FIVE_HOURS / 2, NOW + FIVE_HOURS];
+            let week = [NOW + 60, at(23, 58), NOW + 3 * 86_400, NOW + 6 * 86_400];
             for used in [0.0, 8.0, 38.0, 88.0, 99.9, 100.0, 140.0] {
-                for reset in [NOW + 60, at(23, 58), NOW + 3 * 86_400, NOW + 6 * 86_400] {
-                    let source = read(window(used, reset), window(used, reset));
-                    let live = items(&source, &source, NOW, &zone());
-                    let live = width(&live, &mut measure);
-                    assert!(live <= slot, "{used} {reset}: {live} > {slot}");
+                for short in five_hours {
+                    for long in week {
+                        let source = read(window(used, short), window(used, long));
+                        let live = items(&source, &source, NOW, &zone());
+                        let live = width(&live, &mut measure);
+                        assert!(live <= slot, "{used} {short} {long}: {live} > {slot}");
+                    }
                 }
             }
         });

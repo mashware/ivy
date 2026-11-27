@@ -109,6 +109,8 @@ pub(super) struct AllowanceView {
     observation: Option<Observation>,
     failure: Option<Failure>,
     painted_fixture_windows: Option<usize>,
+    #[cfg(test)]
+    stub_reads: bool,
 }
 
 impl AllowanceView {
@@ -210,6 +212,13 @@ impl AllowanceView {
         self.failure = None;
         let (sender, result) = mpsc::sync_channel(1);
         let cancelled = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        if self.stub_reads {
+            // A test that drives the schedule must not start the installed Codex client.
+            drop(sender);
+            self.pending = Some(Pending { result, cancelled });
+            return;
+        }
         let cancel = cancelled.clone();
         let ctx = context.clone();
         if std::thread::Builder::new()
@@ -530,6 +539,28 @@ mod chip_tests {
             next_read(true, false, false, finished, at(900)),
             Next::Never
         );
+    }
+
+    /// The window's own pass starts the read when it is due, with AI usage closed, and a measured
+    /// run never does (D13). Where reads are unsupported nothing starts at all.
+    #[test]
+    fn the_window_pass_starts_a_due_read_except_in_a_measured_run() {
+        let ctx = egui::Context::default();
+        for measuring in [false, true] {
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            window.usage.measuring = measuring;
+            window.usage.allowances.enabled = true;
+            window.usage.allowances.stub_reads = true;
+            let mut output =
+                ctx.run_ui(Default::default(), |ui| crate::usage::begin_pass(&mut window, ui));
+            output.textures_delta.clear();
+            assert!(!window.usage.open);
+            assert_eq!(
+                window.usage.allowances.polling(),
+                SUPPORTED_PLATFORM && !measuring,
+                "measuring: {measuring}"
+            );
+        }
     }
 
     /// The clock starts when a read ends: the instant `poll` takes the reply.

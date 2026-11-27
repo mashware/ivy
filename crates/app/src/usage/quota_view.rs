@@ -526,6 +526,38 @@ mod tests {
         assert_eq!(repaints.load(Ordering::Relaxed), 2);
     }
 
+    /// With AI usage closed, the window's own pass is what lets a launch wake it for the chip:
+    /// a change after that pass repaints, and none does in a measured run.
+    #[test]
+    fn the_window_pass_lets_a_changed_launch_wake_the_closed_view_for_the_chip() {
+        use std::sync::atomic::AtomicUsize;
+        let ctx = egui::Context::default();
+        for measuring in [false, true] {
+            let wakes = Arc::new(AtomicUsize::new(0));
+            let count = Arc::clone(&wakes);
+            let wake = Wake::new(move || {
+                count.fetch_add(1, Ordering::Relaxed);
+            });
+            let broker = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+            let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+            window.usage.measuring = measuring;
+            window
+                .usage
+                .quota
+                .install_fixture(Arc::clone(&broker), Arc::clone(&wake));
+            let mut output =
+                ctx.run_ui(Default::default(), |ui| crate::usage::begin_pass(&mut window, ui));
+            output.textures_delta.clear();
+            assert!(!window.usage.open);
+            broker.stop();
+            assert_eq!(
+                wakes.load(Ordering::Relaxed),
+                usize::from(!measuring),
+                "measuring: {measuring}"
+            );
+        }
+    }
+
     /// Several launches can report; the chip shows the one heard from last, and nothing once the
     /// reporting is disabled.
     #[test]

@@ -334,9 +334,14 @@ fn with_the_view_closed_only_a_changed_value_wakes_the_window_for_the_chip() {
         } => window.used_percentage,
         _ => None,
     };
+    // A snapshot is visible a moment before its wake is requested, outside the broker's lock.
+    let settled = || {
+        std::thread::sleep(Duration::from_millis(50));
+        wakes.load(Ordering::Relaxed)
+    };
     launch.run("steady");
     wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
-    assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    assert_eq!(settled(), 1);
     // The chip's frame clears the pending wake; then the same values arrive again.
     wake.begin_frame();
     launch.run("steady");
@@ -346,13 +351,13 @@ fn with_the_view_closed_only_a_changed_value_wakes_the_window_for_the_chip() {
     wake.begin_frame();
     launch.run("moved");
     wait_for(&broker, |snapshot| used(snapshot) == Some(20.0));
-    assert_eq!(wakes.load(Ordering::Relaxed), 2, "the repeat must not wake");
+    assert_eq!(settled(), 2, "the repeat must not wake");
     wake.set_chip(false);
     wake.begin_frame();
     launch.run("steady");
     wait_for(&broker, |snapshot| used(snapshot) == Some(10.0));
     assert_eq!(
-        wakes.load(Ordering::Relaxed),
+        settled(),
         2,
         "no chip, no view: no wake"
     );
