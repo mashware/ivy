@@ -12687,3 +12687,11 @@ would make the same gesture jump in different visual directions after a split.
 **Reason.** In the two-process experiment, identically worded questions belonged to different live processes. A reply written to the process had no receipt for helper continuation. Name the project and session; show an uncertain outcome when delivery cannot be established. Let the installed client own authentication.
 
 **Discarded.** Attaching the interactive protocol after launch has no documented support in Gentle 5.1.0. Guessing a helper from nearby activity would misattribute overlapping questions. Opening the originating console would displace the active review. A complete transcript and continuing conversation belong to the next roadmap phase.
+
+### Stopping work while keeping the conversation (#296)
+
+**Decision.** Stop the current assignment within its owning Gentle session. Keep the client and conversation available for the next prompt. Match cancellation and status to the selected session and to each producer-issued work ID. Show unresolved work when an installed client cannot verify its outcome. Closing the session remains a separate action.
+
+**Reason.** With two Gentle Shell 5.1.0 sessions, aborting the foreground turn could leave a background helper running. The owner later reported that helper cancelled after a targeted request. A second session rejected the foreign helper ID and completed its own work. The user chose to preserve the conversation after a stop.
+
+**Discarded.** Terminating the launcher ends the live conversation. An acknowledgement for a turn abort cannot establish that its delegates stopped. A bounded list cannot prove the absence of other work.

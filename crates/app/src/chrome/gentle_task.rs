@@ -43,6 +43,17 @@ struct Task {
     dialogs: Vec<Dialog>,
     issue: Option<String>,
     initial_handled: bool,
+    turn: Turn,
+    follow_up: String,
+    awaiting_prompt_receipt: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Turn {
+    Working,
+    Stopping,
+    StopUnconfirmed,
+    Ready,
 }
 
 struct Dialog {
@@ -61,7 +72,9 @@ enum Status {
 
 impl Task {
     fn needs_attention(&self) -> bool {
-        self.issue.is_some()
+        self.turn == Turn::Stopping
+            || (self.session.is_none() && !self.follow_up.is_empty())
+            || self.issue.is_some()
             || self
                 .dialogs
                 .iter()
@@ -87,24 +100,96 @@ impl Task {
             Event::Sent(id) => self.set_status(&id, Status::Sent),
             Event::Uncertain(id) => self.set_status(&id, Status::Uncertain),
             Event::Expired(id) => self.dialogs.retain(|d| d.question.id != id),
+            Event::PromptAccepted => {
+                if std::mem::take(&mut self.awaiting_prompt_receipt) {
+                    self.follow_up.clear();
+                }
+            }
             Event::Handled => self.initial_handled = true,
+            Event::Notice(reason) => self.issue = Some(reason),
+            Event::TurnFailed(reason) => {
+                self.awaiting_prompt_receipt = false;
+                self.turn = Turn::Ready;
+                self.issue = Some(reason);
+            }
             Event::Completed => {
-                self.session = None;
-                self.dialogs.retain(|d| d.status == Status::Uncertain);
+                self.turn = Turn::Ready;
+                self.dialogs.retain(|d| d.status != Status::Sent);
+            }
+            Event::StopOutcome {
+                message,
+                can_continue,
+            } => {
+                self.turn = if can_continue {
+                    Turn::Ready
+                } else {
+                    Turn::StopUnconfirmed
+                };
+                self.issue = Some(message);
             }
             Event::Closed(reason) => self.disconnect(reason),
         }
     }
 
+    fn request_stop(&mut self) {
+        if self.turn == Turn::Stopping {
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        match session.request_stop() {
+            Ok(()) => {
+                self.turn = Turn::Stopping;
+                self.issue = None;
+            }
+            Err(reason) => self.issue = Some(reason),
+        }
+    }
+
+    fn send_follow_up(&mut self) -> bool {
+        if self.turn != Turn::Ready
+            || self.follow_up.trim().is_empty()
+            || self.follow_up.len() > transport::MAX_TEXT
+        {
+            return false;
+        }
+        let Some(session) = self.session.as_mut() else {
+            return false;
+        };
+        match session.follow_up(&self.follow_up) {
+            Ok(()) => {
+                self.awaiting_prompt_receipt = true;
+                self.turn = Turn::Working;
+                self.initial_handled = false;
+                self.issue = None;
+                true
+            }
+            Err(reason) => {
+                self.issue = Some(reason);
+                false
+            }
+        }
+    }
+
     fn set_status(&mut self, id: &str, status: Status) {
-        if let Some(dialog) = self.dialogs.iter_mut().find(|d| d.question.id == id) {
+        if let Some(dialog) = self
+            .dialogs
+            .iter_mut()
+            .find(|d| d.question.id == id && d.status != Status::Uncertain)
+        {
             dialog.status = status;
         }
     }
 
     fn disconnect(&mut self, reason: String) {
         self.session = None;
+        self.turn = Turn::Ready;
         self.issue = Some(reason);
+        self.retire_questions();
+    }
+
+    fn retire_questions(&mut self) {
         self.dialogs.retain(|d| d.status != Status::Waiting);
         for dialog in &mut self.dialogs {
             dialog.status = Status::Uncertain;
@@ -156,7 +241,7 @@ impl GentleTasks {
         };
         let Some(directory) = cwd.clone() else { return };
         if self.sessions.len() >= 16 {
-            *error = "Finish a Gentle task or dismiss its status before starting another.".into();
+            *error = "Close a Gentle session or dismiss its status before starting another.".into();
             return;
         }
         if prompt.trim().is_empty() || prompt.len() > transport::MAX_TEXT {
@@ -180,6 +265,9 @@ impl GentleTasks {
                         dialogs: Vec::new(),
                         issue: None,
                         initial_handled: false,
+                        turn: Turn::Working,
+                        follow_up: String::new(),
+                        awaiting_prompt_receipt: false,
                     },
                 );
                 self.close(ctx);
@@ -192,6 +280,9 @@ impl GentleTasks {
         let Some(task) = self.sessions.get_mut(&task_id) else {
             return;
         };
+        if task.turn == Turn::Stopping {
+            return;
+        }
         let Some(dialog) = task
             .dialogs
             .iter_mut()
@@ -276,6 +367,9 @@ mod tests {
             dialogs: Vec::new(),
             issue: None,
             initial_handled: false,
+            turn: Turn::Working,
+            follow_up: String::new(),
+            awaiting_prompt_receipt: false,
         };
         for id in ["sent", "waiting"] {
             task.receive(Event::Question(Question {
@@ -294,6 +388,83 @@ mod tests {
     }
 
     #[test]
+    fn stop_preserves_unconfirmed_work_and_drafts_until_the_client_reconciles_them() {
+        let mut task = Task {
+            directory: PathBuf::from("A"),
+            session: None,
+            dialogs: Vec::new(),
+            issue: None,
+            initial_handled: false,
+            turn: Turn::Working,
+            follow_up: String::new(),
+            awaiting_prompt_receipt: false,
+        };
+        let question = |id: &str| {
+            Event::Question(Question {
+                id: id.into(),
+                title: "Which route?".into(),
+                kind: Kind::Input(String::new()),
+                deadline: None,
+            })
+        };
+        task.receive(question("submitted"));
+        task.set_status("submitted", Status::Submitting);
+        task.turn = Turn::Stopping;
+        task.receive(Event::Uncertain("submitted".into()));
+        task.receive(Event::Sent("submitted".into()));
+        assert!(task.dialogs[0].status == Status::Uncertain);
+        task.receive(question("late"));
+        task.dialogs[1].draft = "keep this draft".into();
+        task.receive(Event::StopOutcome {
+            message: "Could not confirm the main turn stopped.".into(),
+            can_continue: false,
+        });
+        assert!(task.turn == Turn::StopUnconfirmed);
+        assert_eq!(task.dialogs[1].draft, "keep this draft");
+        assert!(!task.send_follow_up());
+        task.receive(Event::Expired("late".into()));
+        task.receive(Event::StopOutcome {
+            message: "Main turn stopped.".into(),
+            can_continue: true,
+        });
+        assert_eq!(task.dialogs.len(), 1);
+        assert!(task.turn == Turn::Ready);
+        assert_eq!(task.issue.as_deref(), Some("Main turn stopped."));
+        assert!(task.dialogs[0].status == Status::Uncertain);
+    }
+
+    #[test]
+    fn acknowledgement_clears_only_a_submitted_follow_up_and_loss_preserves_its_draft() {
+        let mut task = Task {
+            directory: "A".into(),
+            session: None,
+            dialogs: vec![],
+            issue: None,
+            initial_handled: false,
+            turn: Turn::Working,
+            follow_up: "another prompt".into(),
+            awaiting_prompt_receipt: false,
+        };
+        task.receive(Event::PromptAccepted);
+        assert_eq!(task.follow_up, "another prompt");
+        task.awaiting_prompt_receipt = true;
+        task.receive(Event::TurnFailed("Rejected.".into()));
+        assert_eq!(task.follow_up, "another prompt");
+        task.awaiting_prompt_receipt = true;
+        task.receive(Event::PromptAccepted);
+        assert!(task.follow_up.is_empty());
+        task.follow_up = "keep this".into();
+        task.awaiting_prompt_receipt = true;
+        task.receive(Event::Closed("Lost contact.".into()));
+        task.issue = None;
+        assert!(
+            task.needs_attention(),
+            "dismissing the status must keep the draft"
+        );
+        assert_eq!(task.follow_up, "keep this");
+    }
+
+    #[test]
     fn expiry_of_the_last_question_returns_keyboard_focus_without_closing_a_new_task() {
         let ctx = egui::Context::default();
         let editor = egui::Id::new("review-note");
@@ -308,6 +479,9 @@ mod tests {
             dialogs: vec![],
             issue: None,
             initial_handled: false,
+            turn: Turn::Working,
+            follow_up: String::new(),
+            awaiting_prompt_receipt: false,
         };
         for id in ["one", "two"] {
             task.receive(Event::Question(Question {
@@ -536,17 +710,60 @@ mod tests {
         }
 
         let exe = root.0.join("gentle-fixture");
-        fs::write(&exe,r#"#!/bin/sh
-trap 'touch retired' EXIT
-trap 'exit 0' TERM
-IFS= read -r prompt || exit 1
-printf '%s\n' '{"type":"extension_ui_request","id":"same-id","method":"select","title":"Continue?","options":["Proceed"]}'
-IFS= read -r answer || exit 1
-printf '%s\n' "$answer" > receipt
-printf '%s\n' '{"type":"agent_settled"}'
+        fs::write(&exe, r#"#!/usr/bin/env python3
+import atexit, json, os, pathlib, signal, sys, time
+file = pathlib.Path
+atexit.register(lambda: file("retired").touch())
+signal.signal(signal.SIGTERM, lambda *_: sys.exit())
+schema = "gentle-shell.desktop-rpc/v1"
+def emit(**value):
+    print(json.dumps(value), flush=True)
+def reply(message, data):
+    emit(type="response", id=message["id"], command=message["type"], success=True, data=data)
+def question(title, choice, dialog_id="same-id"):
+    emit(type="extension_ui_request", id=dialog_id, method="select", title=title, options=[choice])
+for line in sys.stdin:
+    message = json.loads(line)
+    kind = message["type"]
+    if kind == "extension_ui_response":
+        file("receipt").write_text(line)
+        emit(type="agent_settled", aborted=False)
+    elif kind == "get_commands":
+        reply(message, {"commands":[{"name":"gentle:desktop","source":"extension"}]})
+    elif kind == "abort":
+        until = time.monotonic() + 8
+        while not file("allow-stop").exists() and time.monotonic() < until:
+            time.sleep(0.01)
+        assert file("allow-stop").exists()
+        file("aborted").write_text(str(os.getpid()))
+        emit(type="agent_settled", aborted=True)
+        reply(message, {})
+    elif kind == "get_state":
+        reply(message, {"isStreaming":False, "isCompacting":False, "pendingMessageCount":0})
+    elif kind == "prompt":
+        prompt = message["message"]
+        if prompt.startswith("/gentle:desktop "):
+            request = json.loads(prompt.split(" ",1)[1])
+            values = {"capabilities":{"methods":["list_subagents","cancel_subagent","list_jobs","cancel_job"]},
+                      "list_subagents":{"agents":[]}, "list_jobs":{"jobs":[]}}
+            envelope = dict(schema=schema, kind="response", requestId=request["requestId"],
+                            ok=True, data=values[request["method"]])
+            emit(type="extension_ui_request", method="setWidget", widgetKey="gentle-desktop-rpc",
+                 widgetLines=[json.dumps(envelope)])
+            reply(message, {"disposition":"handled"})
+        elif prompt == "ask":
+            reply(message, {})
+            file("initial").write_text(str(os.getpid()))
+            question("Continue?", "Proceed")
+            if file.cwd().name == "A":
+                emit(type="agent_settled", aborted=False)
+        else:
+            reply(message, {})
+            file("follow-up").write_text(str(os.getpid())+" "+prompt)
+            question("Resume this assignment?", "Follow-up choice", "follow-up-id")
 "#).unwrap();
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).unwrap();
-        for (id, name) in [(1, "A"), (2, "B")] {
+        let add_task = |window: &mut Window, id: u64, name: &str| {
             let cwd = root.0.join(name);
             fs::create_dir(&cwd).unwrap();
             let session =
@@ -559,16 +776,90 @@ printf '%s\n' '{"type":"agent_settled"}'
                     dialogs: vec![],
                     issue: None,
                     initial_handled: false,
+                    turn: Turn::Working,
+                    follow_up: String::new(),
+                    awaiting_prompt_receipt: false,
                 },
             );
-        }
-        let labels = wait(&mut window, &ctx, "Gentle question");
+        };
+        add_task(&mut window, 1, "A");
+        add_task(&mut window, 2, "B");
+        let labels = wait(&mut window, &ctx, "2 Gentle questions");
         assert_eq!(point(&labels, "review anchor at second hunk"), anchor);
         click(&mut window, &ctx, point(&labels, "Gentle question"));
-        let labels = wait(&mut window, &ctx, "Session #2");
-        let choices: Vec<_> = labels.iter().filter(|(s, _)| s == "Proceed").collect();
-        assert_eq!(choices.len(), 2, "{labels:?}");
-        click(&mut window, &ctx, choices[1].1);
+        wait(&mut window, &ctx, "Stop task");
+        for _ in 0..8 {
+            frame(&mut window, &ctx, vec![]);
+        }
+        let labels = frame(&mut window, &ctx, vec![]);
+        assert!(window.chrome.gentle_task.sessions[&1].turn == Turn::Ready);
+        click(&mut window, &ctx, point(&labels, "Stop task"));
+        let labels = wait(&mut window, &ctx, "Stopping task");
+        let first_row = point(&labels, "Session #1").y;
+        let second_row = labels
+            .iter()
+            .find(|(s, _)| s.contains("Session #2"))
+            .map_or(f32::INFINITY, |(_, xy)| xy.y);
+        assert!(
+            !labels
+                .iter()
+                .any(|(s, xy)| (s == "Stop task" || s == "Proceed")
+                    && (first_row..second_row).contains(&xy.y))
+        );
+        fs::write(root.0.join("A/allow-stop"), "").unwrap();
+        wait(&mut window, &ctx, "Send follow-up");
+        for _ in 0..8 {
+            frame(&mut window, &ctx, vec![]);
+        }
+        let labels = frame(&mut window, &ctx, vec![]);
+        assert!(!root.0.join("A/retired").exists());
+        assert!(!root.0.join("B/aborted").exists());
+        click(
+            &mut window,
+            &ctx,
+            point(&labels, "Continue this conversation"),
+        );
+        let labels = frame(
+            &mut window,
+            &ctx,
+            vec![Input::Text("second assignment".into())],
+        );
+        assert_eq!(
+            window.chrome.gentle_task.sessions[&1].follow_up, "second assignment",
+            "the selected session must own the typed draft"
+        );
+        click(&mut window, &ctx, point(&labels, "Send follow-up"));
+        assert!(
+            window.chrome.gentle_task.surface.is_none(),
+            "the selected session must accept the follow-up click"
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !root.0.join("A/follow-up").exists() {
+            frame(&mut window, &ctx, vec![]);
+            assert!(Instant::now() < deadline, "A never received the follow-up");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid = fs::read_to_string(root.0.join("A/initial")).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.0.join("A/follow-up")).unwrap(),
+            format!("{pid} second assignment")
+        );
+        assert!(!root.0.join("B/follow-up").exists());
+        let labels = wait(&mut window, &ctx, "2 Gentle questions");
+        click(&mut window, &ctx, point(&labels, "Gentle questions"));
+        wait(&mut window, &ctx, "Follow-up choice");
+        for _ in 0..8 {
+            frame(&mut window, &ctx, vec![]);
+        }
+        let labels = frame(&mut window, &ctx, vec![]);
+        click(&mut window, &ctx, point(&labels, "Close session"));
+        wait(&mut window, &ctx, "Proceed");
+        for _ in 0..8 {
+            frame(&mut window, &ctx, vec![]);
+        }
+        let labels = frame(&mut window, &ctx, vec![]);
+        assert!(!labels.iter().any(|(s, _)| s.contains("Session #1")));
+        click(&mut window, &ctx, point(&labels, "Proceed"));
         let receipt = root.0.join("B/receipt");
         let deadline = Instant::now() + Duration::from_secs(5);
         while !receipt.is_file() || fs::read(&receipt).unwrap().is_empty() {
@@ -584,6 +875,8 @@ printf '%s\n' '{"type":"agent_settled"}'
         assert_eq!(point(&labels, "review anchor at second hunk"), anchor);
         assert_eq!(window.active, 0);
         assert_eq!(window.active().focus, pane);
+        add_task(&mut window, 3, "C");
+        wait(&mut window, &ctx, "Gentle question");
         crate::settings::interpret("gentle.enabled = off")
             .unwrap()
             .0
@@ -591,15 +884,15 @@ printf '%s\n' '{"type":"agent_settled"}'
         let labels = frame(&mut window, &ctx, vec![]);
         assert!(!labels.iter().any(|(t, _)| t.contains("Gentle question")));
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !root.0.join("A/retired").exists() {
-            assert!(Instant::now() < deadline, "disabling Gentle left A running");
+        while !root.0.join("C/retired").exists() {
+            assert!(Instant::now() < deadline, "disabling Gentle left C running");
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(!root.0.join("A/receipt").exists());
+        assert!(!root.0.join("C/receipt").exists());
     }
 
     crate::windows_unix_omission!(
         reviewer_answers_the_background_session_at_the_same_visible_diff_line,
-        "unix-only: uses a POSIX shell for private RPC pipes and a terminal directory witness"
+        "unix-only: uses executable shebang fixtures and POSIX shell commands for a terminal directory witness"
     );
 }

@@ -2,7 +2,7 @@
   {
     "binary": "app/app:lib",
     "name": "chrome::gentle_task::tests::reviewer_answers_the_background_session_at_the_same_visible_diff_line",
-    "reason": "unix-only: uses a POSIX shell for private RPC pipes and a terminal directory witness"
+    "reason": "unix-only: uses executable shebang fixtures and POSIX shell commands for a terminal directory witness"
   },
   {
     "binary": "app/app:lib",
