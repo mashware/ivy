@@ -12623,6 +12623,11 @@ and can race with Claude or the person's edits. An account cache would give
 current meaning to data that does not identify an account. A single viewer
 timer would wake Ivy when the AI usage screen is closed.
 
+**Amended by [D132](#d132--the-title-bar-chip-reads-allowances-with-ai-usage-closed)
+(#283):** while the title bar's chip shows Claude, a change in a launch's
+windows wakes the window with AI usage closed. A frame that repeats the same
+values still does not.
+
 ## D129 — Codex allowances are account-bound observations
 
 **Decision.** AI usage offers an independent, default-off Codex allowance control. A manual refresh
@@ -12641,6 +12646,11 @@ to avoid observed unrelated reads. Auth and its lifecycle belong to the official
 **Discarded.** No shared TUI connection, local history inference, account watching or credential-file
 access from Ivy. A single workspace ID cannot distinguish two users in that workspace. The pinned
 protocol semantics and native evidence initially cover Linux x86_64 and that release only.
+
+**Amended by [D132](#d132--the-title-bar-chip-reads-allowances-with-ai-usage-closed) (#283):**
+closing the view no longer invalidates the result or cancels the request; only disabling allowance
+reads does. While reads are enabled and the chip shows Codex, Ivy reads again five minutes after
+the last read finished.
 
 ## D130 — Codex history joins local usage through separate consent
 
@@ -12666,3 +12676,38 @@ Direct account access is unnecessary for local history.
 **Reason.** Ivy hosts ordinary shells and several independent agent clients. A user who never works with Gentle should spend neither screen space nor startup work on it. Choosing to expose a launcher and choosing to start an agent are two distinct actions.
 
 **Discarded.** Automatic executable discovery at startup would turn an installed command into an implicit preference. An always-visible empty task section would reserve workspace space before a producer had anything to publish. Making Ivy's own authentication a prerequisite would break D4.
+
+## D132 — The title bar chip reads allowances with AI usage closed
+
+**Decision.** A chip in the wide title bar shows the subscription allowances a person has enabled
+in this window (#283). It amends D128 and D129 in three places:
+
+- Closing AI usage no longer revokes Codex allowance reads. Only «Disable allowance reads» does,
+  and it still clears the observation and cancels a request in flight at once.
+- While reads are enabled and the chip shows Codex, Ivy reads again five minutes after the last
+  read finished. The first read starts as soon as reads are enabled. One read is in flight at
+  most, and a read that was revoked does not start the clock.
+- While the chip shows Claude, a launch's broker wakes the window when the windows it reports
+  change. A frame that repeats the same values does not wake it.
+
+The chip shows the most recently updated Claude launch. A reading older than 30 minutes, or none
+yet, is greyed as stale rather than shown as a figure. «Shows» means the agent is one of the chip's
+items, not that the bar is wide enough to draw it. A narrow window that hides the chip keeps the
+cadence, so the figure is current when the window widens. A measured run starts no background
+read.
+
+**Why.** A glance at the bar is only worth something if the figure is current with AI usage
+closed, which is where a person spends their time. D129's revoke-on-close made every Codex figure
+disappear the moment it was read. Five minutes keeps a 5-hour window's figure within a few points
+while starting the official client about twelve times an hour. Timing from the end of a read,
+rather than its start, keeps a slow client from overlapping itself. Waking on a change in value
+alone keeps a statusline that repeats itself on every keystroke from repainting the window.
+
+**Discarded.**
+- Keeping revoke-on-close and reading only while AI usage is open: the chip would be stale
+  whenever it is useful.
+- A shorter cadence: it spawns the client more often for a figure that moves slowly.
+- Reading on a timer from start to start: a slow read would overlap the next one.
+- Waking on every Claude frame, as D128 already discarded for the closed view.
+- Pausing the Codex cadence while a narrow window hides the chip: the figure's freshness would
+  depend on the window's width.

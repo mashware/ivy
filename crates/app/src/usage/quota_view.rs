@@ -301,18 +301,18 @@ impl QuotaView {
     /// What the chip reads: the most recently updated launch's snapshot, since several launches can
     /// report and none of them is verified to be the account the person means.
     pub(super) fn chip_source(&self) -> super::chip::Source {
-        use super::chip::{Reading, Source, Window};
+        use super::chip::{Reading, Source, Allowance};
         if !self.enabled.load(Ordering::Acquire) {
             return Source::Off;
         }
         let window = |state: WindowState| match state {
             WindowState::Absent => None,
-            WindowState::Expired => Some(Window {
+            WindowState::Expired => Some(Allowance {
                 used: None,
                 resets_at: None,
                 expired: true,
             }),
-            WindowState::Reported(window) => Some(Window {
+            WindowState::Reported(window) => Some(Allowance {
                 used: window.used_percentage,
                 resets_at: window.resets_at,
                 expired: false,

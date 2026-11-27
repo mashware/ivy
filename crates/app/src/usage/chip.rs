@@ -74,7 +74,7 @@ pub(super) enum Tone {
 /// One allowance window as its source reported it. `expired` is a window whose reset has passed:
 /// what it holds now is unknown, so it is never shown as a percentage.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Window {
+pub(super) struct Allowance {
     pub(super) used: Option<f64>,
     pub(super) resets_at: Option<i64>,
     pub(super) expired: bool,
@@ -84,12 +84,12 @@ pub(super) struct Window {
 pub(super) struct Reading {
     /// Seconds since the epoch.
     pub(super) observed_at: i64,
-    pub(super) five_hour: Option<Window>,
-    pub(super) weekly: Option<Window>,
+    pub(super) five_hour: Option<Allowance>,
+    pub(super) weekly: Option<Allowance>,
 }
 
 impl Reading {
-    fn window(&self, span: Span) -> Option<Window> {
+    fn window(&self, span: Span) -> Option<Allowance> {
         match span {
             Span::FiveHour => self.five_hour,
             Span::Weekly => self.weekly,
@@ -315,7 +315,7 @@ where
 
 fn window_line<Tz: TimeZone>(
     span: Span,
-    window: Option<Window>,
+    window: Option<Allowance>,
     stale: bool,
     now: i64,
     zone: &Tz,
@@ -380,8 +380,8 @@ mod tests {
         FixedOffset::east_opt(0).unwrap()
     }
 
-    fn window(used: f64, resets_at: i64) -> Option<Window> {
-        Some(Window {
+    fn window(used: f64, resets_at: i64) -> Option<Allowance> {
+        Some(Allowance {
             used: Some(used),
             resets_at: Some(resets_at),
             expired: false,
@@ -394,7 +394,7 @@ mod tests {
         midnight + hours * 3600 + minutes * 60
     }
 
-    fn read(five_hour: Option<Window>, weekly: Option<Window>) -> Source {
+    fn read(five_hour: Option<Allowance>, weekly: Option<Allowance>) -> Source {
         Source::Read(Reading {
             observed_at: NOW - 60,
             five_hour,
@@ -447,12 +447,12 @@ mod tests {
             weekly: window(0.0, NOW + 86_400 * 2),
         });
         let expired = read(
-            Some(Window {
+            Some(Allowance {
                 used: Some(0.0),
                 resets_at: Some(NOW - 1),
                 expired: true,
             }),
-            Some(Window {
+            Some(Allowance {
                 used: None,
                 resets_at: None,
                 expired: false,

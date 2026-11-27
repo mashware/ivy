@@ -727,6 +727,7 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/usage/codex_controls.rs"),
     ),
     ("src/usage/paint.rs", include_str!("../src/usage/paint.rs")),
+    ("src/usage/report.rs", include_str!("../src/usage/report.rs")),
     (
         "src/usage/quota_broker.rs",
         include_str!("../src/usage/quota_broker.rs"),
