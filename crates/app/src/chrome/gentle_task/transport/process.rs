@@ -3,18 +3,122 @@
 mod windows;
 
 use super::wire::{self, Incoming};
-use super::{Answer, Dialogs, Event, Inbox, Initial, Message};
-use serde_json::json;
+use super::{Answer, Dialogs, Event, HelperList, HelperMailbox, Inbox, Initial, Message, helpers};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 enum Outgoing {
     Command(serde_json::Value),
     Reply(String, Answer, Option<Instant>),
+}
+
+#[derive(Default)]
+struct HelperFeed {
+    epoch: u64,
+    sequence: u64,
+    latest: Option<Value>,
+    invalid: Option<Value>,
+}
+
+impl HelperFeed {
+    fn publish(&mut self, event: Option<Value>) {
+        let Some(event) = event else {
+            *self = Self {
+                epoch: self.epoch + 1,
+                ..Self::default()
+            };
+            return;
+        };
+        match event["seq"].as_u64() {
+            Some(seq) if seq > self.sequence => {
+                self.sequence = seq;
+                self.latest = Some(event);
+                self.invalid = None;
+            }
+            None | Some(0) => self.invalid = Some(event),
+            _ => {}
+        }
+    }
+
+    fn take(&mut self, epoch: u64) -> [Option<Value>; 2] {
+        if self.epoch == epoch {
+            [self.latest.take(), self.invalid.take()]
+        } else {
+            [None, None]
+        }
+    }
+}
+
+struct HelperWatch {
+    monitor: helpers::Monitor,
+    current: HelperList,
+    display: HelperMailbox,
+    feed: Arc<Mutex<HelperFeed>>,
+    epoch: u64,
+}
+
+impl HelperWatch {
+    fn apply(
+        &mut self,
+        (request, status): (Option<Value>, Option<helpers::Snapshot>),
+        writer: &mpsc::SyncSender<Outgoing>,
+    ) {
+        if let Some(status) = status {
+            self.publish(status);
+        }
+        if let Some(request) = request
+            && writer.try_send(Outgoing::Command(request)).is_err()
+        {
+            let status = self.monitor.write_failed(Instant::now());
+            self.publish(status);
+        }
+    }
+
+    fn publish(&mut self, status: helpers::Snapshot) {
+        let next = match status {
+            helpers::Snapshot::Rows(rows) => HelperList {
+                rows,
+                unavailable: false,
+            },
+            helpers::Snapshot::Reset => HelperList::default(),
+            helpers::Snapshot::Unavailable => {
+                if self.current.unavailable {
+                    return;
+                }
+                self.current.unavailable = true;
+                self.display.publish(self.current.clone());
+                return;
+            }
+        };
+        if next != self.current {
+            self.current = next;
+            self.display.publish(self.current.clone());
+        }
+    }
+
+    fn start(&mut self, writer: &mpsc::SyncSender<Outgoing>) {
+        let update = self.monitor.start(Instant::now());
+        self.apply(update, writer);
+    }
+
+    fn poll(&mut self, writer: &mpsc::SyncSender<Outgoing>) {
+        let events = self
+            .feed
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take(self.epoch);
+        for event in events.into_iter().flatten() {
+            let update = self.monitor.observe(&event, Instant::now());
+            self.apply(update, writer);
+        }
+        let update = self.monitor.tick(Instant::now());
+        self.apply(update, writer);
+    }
 }
 
 fn prompt(id: &str, message: String) -> Outgoing {
@@ -86,10 +190,17 @@ pub(super) fn run(
     let stdout = owned.child.stdout.take().expect("piped stdout");
     let mut stdin = owned.child.stdin.take().expect("piped stdin");
     let reader = inbox.clone();
+    let feed = Arc::new(Mutex::new(HelperFeed::default()));
+    let reader_feed = feed.clone();
     thread::Builder::new()
         .name("gentle-read".into())
         .spawn(move || {
-            if let Err(reason) = wire::receive(stdout, &reader) {
+            if let Err(reason) = wire::receive(stdout, &reader, &|event| {
+                reader_feed
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .publish(event);
+            }) {
                 let _ = reader.send(Message::Failed(reason));
             }
         })
@@ -126,11 +237,19 @@ pub(super) fn run(
         })
         .map_err(|e| e.to_string())?;
 
+    let mut helpers = HelperWatch {
+        monitor: helpers::Monitor::default(),
+        current: HelperList::default(),
+        display: initial.helpers,
+        feed,
+        epoch: 0,
+    };
     let mut ready = initial.claimed.swap(true, Ordering::AcqRel);
     if !ready {
         writer
             .try_send(prompt(wire::PROMPT_ID, initial.task))
             .map_err(|_| "Could not send the initial prompt to Gentle.".to_string())?;
+        helpers.start(&writer);
     }
     let mut expected_prompt = (!ready).then(|| wire::PROMPT_ID.to_owned());
     let mut has_assignment = !ready;
@@ -153,6 +272,7 @@ pub(super) fn run(
         let tick = stop.tick(Instant::now());
         apply_stop(tick, &mut stop, &writer, &mut dialogs, &mut ready, emit)?;
         dialogs.expire(emit);
+        helpers.poll(&writer);
         let msg = match requests.recv_timeout(Duration::from_millis(100)) {
             Ok(msg) => msg,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -193,6 +313,8 @@ pub(super) fn run(
                         expected_prompt = Some(id);
                         if has_assignment {
                             stop.follow_up();
+                        } else {
+                            helpers.start(&writer);
                         }
                         has_assignment = true;
                     }
@@ -205,6 +327,16 @@ pub(super) fn run(
                         break Err("The Gentle connection closed.".into());
                     }
                 }
+            }
+            Message::Incoming(Incoming::HelperReset) => {
+                helpers.epoch += 1;
+                if has_assignment {
+                    helpers.start(&writer);
+                }
+            }
+            Message::Incoming(Incoming::HelperControl(value)) => {
+                let update = helpers.monitor.observe(&value, Instant::now());
+                helpers.apply(update, &writer);
             }
             Message::Incoming(Incoming::StopControl(value)) => {
                 let update = stop.observe(&value, Instant::now());
@@ -308,6 +440,7 @@ pub(super) fn run(
             Message::Failed(reason) => break Err(reason),
         }
     };
+    helpers.poll(&writer);
     if result.is_err() {
         for id in dialogs.writing {
             emit(Event::Uncertain(id));
@@ -454,5 +587,30 @@ fn stop_and_reap(child: &mut Child) -> std::io::Result<()> {
             }));
         }
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn helper_bursts_retain_the_latest_projection_for_the_correct_owner() {
+        let mut feed = HelperFeed::default();
+        for seq in 1..=1024 {
+            feed.publish(Some(json!({"seq":seq})));
+        }
+        feed.publish(Some(json!({"seq":8})));
+        feed.publish(Some(json!({"seq":"invalid"})));
+        assert_eq!(
+            feed.take(0),
+            [Some(json!({"seq":1024})), Some(json!({"seq":"invalid"}))]
+        );
+        assert_eq!(feed.take(0), [None, None]);
+        feed.publish(Some(json!({"seq":1025})));
+        feed.publish(None);
+        feed.publish(Some(json!({"seq":1,"owner":"B"})));
+        assert_eq!(feed.take(0), [None, None]);
+        assert_eq!(feed.take(1), [Some(json!({"seq":1,"owner":"B"})), None]);
     }
 }

@@ -42,6 +42,8 @@ Verified on Linux with Gentle Shell 5.1.0 and Pi 1.6.1. Two independently delega
 
 [Stop and follow up (#296)](https://github.com/mashware/ivy/issues/296) covers interrupting the selected assignment, checking its visible helpers and jobs, and continuing the same conversation. The transcript and delegated-work views are still pending.
 
+[Helper list (#298)](https://github.com/mashware/ivy/issues/298) adds session-owned helper names, IDs and reported state. The list retains observation limits and disconnection status.
+
 Done when: a user can assign work, observe delegation, handle a question and see completion from Ivy. A noisy or terminated session leaves the neighboring console responsive.
 
 ## Cross-project review

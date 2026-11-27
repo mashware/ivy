@@ -627,6 +627,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/chrome/gentle_task/transport/wire.rs"),
     ),
     (
+        "app/src/chrome/gentle_task/transport/helpers.rs",
+        include_str!("../src/chrome/gentle_task/transport/helpers.rs"),
+    ),
+    (
         "app/src/chrome/gentle_task/transport/wire/stop.rs",
         include_str!("../src/chrome/gentle_task/transport/wire/stop.rs"),
     ),

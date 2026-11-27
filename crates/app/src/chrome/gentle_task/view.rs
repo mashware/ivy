@@ -128,7 +128,7 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
             state.previous_focus = focus_before;
         }
         state.pressed_badge = false;
-        state.surface = Some(Surface::Questions);
+        state.surface = Some(Surface::Overview);
         ctx.request_repaint();
         return claim(state, ui);
     }
@@ -154,9 +154,20 @@ fn indicator(sessions: &BTreeMap<u64, Task>) -> Option<String> {
             return Some(format!("{count} Gentle questions"));
         }
         (id, task, "Gentle question")
-    } else {
-        let (&id, task) = sessions.iter().find(|(_, task)| task.needs_attention())?;
+    } else if let Some((&id, task)) = sessions.iter().find(|(_, task)| task.needs_attention()) {
         (id, task, "Gentle task status")
+    } else {
+        let mut count = 0;
+        let mut bounded = false;
+        let mut stale = false;
+        for list in sessions.values().filter_map(|task| task.helpers.as_ref()) {
+            count += list.rows.len();
+            bounded |= list.rows.len() == transport::HELPER_LIMIT;
+            stale |= list.unavailable && !list.rows.is_empty();
+        }
+        let plus = if bounded { "+" } else { "" };
+        let qualifier = if stale { " · last known" } else { "" };
+        return (count > 0).then(|| format!("Gentle helpers · {count}{plus}{qualifier}"));
     };
     let project = task
         .directory
@@ -196,7 +207,7 @@ fn dialog(
             let title = if compose {
                 "New Gentle task"
             } else {
-                "Gentle questions"
+                "Gentle tasks"
             };
             if crate::settings::editor::view::dialog::header(ui, title) {
                 action = Some(Action::Close);
@@ -248,21 +259,22 @@ fn dialog(
                             ui.label(error.as_str());
                         }
                     }
-                    let mut visible = false;
                     for (&task_id, task) in &mut state.sessions {
-                        if !compose && !task.needs_attention() {
+                        if !compose && !task.visible_in_overview() {
                             continue;
                         }
-                        visible = true;
                         if let Some(entry) = ui
-                            .push_id(task_id, |ui| entry(ui, task, task_id, compose))
+                            .push_id(task_id, |ui| {
+                                let action = entry(ui, task, task_id, compose);
+                                if let Some(list) = &task.helpers {
+                                    helper_rows(ui, list);
+                                }
+                                action
+                            })
                             .inner
                         {
                             action = Some(entry);
                         }
-                    }
-                    if !visible && !compose {
-                        ui.label("No pending questions.");
                     }
                 });
         });
@@ -270,6 +282,31 @@ fn dialog(
         action = Some(Action::Close);
     }
     action
+}
+
+fn helper_rows(ui: &mut egui::Ui, list: &HelperList) {
+    if !list.rows.is_empty() {
+        ui.strong("Helpers");
+    }
+    if list.unavailable {
+        ui.label(if list.rows.is_empty() {
+            "Helper list unavailable."
+        } else {
+            "Helper list unavailable. Showing last known states."
+        });
+    }
+    if list.rows.len() == transport::HELPER_LIMIT {
+        ui.label(format!(
+            "Showing {} helpers. More may exist.",
+            transport::HELPER_LIMIT
+        ));
+    }
+    for helper in &list.rows {
+        ui.label(format!(
+            "{} · {} · {}",
+            helper.name, helper.state, helper.id
+        ));
+    }
 }
 
 fn entry(ui: &mut egui::Ui, task: &mut Task, task_id: u64, compose: bool) -> Option<Action> {
@@ -405,4 +442,52 @@ fn question(ui: &mut egui::Ui, dialog: &mut Dialog) -> Option<Answer> {
         return Some(Answer::Cancel);
     }
     answer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn helper_inventory_paints_availability_and_bounds_without_empty_controls() {
+        fn labels(list: &HelperList) -> Vec<String> {
+            let ctx = egui::Context::default();
+            let output = ctx.run_ui(Default::default(), |ui| helper_rows(ui, list));
+            let labels = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            labels
+        }
+        let mut list = HelperList::default();
+        assert!(labels(&list).is_empty());
+        list.unavailable = true;
+        assert_eq!(labels(&list), ["Helper list unavailable."]);
+        list.rows = (1..=49)
+            .map(|n| transport::Helper {
+                id: format!("helper-{n}"),
+                name: "Inspector".into(),
+                state: "queued",
+            })
+            .collect();
+        let stale = labels(&list);
+        assert!(stale.contains(&"Helper list unavailable. Showing last known states.".into()));
+        assert!(stale.contains(&"Inspector · queued · helper-49".into()));
+        assert!(!stale.iter().any(|s| s.contains("More may exist")));
+        list.unavailable = false;
+        list.rows.push(transport::Helper {
+            id: "helper-50".into(),
+            name: "Inspector".into(),
+            state: "failed",
+        });
+        let bounded = labels(&list);
+        assert!(bounded.contains(&"Showing 50 helpers. More may exist.".into()));
+        assert!(bounded.contains(&"Inspector · failed · helper-50".into()));
+        assert!(!bounded.iter().any(|s| s.contains("unavailable")));
+    }
 }

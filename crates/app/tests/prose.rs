@@ -407,6 +407,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/chrome/gentle_task/transport/helpers.rs",
+        include_str!("../src/chrome/gentle_task/transport/helpers.rs"),
+        0,
+    ),
+    (
         "src/chrome/gentle_task/transport/wire/stop.rs",
         include_str!("../src/chrome/gentle_task/transport/wire/stop.rs"),
         0,
@@ -2688,6 +2693,11 @@ const PROTOTYPES: &[(&str, &str, usize)] = &[
     (
         "prototypes/gentle-rpc/probe.py",
         include_str!("../../../prototypes/gentle-rpc/probe.py"),
+        95,
+    ),
+    (
+        "prototypes/gentle-rpc/helpers.py",
+        include_str!("../../../prototypes/gentle-rpc/helpers.py"),
         95,
     ),
     (

@@ -6,7 +6,7 @@ pub(crate) use transport::shutdown;
 use crate::Window;
 use eframe::egui;
 use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
-use transport::{Answer, Event, Kind, Question, Session};
+use transport::{Answer, Event, HelperList, Kind, Question, Session};
 
 #[derive(Default)]
 pub(crate) struct GentleTasks {
@@ -34,7 +34,7 @@ enum Surface {
         focus: bool,
         error: String,
     },
-    Questions,
+    Overview,
 }
 
 struct Task {
@@ -42,6 +42,7 @@ struct Task {
     session: Option<Session>,
     dialogs: Vec<Dialog>,
     issue: Option<String>,
+    helpers: Option<HelperList>,
     initial_handled: bool,
     turn: Turn,
     follow_up: String,
@@ -81,8 +82,19 @@ impl Task {
                 .any(|d| matches!(d.status, Status::Waiting | Status::Uncertain))
     }
 
+    fn has_helpers(&self) -> bool {
+        self.helpers
+            .as_ref()
+            .is_some_and(|list| !list.rows.is_empty())
+    }
+
+    fn visible_in_overview(&self) -> bool {
+        self.needs_attention() || self.has_helpers()
+    }
+
     fn receive(&mut self, event: Event) {
         match event {
+            Event::Helpers(list) => self.helpers = Some(list),
             Event::Question(question) => {
                 if self.dialogs.iter().any(|d| d.question.id == question.id) {
                     return;
@@ -184,6 +196,9 @@ impl Task {
 
     fn disconnect(&mut self, reason: String) {
         self.session = None;
+        if let Some(list) = &mut self.helpers {
+            list.unavailable = true;
+        }
         self.turn = Turn::Ready;
         self.issue = Some(reason);
         self.retire_questions();
@@ -225,8 +240,8 @@ impl GentleTasks {
     fn prune(&mut self, ctx: &egui::Context) {
         self.sessions
             .retain(|_, task| task.session.is_some() || task.needs_attention());
-        if matches!(self.surface, Some(Surface::Questions))
-            && !self.sessions.values().any(Task::needs_attention)
+        if matches!(self.surface, Some(Surface::Overview))
+            && !self.sessions.values().any(Task::visible_in_overview)
         {
             self.close(ctx);
         }
@@ -264,6 +279,7 @@ impl GentleTasks {
                         session: Some(session),
                         dialogs: Vec::new(),
                         issue: None,
+                        helpers: None,
                         initial_handled: false,
                         turn: Turn::Working,
                         follow_up: String::new(),
@@ -366,6 +382,7 @@ mod tests {
             session: None,
             dialogs: Vec::new(),
             issue: None,
+            helpers: None,
             initial_handled: false,
             turn: Turn::Working,
             follow_up: String::new(),
@@ -394,6 +411,7 @@ mod tests {
             session: None,
             dialogs: Vec::new(),
             issue: None,
+            helpers: None,
             initial_handled: false,
             turn: Turn::Working,
             follow_up: String::new(),
@@ -440,6 +458,7 @@ mod tests {
             session: None,
             dialogs: vec![],
             issue: None,
+            helpers: None,
             initial_handled: false,
             turn: Turn::Working,
             follow_up: "another prompt".into(),
@@ -469,7 +488,7 @@ mod tests {
         let ctx = egui::Context::default();
         let editor = egui::Id::new("review-note");
         let mut state = GentleTasks {
-            surface: Some(Surface::Questions),
+            surface: Some(Surface::Overview),
             previous_focus: Some(editor),
             ..Default::default()
         };
@@ -478,6 +497,7 @@ mod tests {
             session: None,
             dialogs: vec![],
             issue: None,
+            helpers: None,
             initial_handled: false,
             turn: Turn::Working,
             follow_up: String::new(),
@@ -498,7 +518,7 @@ mod tests {
             .unwrap()
             .receive(Event::Expired("one".into()));
         state.prune(&ctx);
-        assert!(matches!(state.surface, Some(Surface::Questions)));
+        assert!(matches!(state.surface, Some(Surface::Overview)));
         state
             .sessions
             .get_mut(&1)
@@ -711,13 +731,30 @@ mod tests {
 
         let exe = root.0.join("gentle-fixture");
         fs::write(&exe, r#"#!/usr/bin/env python3
-import atexit, json, os, pathlib, signal, sys, time
+import atexit, json, os, pathlib, signal, sys, threading, time
 file = pathlib.Path
 atexit.register(lambda: file("retired").touch())
 signal.signal(signal.SIGTERM, lambda *_: sys.exit())
 schema = "gentle-shell.desktop-rpc/v1"
+output = threading.Lock()
 def emit(**value):
-    print(json.dumps(value), flush=True)
+    with output:
+        print(json.dumps(value), flush=True)
+def rows(state):
+    return [{"id":"owner-"+file.cwd().name,"agent":"Inspector","status":state}] if state else []
+def disconnect_on_request():
+    while not file("disconnect").exists():
+        time.sleep(0.01)
+    os._exit(0)
+def update_helpers():
+    for seq, (trigger, state) in enumerate([("advance","waiting"),("clear","")], start=1):
+        while not file(trigger).exists():
+            time.sleep(0.01)
+        envelope = dict(schema=schema, kind="event", event="agents_update", seq=seq,
+                        data={"agents":rows(state)})
+        emit(type="extension_ui_request", method="setWidget", widgetKey="gentle-desktop-rpc",
+             widgetLines=[json.dumps(envelope)])
+
 def reply(message, data):
     emit(type="response", id=message["id"], command=message["type"], success=True, data=data)
 def question(title, choice, dialog_id="same-id"):
@@ -744,13 +781,19 @@ for line in sys.stdin:
         prompt = message["message"]
         if prompt.startswith("/gentle:desktop "):
             request = json.loads(prompt.split(" ",1)[1])
-            values = {"capabilities":{"methods":["list_subagents","cancel_subagent","list_jobs","cancel_job"]},
+            values = {"capabilities":{"methods":["list_subagents","cancel_subagent","list_jobs","cancel_job"], "events":["agents_update"]},
                       "list_subagents":{"agents":[]}, "list_jobs":{"jobs":[]}}
+            if file.cwd().name in ["D", "E"]:
+                values["list_subagents"] = {"agents":rows("running")}
             envelope = dict(schema=schema, kind="response", requestId=request["requestId"],
                             ok=True, data=values[request["method"]])
             emit(type="extension_ui_request", method="setWidget", widgetKey="gentle-desktop-rpc",
                  widgetLines=[json.dumps(envelope)])
             reply(message, {"disposition":"handled"})
+        elif prompt == "observe":
+            reply(message, {})
+            threading.Thread(target=update_helpers, daemon=True).start()
+            threading.Thread(target=disconnect_on_request, daemon=True).start()
         elif prompt == "ask":
             reply(message, {})
             file("initial").write_text(str(os.getpid()))
@@ -766,8 +809,13 @@ for line in sys.stdin:
         let add_task = |window: &mut Window, id: u64, name: &str| {
             let cwd = root.0.join(name);
             fs::create_dir(&cwd).unwrap();
+            let prompt = if matches!(name, "D" | "E") {
+                "observe"
+            } else {
+                "ask"
+            };
             let session =
-                Session::start(exe.clone(), cwd.clone(), "ask".into(), Arc::new(|| {})).unwrap();
+                Session::start(exe.clone(), cwd.clone(), prompt.into(), Arc::new(|| {})).unwrap();
             window.chrome.gentle_task.sessions.insert(
                 id,
                 Task {
@@ -775,6 +823,7 @@ for line in sys.stdin:
                     session: Some(session),
                     dialogs: vec![],
                     issue: None,
+                    helpers: None,
                     initial_handled: false,
                     turn: Turn::Working,
                     follow_up: String::new(),
@@ -875,6 +924,77 @@ for line in sys.stdin:
         assert_eq!(point(&labels, "review anchor at second hunk"), anchor);
         assert_eq!(window.active, 0);
         assert_eq!(window.active().focus, pane);
+        add_task(&mut window, 4, "D");
+        add_task(&mut window, 5, "E");
+        let labels = wait(&mut window, &ctx, "Gentle helpers · 2");
+        assert_eq!(point(&labels, "review anchor at second hunk"), anchor);
+        assert!(!labels.iter().any(|(text, _)| text.contains("Inspector")));
+        click(&mut window, &ctx, point(&labels, "Gentle helpers · 2"));
+        let labels = wait(&mut window, &ctx, "Inspector · running · owner-E");
+        let section_d = point(&labels, "Session #4").y;
+        let section_e = point(&labels, "Session #5").y;
+        assert!(
+            (section_d..section_e).contains(&point(&labels, "Inspector · running · owner-D").y)
+        );
+        assert!(point(&labels, "Inspector · running · owner-E").y > section_e);
+        fs::write(root.0.join("D/advance"), "").unwrap();
+        let labels = wait(&mut window, &ctx, "Inspector · waiting · owner-D");
+        assert!(point(&labels, "Inspector · running · owner-E").y > point(&labels, "Session #5").y);
+        assert!(!labels.iter().any(|(s, _)| s.contains("running · owner-D")));
+        fs::write(root.0.join("D/clear"), "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let labels = frame(&mut window, &ctx, vec![]);
+            if !labels.iter().any(|(s, _)| s.contains("Session #4")) {
+                assert!(
+                    labels
+                        .iter()
+                        .any(|(s, _)| s.contains("Inspector · running · owner-E"))
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "withdrawn inventory remained visible"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        frame(
+            &mut window,
+            &ctx,
+            vec![Input::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        let labels = wait(&mut window, &ctx, "Gentle helpers · 1");
+        assert_eq!(point(&labels, "review anchor at second hunk"), anchor);
+        assert_eq!(window.active().focus, pane);
+
+        fs::write(root.0.join("E/disconnect"), "").unwrap();
+        let labels = wait(&mut window, &ctx, "Gentle task status");
+        click(&mut window, &ctx, point(&labels, "Gentle task status"));
+        let labels = wait(&mut window, &ctx, "Showing last known states");
+        assert!(
+            labels
+                .iter()
+                .any(|(s, _)| s.contains("Inspector · running · owner-E"))
+        );
+        assert!(!labels.iter().any(|(s, _)| s.contains("owner-D")));
+        frame(
+            &mut window,
+            &ctx,
+            vec![Input::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
         add_task(&mut window, 3, "C");
         wait(&mut window, &ctx, "Gentle question");
         crate::settings::interpret("gentle.enabled = off")
@@ -882,7 +1002,9 @@ for line in sys.stdin:
             .0
             .apply_to(&mut window);
         let labels = frame(&mut window, &ctx, vec![]);
-        assert!(!labels.iter().any(|(t, _)| t.contains("Gentle question")));
+        assert!(!labels.iter().any(|(t, _)| t.contains("Gentle question")
+            || t.contains("Gentle helpers")
+            || t.contains("owner-E")));
         let deadline = Instant::now() + Duration::from_secs(5);
         while !root.0.join("C/retired").exists() {
             assert!(Instant::now() < deadline, "disabling Gentle left C running");

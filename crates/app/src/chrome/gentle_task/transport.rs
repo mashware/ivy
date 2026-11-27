@@ -1,5 +1,7 @@
 //! Each native task owns the pipes of the client that accepted its prompt.
+mod helpers;
 mod process;
+pub(super) use helpers::{Helper, LIMIT as HELPER_LIMIT};
 mod wire;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,6 +40,7 @@ pub(super) enum Answer {
 
 #[derive(Debug)]
 pub(super) enum Event {
+    Helpers(HelperList),
     PromptAccepted,
     Notice(String),
     Handled,
@@ -104,12 +107,59 @@ enum Turn {
     Disconnected,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct HelperList {
+    pub(super) rows: Vec<Helper>,
+    pub(super) unavailable: bool,
+}
+
+#[derive(Clone)]
+struct HelperMailbox {
+    slot: Arc<Mutex<Option<HelperList>>>,
+    wake: Wake,
+}
+
+impl HelperMailbox {
+    fn new(wake: Wake) -> Self {
+        Self {
+            slot: Arc::default(),
+            wake,
+        }
+    }
+
+    fn publish(&self, snapshot: HelperList) {
+        let old = self
+            .slot
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .replace(snapshot);
+        if old.is_none() {
+            (self.wake)();
+        }
+    }
+
+    fn take(&self) -> Option<HelperList> {
+        match self.slot.try_lock() {
+            Ok(mut slot) => slot.take(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                // An update already scheduled a frame; this frame can race its replacement.
+                (self.wake)();
+                None
+            }
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner().take(),
+        }
+    }
+}
+
 struct Initial {
+    helpers: HelperMailbox,
     task: String,
     claimed: Arc<AtomicBool>,
 }
 
 pub(super) struct Session {
+    helpers: HelperMailbox,
+    closing: Option<String>,
     initial_claimed: Arc<AtomicBool>,
     turn: Turn,
     inbox: Inbox,
@@ -161,7 +211,9 @@ impl Session {
         let launch_claimed = Arc::new(AtomicBool::new(false));
         let worker_claim = launch_claimed.clone();
         let initial_claimed = Arc::new(AtomicBool::new(false));
+        let helpers = HelperMailbox::new(wake.clone());
         let initial = Initial {
+            helpers: helpers.clone(),
             task,
             claimed: initial_claimed.clone(),
         };
@@ -197,6 +249,8 @@ impl Session {
             handle,
         });
         Ok(Self {
+            helpers,
+            closing: None,
             initial_claimed,
             turn: Turn::Working,
             inbox,
@@ -247,19 +301,27 @@ impl Session {
             return None;
         }
         let event = loop {
+            if let Some(reason) = self.closing.take() {
+                break Event::Closed(reason);
+            }
             match self.events.try_recv() {
                 // A queued natural completion can race the click. The supervisor sends at most
                 // one terminal turn event before the next prompt is accepted.
                 Ok(Event::Completed | Event::TurnFailed(_)) if self.turn == Turn::Stopping => continue,
+                Ok(Event::Closed(reason)) => self.closing = Some(reason),
                 Ok(event) => break event,
                 Err(mpsc::TryRecvError::Disconnected) =>
-                    break Event::Closed("The Gentle connection closed.".into()),
+                    self.closing = Some("The Gentle connection closed.".into()),
                 Err(mpsc::TryRecvError::Empty) if self.turn == Turn::BeforePrompt =>
                     break Event::StopOutcome {
                         message: "The initial prompt was never sent. Follow-ups will use this session when Gentle starts.".into(),
                         can_continue: true,
                     },
-                Err(mpsc::TryRecvError::Empty) => return None,
+                Err(mpsc::TryRecvError::Empty) => return self.helpers.take().map(Event::Helpers),
+            }
+            // The supervisor has published its final snapshot before sending the disconnect.
+            if let Some(snapshot) = self.helpers.take() {
+                return Some(Event::Helpers(snapshot));
             }
         };
         match &event {
@@ -412,11 +474,61 @@ mod tests {
     }
 
     #[test]
+    fn question_precedes_a_burst_and_disconnect_follows_its_last_snapshot() {
+        use std::sync::atomic::AtomicUsize;
+        let requests = Arc::new(AtomicUsize::new(0));
+        let count = requests.clone();
+        let helpers = HelperMailbox::new(Arc::new(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+        }));
+        let (inbox, _) = mpsc::sync_channel(2);
+        let (tx, events) = mpsc::sync_channel(2);
+        let (stop, _) = mpsc::channel();
+        let mut session = Session {
+            helpers: helpers.clone(),
+            closing: None,
+            initial_claimed: Arc::new(AtomicBool::new(true)),
+            turn: Turn::Working,
+            inbox,
+            events,
+            stop,
+            available: Default::default(),
+        };
+        for n in 0..512 {
+            helpers.publish(HelperList {
+                rows: vec![Helper {
+                    id: n.to_string(),
+                    name: "Reviewer".into(),
+                    state: "running",
+                }],
+                unavailable: n == 511,
+            });
+        }
+        tx.send(Event::Question(Question {
+            id: "pick".into(),
+            title: "Pick".into(),
+            kind: Kind::Select(vec!["One".into()]),
+            deadline: None,
+        }))
+        .unwrap();
+        tx.send(Event::Closed("Lost".into())).unwrap();
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        assert!(matches!(session.try_event(), Some(Event::Question(q)) if q.id == "pick"));
+        assert!(
+            matches!(session.try_event(), Some(Event::Helpers(list)) if list.unavailable && list.rows[0].id == "511")
+        );
+        assert!(matches!(session.try_event(), Some(Event::Closed(reason)) if reason == "Lost"));
+        assert!(session.try_event().is_none());
+    }
+
+    #[test]
     fn an_expired_or_foreign_choice_is_never_queued() {
         let (inbox, messages) = mpsc::sync_channel(2);
         let (tx, events) = mpsc::sync_channel(2);
         let (stop, _) = mpsc::channel();
         let mut session = Session {
+            helpers: HelperMailbox::new(Arc::new(|| {})),
+            closing: None,
             initial_claimed: Arc::new(AtomicBool::new(true)),
             turn: Turn::Working,
             inbox,
@@ -543,7 +655,8 @@ if prompt["message"] == "persistent":
             method = inner["method"]
             data = {"capabilities":dict(methods=["list_subagents","cancel_subagent","list_jobs","cancel_job"]),
                     "list_subagents":dict(agents=[]),"list_jobs":dict(jobs=[])}[method]
-            record("desktop-methods", method)
+            if not inner["requestId"].startswith("ivy-helpers-"):
+                record("desktop-methods", method)
             receipt = dict(schema=inner["schema"],kind="response",requestId=inner["requestId"],ok=True,data=data)
             send(dict(type="extension_ui_request", method="setWidget", widgetKey="gentle-desktop-rpc",widgetLines=[json.dumps(receipt)]))
         else:
@@ -566,6 +679,10 @@ if prompt["message"] == "retire":
     signal.signal(signal.SIGTERM, retired)
 print(json.dumps(dict(type="extension_ui_request",method="select",id="same-id",title="Pick",options=["Left","Right"])),flush=True)
 line = sys.stdin.readline()
+while line and json.loads(line)["type"] == "get_commands":
+    command = json.loads(line)
+    print(json.dumps(dict(type="response", command="get_commands", id=command["id"], success=True, data=dict(commands=[]))),flush=True)
+    line = sys.stdin.readline()
 if prompt["message"] == "retire" and not line:
     retired()
 reply = json.loads(line)
