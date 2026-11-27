@@ -33,11 +33,16 @@ pub(super) fn read(cancelled: Arc<AtomicBool>) -> Result<Observation, Failure> {
     let mut server = AllowanceProcess::start(&program, &args, true, deadline, cancelled)?;
     handshake(&mut server, &version)?;
     let before = account(&mut server, 2)?;
-    let quotas = rate_limits(&mut server);
+    // A transport failure ends the read; an error answer is judged only once the account is known
+    // not to have changed, since a changed account explains any answer.
+    let quotas = rate_limits(&mut server)?;
     let observed_at = chrono::Utc::now().timestamp();
     let after = account(&mut server, 4)?;
     server.finish()?;
-    bind_observation(before, after, quotas?, observed_at)
+    if !before.matches(&after) {
+        return Err(ACCOUNT_CHANGED);
+    }
+    bind_observation(before, after, quotas.map_err(quota_failure)?, observed_at)
 }
 
 fn handshake(server: &mut AllowanceProcess, version: &str) -> Result<(), Failure> {
@@ -50,26 +55,43 @@ fn handshake(server: &mut AllowanceProcess, version: &str) -> Result<(), Failure
                 "capabilities": {"experimentalApi": true}
             }),
         )
-        // A server that exits before answering is most likely refusing a flag of this launch.
-        .map_err(|_| Failure::Refused("Codex app-server did not start with --disable plugins."))?
-        .map_err(|_| Failure::Refused("Codex refused the app-server handshake."))?;
+        // Only a server that exits before its first answer points at this launch's flags; a
+        // deadline, a malformed line or a wrong reply says nothing about them.
+        .map_err(|failure| match failure {
+            Failure::Exited => Failure::Refused(
+                "Codex app-server exited before answering; it may refuse --disable plugins.",
+            ),
+            other => other,
+        })?
+        .map_err(|code| Failure::Rpc {
+            method: "initialize",
+            code,
+        })?;
     require_agent(&hello, version)?;
     server.send(json!({"method": "initialized"}))
 }
 
-fn rate_limits(server: &mut AllowanceProcess) -> Result<serde_json::Value, Failure> {
-    server
-        .request(
-            3,
-            "account/rateLimits/read",
-            json!({"excludeResetCreditDetails": true}),
-        )?
-        .map_err(|code| match code {
-            NO_METHOD => Failure::Refused("Codex has no account/rateLimits/read method."),
-            BAD_PARAMS => Failure::Refused("Codex rejected excludeResetCreditDetails."),
-            _ => Failure::Unavailable,
-        })
+fn rate_limits(server: &mut AllowanceProcess) -> Result<Result<serde_json::Value, i64>, Failure> {
+    server.request(
+        3,
+        "account/rateLimits/read",
+        json!({"excludeResetCreditDetails": true}),
+    )
 }
+
+/// What an error answer to the quota read means, by its JSON-RPC code.
+fn quota_failure(code: i64) -> Failure {
+    match code {
+        NO_METHOD => Failure::Refused("Codex has no account/rateLimits/read method."),
+        BAD_PARAMS => Failure::Refused("Codex rejected excludeResetCreditDetails."),
+        code => Failure::Rpc {
+            method: "account/rateLimits/read",
+            code,
+        },
+    }
+}
+
+const ACCOUNT_CHANGED: Failure = Failure::Identity("Codex's account changed during the read.");
 
 /// The release the client reports, any `codex-cli <major>.<minor>.<patch>[suffix]`.
 fn client_version(line: &[u8]) -> Result<String, Failure> {
@@ -116,7 +138,10 @@ fn account(server: &mut AllowanceProcess, id: u32) -> Result<Account, Failure> {
         .map_err(|code| match code {
             NO_METHOD => Failure::Refused("Codex has no accountSession/list method."),
             BAD_PARAMS => Failure::Refused("Codex rejected accountSession/list's parameters."),
-            _ => Failure::Unavailable,
+            code => Failure::Rpc {
+                method: "accountSession/list",
+                code,
+            },
         })?;
     Account::from_response(value)
         .map_err(|_| Failure::Refused("Codex gave no complete session, user and workspace."))
@@ -213,7 +238,10 @@ impl AllowanceProcess {
             let mut value: Value =
                 serde_json::from_slice(&line).map_err(|_| Failure::Unavailable)?;
             if value.get("method").is_some() {
-                if value.get("id").is_some() || value["method"] == "account/updated" {
+                if value["method"] == "account/updated" {
+                    return Err(ACCOUNT_CHANGED);
+                }
+                if value.get("id").is_some() {
                     return Err(Failure::Unavailable);
                 }
                 continue;
@@ -248,7 +276,7 @@ impl AllowanceProcess {
             }
             let mut chunk = [0; 4096];
             match self.running.stdout.read(&mut chunk) {
-                Ok(0) => return Err(Failure::Unavailable),
+                Ok(0) => return Err(Failure::Exited),
                 Ok(count) => {
                     self.received += count;
                     if self.received > MAX_EXCHANGE {
@@ -345,6 +373,7 @@ fn check(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Failure> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::failure_text;
     use super::*;
 
     fn refusal<T: std::fmt::Debug>(result: Result<T, Failure>) -> &'static str {
@@ -395,31 +424,72 @@ mod tests {
         .unwrap()
     }
 
-    /// A release that refuses a flag or a parameter of this read says which, instead of a
-    /// generic «version»: a server that exits before the handshake is refusing its launch flags,
-    /// and an «invalid params» answer to the quota read is the excluded detail it does not know.
+    fn answering(id: u32, code: i64) -> AllowanceProcess {
+        scripted(&format!(
+            "read request\nprintf '%s\\n' '{{\"id\":{id},\"error\":{{\"code\":{code},\"message\":\"m\"}}}}'"
+        ))
+    }
+
+    /// Only a server that closes before its first answer is said to refuse the launch flags; any
+    /// other handshake failure keeps its own cause, and an error answer carries its code.
     #[test]
-    fn a_refused_flag_or_parameter_is_named() {
+    fn a_handshake_blames_the_flags_only_when_the_server_closed_first() {
         let _serial = crate::client_attestation::CHILD_TEST_SERIAL.lock().unwrap();
         let mut exits = scripted("read request\nexit 2");
         assert_eq!(
             refusal(handshake(&mut exits, "0.172.0")),
-            "Codex app-server did not start with --disable plugins."
+            "Codex app-server exited before answering; it may refuse --disable plugins."
         );
-        let mut params = scripted(
-            "read request\nprintf '%s\\n' '{\"id\":3,\"error\":{\"code\":-32602,\"message\":\"unknown field\"}}'",
+        let mut garbled = scripted("read request\nprintf 'not json\\n'\nread next");
+        assert!(matches!(
+            handshake(&mut garbled, "0.172.0"),
+            Err(Failure::Unavailable)
+        ));
+        let mut refused = answering(1, -32600);
+        let failure = handshake(&mut refused, "0.172.0").unwrap_err();
+        assert_eq!(
+            failure_text(&failure),
+            "Codex answered initialize with error -32600."
+        );
+    }
+
+    /// Error answers name what was refused: a missing method or rejected parameters by name, and
+    /// any other JSON-RPC code by its number, so a failed read can be diagnosed.
+    #[test]
+    fn error_answers_are_named_by_method_and_code() {
+        let _serial = crate::client_attestation::CHILD_TEST_SERIAL.lock().unwrap();
+        for (code, said) in [
+            (-32602, "Codex rejected excludeResetCreditDetails.".to_owned()),
+            (-32601, "Codex has no account/rateLimits/read method.".to_owned()),
+            (-32603, "Codex answered account/rateLimits/read with error -32603.".to_owned()),
+            (-32600, "Codex answered account/rateLimits/read with error -32600.".to_owned()),
+        ] {
+            let mut server = answering(3, code);
+            let answer = rate_limits(&mut server).unwrap();
+            assert_eq!(failure_text(&quota_failure(answer.unwrap_err())), said);
+        }
+        for (code, said) in [
+            (-32601, "Codex has no accountSession/list method.".to_owned()),
+            (-32602, "Codex rejected accountSession/list's parameters.".to_owned()),
+            (-32603, "Codex answered accountSession/list with error -32603.".to_owned()),
+        ] {
+            let mut server = answering(2, code);
+            assert_eq!(failure_text(&account(&mut server, 2).unwrap_err()), said);
+        }
+        let mut incomplete = scripted(
+            "read request\nprintf '%s\\n' '{\"id\":2,\"result\":{\"activeSessionId\":\"s\",\"sessions\":[]}}'",
         );
         assert_eq!(
-            refusal(rate_limits(&mut params)),
-            "Codex rejected excludeResetCreditDetails."
+            refusal(account(&mut incomplete, 2)),
+            "Codex gave no complete session, user and workspace."
         );
-        let mut method = scripted(
-            "read request\nprintf '%s\\n' '{\"id\":3,\"error\":{\"code\":-32601,\"message\":\"no\"}}'",
+        let mut switched = scripted(
+            "read request\nprintf '%s\\n' '{\"method\":\"account/updated\",\"params\":{}}'\nread next",
         );
-        assert_eq!(
-            refusal(rate_limits(&mut method)),
-            "Codex has no account/rateLimits/read method."
-        );
+        assert!(matches!(
+            account(&mut switched, 2),
+            Err(Failure::Identity("Codex's account changed during the read."))
+        ));
     }
 
     /// One read against the installed client and the person's own account, run by hand with
@@ -445,7 +515,7 @@ mod tests {
         handshake.unwrap();
         let before = account(&mut server, 2);
         eprintln!("EVIDENCE complete_account_before={}", before.is_ok());
-        let quotas = rate_limits(&mut server);
+        let quotas = rate_limits(&mut server).unwrap();
         match &quotas {
             Ok(value) => eprintln!(
                 "EVIDENCE rate_limits=ok accountId_present={} ordinaryUsageAllowed_is_bool={} keys={:?}",
@@ -455,7 +525,7 @@ mod tests {
                     .as_object()
                     .map(|map| map.keys().cloned().collect::<Vec<_>>())
             ),
-            Err(failure) => eprintln!("EVIDENCE rate_limits_failed={failure:?}"),
+            Err(code) => eprintln!("EVIDENCE rate_limits_error_code={code}"),
         }
         let after = account(&mut server, 4);
         eprintln!("EVIDENCE complete_account_after={}", after.is_ok());

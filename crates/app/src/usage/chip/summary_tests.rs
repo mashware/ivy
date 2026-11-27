@@ -188,12 +188,12 @@ fn both() -> (Source, Source) {
             named("5-hour session", FIVE_HOURS, 38.0),
             named("Weekly", WEEK, 6.0),
         ],
-        note: None,
+        last_failure: None,
     };
     let codex = Reading {
         observed_at: now,
         windows: vec![named("Weekly", WEEK, 85.0)],
-        note: None,
+        last_failure: None,
     };
     (Source::Read(claude), Source::Read(codex))
 }

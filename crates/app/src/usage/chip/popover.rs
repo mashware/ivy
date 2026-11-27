@@ -1,6 +1,6 @@
-//! The summary that opens under the chip: one tab per agent with a small bar of its 5-hour use, a
-//! header with when it was read, each window with its use, reset and pace, and a way into AI
-//! usage. It floats like a menu but is not modal, by decision (#283): it takes no keys, claims
+//! The summary that opens under the chip: with two agents on the chip, a tab each with a small bar
+//! of the window the chip shows first for it; a header with when it was read; each window with
+//! its use, reset and pace; and a way into AI usage. It floats like a menu but is not modal, by decision (#283): it takes no keys, claims
 //! the pointer over its own rectangle only and does not dim the consoles, since only modal
 //! surfaces may. `summary_tests.rs` holds it to that.
 
@@ -11,7 +11,7 @@ use crate::{Window, theme::Roles};
 use eframe::egui::{self, Align2, Color32, FontId, Painter, Rect, Sense, Stroke, pos2, vec2};
 
 const WIDTH: f32 = 380.0;
-/// The tab row's padding and the gap between its two tabs.
+/// The tab row's padding; the gap between its two tabs is `GAP`.
 const TABS_PAD: f32 = 10.0;
 const TAB_HEIGHT: f32 = 44.0;
 /// The sections' side and vertical padding.
@@ -30,19 +30,14 @@ fn proportional(size: f32) -> FontId {
     FontId::proportional(size)
 }
 
-/// The header's height: name, «Updated …» and the note when there is one.
+/// The header's height: name, then each of «Updated …», the stale note and the failure that are
+/// there.
 fn header_height(panel: &Panel) -> f32 {
-    let lines =
-        20.0 + if panel.updated.is_some() {
-            2.0 + LINE
-        } else {
-            0.0
-        } + if panel.note.is_some() {
-            2.0 + LINE
-        } else {
-            0.0
-        };
-    4.0 + lines + SECTION
+    let notes = [panel.updated.is_some(), panel.stale.is_some(), panel.failure.is_some()]
+        .into_iter()
+        .filter(|present| *present)
+        .count();
+    4.0 + 20.0 + notes as f32 * (2.0 + LINE) + SECTION
 }
 
 fn row_height(row: &Row) -> f32 {
@@ -230,7 +225,7 @@ impl Paint<'_> {
         );
     }
 
-    /// A bar of `height` across `span`, filled to `used` percent in `fill`.
+    /// A bar filling `span`, coloured to `used` percent of its width in `fill`.
     fn bar(&self, span: Rect, used: Option<f64>, fill: Color32) {
         let radius = span.height() / 2.0;
         self.painter.rect_filled(span, radius, self.roles.line);
@@ -312,16 +307,22 @@ impl Paint<'_> {
             );
             y += LINE;
         }
-        if let Some(note) = &panel.note {
-            y += 2.0;
-            self.text(
-                pos2(left, y + LINE / 2.0),
-                Align2::LEFT_CENTER,
-                note,
-                proportional(12.0),
-                self.roles.wait,
-            );
-            y += LINE;
+        let notes = [
+            (&panel.stale, self.roles.tx3),
+            (&panel.failure, self.roles.block),
+        ];
+        for (note, color) in notes {
+            if let Some(note) = note {
+                y += 2.0;
+                self.text(
+                    pos2(left, y + LINE / 2.0),
+                    Align2::LEFT_CENTER,
+                    note,
+                    proportional(12.0),
+                    color,
+                );
+                y += LINE;
+            }
         }
         y + SECTION
     }

@@ -321,7 +321,7 @@ impl QuotaView {
             .iter()
             .map(|(_, broker)| broker.snapshot())
             .collect();
-        chip_source(&snapshots)
+        chip_source(&snapshots, self.disconnected)
     }
 
     pub(super) fn install(&mut self, name: usize, broker: Arc<Broker>) {
@@ -426,7 +426,7 @@ fn paint_window(ui: &mut egui::Ui, label: &str, state: WindowState) {
 }
 
 /// The chip's reading from the launches' snapshots.
-fn chip_source(snapshots: &[Snapshot]) -> super::chip::Source {
+fn chip_source(snapshots: &[Snapshot], disconnected: bool) -> super::chip::Source {
     use super::chip::{Allowance, FIVE_HOURS, Named, Reading, Source, WEEK};
     let named = |name: &str, length: i64, state: WindowState| {
         let window = match state {
@@ -464,17 +464,30 @@ fn chip_source(snapshots: &[Snapshot]) -> super::chip::Source {
                 .into_iter()
                 .flatten()
                 .collect(),
-                note: None,
+                last_failure: None,
             }),
             _ => None,
         })
         .max_by_key(|reading| reading.observed_at);
+    // An error comes from the launch's statusline or from Ivy's own receiver; the words blame
+    // neither, and a newer error on one launch is not hidden behind another launch's reading.
+    const STOPPED: &str = "Claude reporting stopped with an error.";
+    let errored = snapshots.contains(&Snapshot::ProducerError);
+    let waiting = snapshots.contains(&Snapshot::Waiting);
+    // A launch ended when its snapshot says so, or when AI usage already pruned it.
+    let ended = disconnected || snapshots.contains(&Snapshot::Disconnected);
+    // A reading outranks everything, and a launch still to report outranks a failed or ended one.
     match latest {
-        Some(reading) => Source::Read(reading),
-        None if snapshots.contains(&Snapshot::ProducerError) => {
-            Source::Failed("Claude's statusline reported an error.".into())
+        Some(mut reading) => {
+            reading.last_failure = errored.then(|| STOPPED.to_owned());
+            Source::Read(reading)
         }
-        None => Source::Waiting("Reporting on · launch Claude with it from AI usage".into()),
+        None if waiting || (!errored && !ended) => {
+            Source::Waiting("Reporting on · launch Claude with it from AI usage".into())
+        }
+        None if errored => Source::Failed(STOPPED.into()),
+        // Every launch that could report has ended: there is nothing left to wait for.
+        None => Source::Ended("Start Claude Code with reporting from AI usage.".into()),
     }
 }
 
@@ -611,8 +624,13 @@ mod tests {
         failing.observe_for_test(Snapshot::ProducerError);
         view.install(1, Arc::clone(&failing));
         assert!(
+            matches!(view.chip_source(), Source::Waiting(_)),
+            "a launch still to report outranks a failed one"
+        );
+        waiting.stop();
+        assert!(
             matches!(view.chip_source(), Source::Failed(_)),
-            "an error says so"
+            "with no launch left to wait for, the error says so"
         );
         for (received_at, used) in [(200, 20.0), (300, 30.0), (100, 10.0)] {
             let broker = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
@@ -623,11 +641,34 @@ mod tests {
             panic!("a reading was expected");
         };
         assert_eq!(reading.observed_at, 300);
+        assert_eq!(
+            reading.last_failure.as_deref(),
+            Some("Claude reporting stopped with an error."),
+            "another launch's error is not hidden behind this reading"
+        );
         let five_hour = reading.window(super::super::chip::FIVE_HOURS).unwrap();
         assert_eq!(five_hour.used, Some(30.0));
         assert!(reading.window(super::super::chip::WEEK).unwrap().expired);
         view.disable();
         assert_eq!(view.chip_source(), Source::Off);
+    }
+
+    /// A launch that ended is said to have ended — before AI usage prunes it, and after —
+    /// rather than read as a launch still to come.
+    #[test]
+    fn a_launch_that_ended_is_not_waiting_even_after_ai_usage_prunes_it() {
+        use super::super::chip::Source;
+        let wake = Wake::new(|| {});
+        let mut view = QuotaView::default();
+        let broker = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+        view.install_fixture(Arc::clone(&broker), wake);
+        broker.stop();
+        assert!(matches!(view.chip_source(), Source::Ended(_)));
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ui| view.paint_snapshots(ui));
+        output.textures_delta.clear();
+        assert!(view.brokers.is_empty(), "AI usage prunes the ended launch");
+        assert!(matches!(view.chip_source(), Source::Ended(_)));
     }
 
     #[test]

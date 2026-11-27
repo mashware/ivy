@@ -31,8 +31,8 @@ pub(super) fn begin_pass(view: &mut super::View, ctx: &egui::Context) {
     view.chip.update(ctx, claude, codex, now);
 }
 
-/// The next second at which the chip's text changes with no new reading: a reading turning stale
-/// or a window reaching its reset.
+/// The next second at which a reading's look changes with no new read: it turns stale, or one of its
+/// windows reaches its reset. Readings only; a source with none has nothing to time.
 pub(super) fn next_change(sources: &[&Source], now: i64) -> Option<i64> {
     sources
         .iter()
@@ -58,7 +58,7 @@ pub(super) const STALE_AFTER: i64 = 30 * 60;
 /// From here a window is shown amber, and at `EXHAUSTED` red.
 const AMBER_FROM: f64 = 80.0;
 const EXHAUSTED: f64 = 100.0;
-/// The two windows the chip shows, by length.
+/// The lengths of the 5-hour and the weekly window, which the chip and the popover name.
 pub(super) const FIVE_HOURS: i64 = 5 * 60 * 60;
 pub(super) const WEEK: i64 = 7 * 24 * 60 * 60;
 
@@ -82,7 +82,12 @@ pub(super) enum Tone {
     Normal,
     Amber,
     Red,
+    /// A reading that is too old to show as current.
     Stale,
+    /// No figure: nothing read yet, a window not reported, or one that reset since.
+    Unavailable,
+    /// The read itself failed: said apart from waiting and stale, on the bar too.
+    Failed,
 }
 
 /// How a used share reads: amber from 80 %, red when exhausted.
@@ -126,7 +131,7 @@ pub(super) struct Reading {
     /// Every window the source reported, in its order.
     pub(super) windows: Vec<Named>,
     /// Why the latest read did not replace this reading, when it did not.
-    pub(super) note: Option<String>,
+    pub(super) last_failure: Option<String>,
 }
 
 impl Reading {
@@ -151,12 +156,17 @@ pub(super) enum Source {
     Waiting(String),
     /// Enabled, and the last read failed with nothing earlier to show; the text says why.
     Failed(String),
+    /// Enabled, and every launch that could report has ended; the text says how to get one.
+    Ended(String),
     Read(Reading),
 }
 
 impl Source {
     pub(super) fn enabled(&self) -> bool {
-        matches!(self, Self::Waiting(_) | Self::Failed(_) | Self::Read(_))
+        matches!(
+            self,
+            Self::Waiting(_) | Self::Failed(_) | Self::Ended(_) | Self::Read(_)
+        )
     }
 
     pub(super) fn reading(&self) -> Option<&Reading> {
@@ -192,8 +202,8 @@ fn spans(agent: Agent, source: &Source) -> Vec<(String, i64)> {
     }
 }
 
-/// The agents the chip renders, in its order. The summary's tabs are exactly these, and it opens
-/// on the first.
+/// The agents the chip renders, in its order. With two, the summary has a tab for each and opens
+/// on the first; with one, it has no tabs.
 pub(super) fn shown(claude: &Source, codex: &Source) -> Vec<Agent> {
     [(Agent::Claude, claude), (Agent::Codex, codex)]
         .into_iter()
@@ -226,8 +236,11 @@ fn length_label(seconds: i64) -> String {
         300 => "5h".into(),
         10_080 => "W".into(),
         _ if minutes % 1440 == 0 => format!("{}d", minutes / 1440),
-        _ if minutes % 60 == 0 => format!("{}h", minutes / 60),
-        _ => format!("{minutes}m"),
+        _ if minutes % 60 == 0 && minutes < 60_000 => format!("{}h", minutes / 60),
+        _ if minutes < 1000 => format!("{minutes}m"),
+        // Rounded to hours, or to days, so the label stays within the slot's four characters.
+        _ if minutes < 59_970 => format!("{}h", (minutes + 30) / 60),
+        _ => format!("{}d", (minutes + 720) / 1440),
     }
 }
 
@@ -298,25 +311,29 @@ fn item<Tz: TimeZone>(
 where
     Tz::Offset: Display,
 {
-    // A stale item keeps its label and greys a dash for its value: «stale» is the popover's word.
-    let stale = Item {
+    // An item without a figure keeps its label and says why in its value and ink: a grey dash for
+    // nothing to show or an old reading, a red «!» for a read that failed. The words are the
+    // popover's.
+    let without = |value: &str, tone| Item {
         agent,
         label: label.clone(),
-        value: "—".into(),
+        value: value.into(),
         suffix: None,
-        tone: Tone::Stale,
+        tone,
     };
-    let Some(reading) = source.reading() else {
-        return stale;
+    let reading = match source {
+        Source::Read(reading) => reading,
+        Source::Failed(_) => return without("!", Tone::Failed),
+        _ => return without("—", Tone::Unavailable),
     };
     if now - reading.observed_at > STALE_AFTER {
-        return stale;
+        return without("—", Tone::Stale);
     }
     let Some(window) = reading.window(length).filter(|window| !window.expired) else {
-        return stale;
+        return without("—", Tone::Unavailable);
     };
     let Some(used) = window.used else {
-        return stale;
+        return without("—", Tone::Unavailable);
     };
     let tone = tone_of(used);
     let reset = window.resets_at.and_then(|at| clock(at, now, zone));
@@ -363,7 +380,8 @@ pub(super) fn templates(claude: &Source, codex: &Source) -> Vec<Item> {
         let fixed = agent == Agent::Claude;
         for (label, length) in spans(agent, &Source::Waiting(String::new())) {
             // Claude's 5-hour window resets within the day, so its reset never carries a weekday;
-            // Codex's one item can be any of its windows, so it is sized for the widest label.
+            // Codex's one item can be any of its windows, and its label is at most four
+            // characters (`length_label`).
             let day = if fixed && length == FIVE_HOURS {
                 ""
             } else {

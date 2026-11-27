@@ -42,7 +42,7 @@ fn reading(observed_at: i64, five: Option<Allowance>, week: Option<Allowance>) -
         .into_iter()
         .flatten()
         .collect(),
-        note: None,
+        last_failure: None,
     })
 }
 
@@ -126,15 +126,14 @@ fn a_missing_or_old_reading_keeps_its_label_with_a_grey_dash_and_never_zero() {
             expired: false,
         }),
     );
-    for source in [
-        Source::Waiting("hint".into()),
-        Source::Failed("why".into()),
-        old,
-        expired,
+    for (source, tone) in [
+        (Source::Waiting("hint".into()), Tone::Unavailable),
+        (old, Tone::Stale),
+        (expired, Tone::Unavailable),
     ] {
         let items = items(&source, &Source::Off, NOW, &zone());
         assert_eq!(line(&items), "5h — | W —", "{source:?}");
-        assert!(items.iter().all(|item| item.tone == Tone::Stale));
+        assert!(items.iter().all(|item| item.tone == tone), "{items:?}");
     }
     let edge = reading(
         NOW - STALE_AFTER,
@@ -247,6 +246,50 @@ fn the_summary_names_each_state_without_a_reading() {
             Some("Codex returned no verified reading.")
         )
     );
+    assert!(matches!(failed.body, Body::Message { tone: Tone::Failed, .. }));
+    // A launch that ended is not a launch still to come.
+    let ended = Source::Ended("Start Claude Code with reporting from AI usage.".into());
+    let ended = describe(Agent::Claude, &ended, NOW, &zone());
+    assert_eq!(
+        message(&ended.body).0,
+        "The launch that reported it has ended."
+    );
+}
+
+/// On the bar a failed read is not a grey dash: it is a red «!», told apart from waiting, a
+/// launch that ended, an old reading and a window with no figure, which all grey a dash.
+#[test]
+fn a_failed_read_is_a_red_mark_and_the_rest_grey_a_dash() {
+    let tones = |source: Source| {
+        let items = items(&source, &Source::Off, NOW, &zone());
+        (items[0].value.clone(), items[0].tone)
+    };
+    assert_eq!(tones(Source::Failed("why".into())), ("!".into(), Tone::Failed));
+    assert_eq!(tones(Source::Waiting("hint".into())), ("—".into(), Tone::Unavailable));
+    assert_eq!(tones(Source::Ended("hint".into())), ("—".into(), Tone::Unavailable));
+    let old = reading(NOW - STALE_AFTER - 1, window(10.0, at(18, 0)), None);
+    assert_eq!(tones(old), ("—".into(), Tone::Stale));
+}
+
+/// The chip's own clock: an idle window is woken when a reading turns stale — one second past
+/// `STALE_AFTER` — or when one of its windows resets first, whichever is sooner.
+#[test]
+fn the_next_change_is_the_stale_flip_or_an_earlier_reset() {
+    let fresh = reading(NOW, window(10.0, NOW + 3 * 3600), None);
+    assert_eq!(next_change(&[&fresh], NOW), Some(NOW + STALE_AFTER + 1));
+    let soon = reading(NOW, window(10.0, NOW + 600), None);
+    assert_eq!(next_change(&[&soon, &fresh], NOW), Some(NOW + 600));
+    assert_eq!(next_change(&[&Source::Waiting(String::new())], NOW), None);
+}
+
+/// Every window length labels in at most four characters, which is what the Codex template
+/// reserves.
+#[test]
+fn every_window_label_fits_four_characters() {
+    for minutes in 1..=(366 * 1440) {
+        let label = length_label(minutes * 60);
+        assert!(label.chars().count() <= 4, "{minutes} min: {label}");
+    }
 }
 
 /// Each window with its figure, its reset with how long until it, and its pace with whether it
@@ -260,7 +303,7 @@ fn the_summary_shows_each_window_with_use_reset_and_pace() {
     );
     let panel = describe(Agent::Claude, &claude, NOW, &zone());
     assert_eq!(panel.updated.as_deref(), Some("Updated 1m ago"));
-    assert_eq!(panel.note, None);
+    assert_eq!((panel.stale, panel.failure), (None, None));
     let Body::Windows(rows) = panel.body else {
         panic!("no windows");
     };
@@ -286,14 +329,22 @@ fn the_summary_shows_each_window_with_use_reset_and_pace() {
     assert_eq!(rows[1].tone, Tone::Normal);
 }
 
-/// An old reading still shows its windows, greyed, and says how old it is.
+/// An old reading still shows its windows, greyed, and says how old it is; when its refresh failed
+/// too, it says both instead of the age hiding the failure.
 #[test]
 fn a_stale_reading_is_greyed_and_says_so() {
-    let old = reading(NOW - 31 * 60, window(40.0, at(10, 0)), None);
+    let mut old = reading(NOW - 31 * 60, window(40.0, at(10, 0)), None);
+    if let Source::Read(reading) = &mut old {
+        reading.last_failure = Some("Last read failed: Codex closed.".into());
+    }
     let panel = describe(Agent::Codex, &old, NOW, &zone());
     assert_eq!(
-        panel.note.as_deref(),
+        panel.stale.as_deref(),
         Some("Stale · no new reading for 31m")
+    );
+    assert_eq!(
+        panel.failure.as_deref(),
+        Some("Last read failed: Codex closed.")
     );
     let Body::Windows(rows) = panel.body else {
         panic!("no windows");
@@ -328,7 +379,7 @@ fn codex_shows_its_five_hour_window_or_else_its_shortest_one() {
                 window: window(5.0, NOW + 60).unwrap(),
             })
             .collect(),
-        note: None,
+        last_failure: None,
     });
     assert_eq!(
         line(&super::items(&Source::Off, &other, NOW, &zone())),

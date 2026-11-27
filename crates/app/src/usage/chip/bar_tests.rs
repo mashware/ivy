@@ -61,7 +61,7 @@ pub(super) fn codex() -> (Source, Source) {
                 expired: false,
             },
         }],
-        note: None,
+        last_failure: None,
     };
     (Source::Off, Source::Read(reading))
 }

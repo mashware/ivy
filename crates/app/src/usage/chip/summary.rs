@@ -12,8 +12,11 @@ const PACE_MARGIN: f64 = 5.0;
 pub(super) struct Panel {
     /// «Updated …», when there is a reading.
     pub(super) updated: Option<String>,
-    /// Why what is shown may not be current: stale, or the last read failed.
-    pub(super) note: Option<String>,
+    /// How old the reading is, once it is stale.
+    pub(super) stale: Option<String>,
+    /// Why the last read did not replace the reading shown. Kept apart from staleness, so an old
+    /// reading whose refresh failed says both.
+    pub(super) failure: Option<String>,
     pub(super) body: Body,
 }
 
@@ -42,7 +45,8 @@ pub(super) struct Row {
 fn message(text: &str, hint: Option<String>, tone: Tone) -> Panel {
     Panel {
         updated: None,
-        note: None,
+        stale: None,
+        failure: None,
         body: Body::Message {
             text: text.into(),
             hint,
@@ -60,7 +64,7 @@ where
             return message(
                 "Allowances are not available on this platform.",
                 None,
-                Tone::Stale,
+                Tone::Unavailable,
             );
         }
         // Claude has no reads to turn on: its figures come from a launch made with reporting.
@@ -68,41 +72,44 @@ where
             return message(
                 "Claude's allowance comes from a reporting launch.",
                 Some("Start Claude Code with reporting from AI usage.".into()),
-                Tone::Stale,
+                Tone::Unavailable,
             );
         }
         Source::Off => {
             return message(
                 "Allowance reads are off.",
                 Some("Turn them on in AI usage.".into()),
-                Tone::Stale,
+                Tone::Unavailable,
             );
         }
         Source::Waiting(hint) => {
             return message(
                 "Waiting for the first reading.",
                 Some(hint.clone()),
-                Tone::Stale,
+                Tone::Unavailable,
+            );
+        }
+        Source::Ended(hint) => {
+            return message(
+                "The launch that reported it has ended.",
+                Some(hint.clone()),
+                Tone::Unavailable,
             );
         }
         Source::Failed(why) => {
             let text = format!("Could not read {} allowances.", agent.name());
-            return message(&text, Some(why.clone()), Tone::Red);
+            return message(&text, Some(why.clone()), Tone::Failed);
         }
         Source::Read(reading) => reading,
     };
     let age = now - reading.observed_at;
     let stale = age > STALE_AFTER;
-    let note = if stale {
-        Some(format!("Stale · no new reading for {}", duration(age)))
-    } else {
-        reading.note.clone()
-    };
+    let stale_note = stale.then(|| format!("Stale · no new reading for {}", duration(age)));
     let body = if reading.windows.is_empty() {
         Body::Message {
             text: "No windows reported yet.".into(),
             hint: None,
-            tone: Tone::Stale,
+            tone: Tone::Unavailable,
         }
     } else {
         Body::Windows(
@@ -115,7 +122,8 @@ where
     };
     Panel {
         updated: Some(format!("Updated {}", ago(age))),
-        note,
+        stale: stale_note,
+        failure: reading.last_failure.clone(),
         body,
     }
 }
@@ -135,7 +143,7 @@ where
         used_text: text.into(),
         reset: None,
         pace: None,
-        tone: Tone::Stale,
+        tone: Tone::Unavailable,
     };
     if expired {
         return unknown("Reset, not read since");

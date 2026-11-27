@@ -45,16 +45,20 @@ pub(super) fn bind_observation(
     observed_at: i64,
 ) -> Result<Observation, Failure> {
     if !before.matches(&after) {
-        return Err(Failure::Refused("Codex's account changed during the read."));
+        return Err(Failure::Identity("Codex's account changed during the read."));
     }
     if response["accountId"].as_str() != Some(after.workspace.as_str()) {
-        return Err(Failure::Refused("Codex answered for another workspace."));
+        return Err(Failure::Identity("Codex answered for another workspace."));
     }
     // In 0.167.2 this field, including false, survives only when the backend's account AND user
     // match active auth; accountId alone would accept another user in the workspace. With no
     // release pinned it is the evidence every read must carry, and its absence is a refusal.
+    // Residual risk (D132): its meaning as a witness was proven for 0.167.2 only; 0.172.0 was
+    // seen to send it for a matching user, not to withhold it for another. A release that sends
+    // it unconditionally would let another user's reading through this check; the sign-in source
+    // (#283) does not depend on it and is preferred where it is available.
     if !response["ordinaryUsageAllowed"].is_boolean() {
-        return Err(Failure::Refused(
+        return Err(Failure::Identity(
             "Codex sent no identity witness (ordinaryUsageAllowed).",
         ));
     }
@@ -186,7 +190,7 @@ mod tests {
 
     fn refusal(result: Result<Observation, Failure>) -> &'static str {
         match result {
-            Err(Failure::Refused(reason)) => reason,
+            Err(Failure::Identity(reason)) => reason,
             other => panic!("a refusal was expected: {other:?}"),
         }
     }

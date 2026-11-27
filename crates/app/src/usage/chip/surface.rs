@@ -30,8 +30,8 @@ pub(super) fn ink(tone: Tone, roles: &Roles, normal: Color32) -> Color32 {
     match tone {
         Tone::Normal => normal,
         Tone::Amber => roles.wait,
-        Tone::Red => roles.block,
-        Tone::Stale => roles.tx3,
+        Tone::Red | Tone::Failed => roles.block,
+        Tone::Stale | Tone::Unavailable => roles.tx3,
     }
 }
 

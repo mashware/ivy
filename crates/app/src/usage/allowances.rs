@@ -60,17 +60,31 @@ enum Failure {
     /// what was missing or what the client refused (D132).
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     Refused(&'static str),
+    /// The evidence says the reading may belong to another account or workspace; the text says
+    /// which. The only failures that drop the reading already shown.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    Identity(&'static str),
+    /// The client's server closed its output before answering.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    Exited,
+    /// The client answered a request with a JSON-RPC error this read does not name otherwise.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    Rpc { method: &'static str, code: i64 },
 }
 
 type Reply = Result<Observation, Failure>;
 
 /// What a failed read tells a person, in AI usage and under the chip alike.
-fn failure_text(failure: &Failure) -> &'static str {
+fn failure_text(failure: &Failure) -> String {
     match failure {
-        Failure::Unsupported => "No Codex client that can do verified reads.",
+        Failure::Unsupported => "No Codex client that can do verified reads.".into(),
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        Failure::Refused(reason) => reason,
-        _ => "Codex returned no verified reading.",
+        Failure::Refused(reason) | Failure::Identity(reason) => (*reason).into(),
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        Failure::Exited => "Codex's app-server closed before answering.".into(),
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        Failure::Rpc { method, code } => format!("Codex answered {method} with error {code}."),
+        _ => "Codex returned no verified reading.".into(),
     }
 }
 
@@ -169,7 +183,7 @@ impl AllowanceView {
             // A failed read says so: «waiting» over a failure hid why no figure ever came.
             return match (&self.pending, &self.failure) {
                 (Some(_), _) => Source::Waiting("Codex reads on · reading now…".into()),
-                (None, Some(failure)) => Source::Failed(failure_text(failure).into()),
+                (None, Some(failure)) => Source::Failed(failure_text(failure)),
                 (None, None) => Source::Waiting(self.next_read_hint()),
             };
         };
@@ -203,7 +217,7 @@ impl AllowanceView {
         Source::Read(Reading {
             observed_at: observation.observed_at,
             windows: windows.collect(),
-            note: self
+            last_failure: self
                 .failure
                 .as_ref()
                 .map(|failure| format!("Last read failed: {}", failure_text(failure))),
@@ -223,9 +237,8 @@ impl AllowanceView {
         }
     }
 
-    /// Reads enabled and the last one failed as an unsupported client does, with no reading
-    /// before it: what a person with a newer Codex sees.
-    #[cfg(test)]
+    /// Reads enabled and the last one failed, with no reading before it.
+    #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
     pub(super) fn fail_for_test(&mut self) {
         self.enabled = true;
         self.failure = Some(Failure::Unsupported);
@@ -233,7 +246,7 @@ impl AllowanceView {
     }
 
     /// Reads enabled and a reading just taken whose only window is a week: the owner's plan.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
     pub(super) fn weekly_for_test(&mut self, used: f64) {
         let now = chrono::Utc::now().timestamp();
         self.enabled = true;
@@ -355,15 +368,20 @@ impl AllowanceView {
                 None
             }
             Err(failure) => {
-                let same_context = match &failure {
+                // Only evidence of another account drops what is shown; any other failure keeps
+                // the last reading, which says the failure and greys with age. With a five-minute
+                // cadence, blanking on every transient failure would empty the chip for nothing.
+                let other_account = match &failure {
                     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    Failure::SameAccount(account) => self
+                    Failure::Identity(_) => true,
+                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                    Failure::SameAccount(account) => !self
                         .observation
                         .as_ref()
                         .is_some_and(|observation| account.matches(&observation.account)),
                     _ => false,
                 };
-                if !same_context {
+                if other_account {
                     self.observation = None;
                 }
                 Some(failure)
@@ -415,7 +433,7 @@ impl AllowanceView {
             ui.label(match failure {
                 Failure::Unsupported => failure_text(failure),
                 _ if self.observation.is_some() => {
-                    "Stale · Could not refresh the last successful reading."
+                    "Stale · Could not refresh the last successful reading.".to_owned()
                 }
                 _ => failure_text(failure),
             });
@@ -759,7 +777,7 @@ mod chip_tests {
             })
         );
         assert!(reading.window(super::super::chip::WEEK).unwrap().expired);
-        assert_eq!(reading.note, None);
+        assert_eq!(reading.last_failure, None);
     }
 
     /// The states before a figure arrives are told apart: a read in flight, a read that failed —
@@ -800,7 +818,7 @@ mod chip_tests {
             panic!("the earlier reading is kept");
         };
         assert_eq!(
-            reading.note.as_deref(),
+            reading.last_failure.as_deref(),
             Some("Last read failed: Codex returned no verified reading.")
         );
     }
