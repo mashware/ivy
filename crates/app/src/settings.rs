@@ -2119,7 +2119,7 @@ mod tests {
     #[test]
     fn the_messages_the_document_publishes_are_the_ones_the_terminal_writes() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
-        const WINDOW: &str = include_str!("settings.rs");
+        const WINDOW: &str = include_str!("settings/window.rs");
 
         let published: Vec<&str> = markdown::fenced(DOCUMENT)
             .code
