@@ -140,7 +140,7 @@ reading before taking the criterion as closed with a `host-load` measurement:
 
 - The instrument measures what the terminal **drains from the PTY**, not what it **paints**.
 - The mitigation that this very phase plans for F1.3 is *«repaint only when the PTY produces
-  changes»* (see the Phase 1 risks in [05-roadmap.md](05-roadmap.md)), that is, **coalescing
+  changes»* (see the Phase 1 risks in [historical roadmap](05-roadmap-historical.md)), that is, **coalescing
   frames**. Our app would pass the test **by construction**, measuring well precisely for doing what
   the test does not look at.
 - And the painting is **unobservable from the process that produces the load**: no terminal protocol
@@ -2322,7 +2322,7 @@ done:
 | Remote worktrees over SSH or on a VPS | Orca, Superset, Herdr |
 | Restoring agent sessions after a restart; hibernating the idle ones | Orca, Herdr |
 | Linear and Jira integration; a registry of installable skills | Orca, Superset |
-| A task board and dependency chains | Cline Kanban, Vibe Kanban — see «Ideas with no phase» in [05-roadmap.md](05-roadmap.md) |
+| A task board and dependency chains | Cline Kanban, Vibe Kanban — see «Ideas with no phase» in [historical roadmap](05-roadmap-historical.md) |
 
 **The criterion for letting something from that list in early: that it serves the contract, not that
 the neighbor has it.** In favor, the remote worktrees: a producer publishing from another machine is
@@ -5646,7 +5646,7 @@ hundredths of a second** — green over a live bug. That is what the two rounds 
 of the published **0.36.1** that differs from it in **one thing**: the `return` that follows the paste
 shortcut only fires when something was actually produced. Everything else is byte for byte the
 published crate. It is the **first patched dependency in this repository's history**, and
-`docs/05-roadmap.md` carries the amendment to the policy that said versions come from published
+The [historical roadmap](05-roadmap-historical.md) carries the amendment to the policy that said versions come from published
 releases.
 
 **Checkout representation, November 2026** ([#190](https://github.com/mashware/ivy/issues/190)).
