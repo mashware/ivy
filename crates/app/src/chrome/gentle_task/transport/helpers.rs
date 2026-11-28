@@ -39,6 +39,7 @@ struct Pending {
 #[derive(Default)]
 pub(super) struct Monitor {
     next_id: u64,
+    supports_snapshot: Option<bool>,
     pending: Option<Pending>,
     refresh: Option<(Instant, Read)>,
     event_support: bool,
@@ -56,7 +57,12 @@ pub(super) fn our_id(v: &Value) -> bool {
 }
 
 impl Monitor {
+    pub(super) fn supports_snapshot(&self) -> Option<bool> {
+        self.supports_snapshot
+    }
+
     pub(super) fn start(&mut self, now: Instant) -> Update {
+        self.supports_snapshot = None;
         self.event_support = false;
         self.sequence = 0;
         self.refresh = None;
@@ -169,6 +175,12 @@ impl Monitor {
                 (Some(self.request(Read::Capabilities, now)), None)
             }
             Read::Capabilities => {
+                if let Some(methods) = data["methods"]
+                    .as_array()
+                    .filter(|m| m.iter().all(Value::is_string))
+                {
+                    self.supports_snapshot = Some(methods.iter().any(|m| m == "get_snapshot"));
+                }
                 if !has(&data["methods"], "list_subagents") {
                     return (None, Some(Snapshot::Unavailable));
                 }
@@ -388,5 +400,27 @@ mod tests {
             .map(|i| json!({"id":i.to_string(),"agent":"worker","status":"queued"}))
             .collect();
         assert_eq!(parse(&json!({"agents":rows})).unwrap().len(), LIMIT);
+    }
+    #[test]
+    fn optional_snapshot_support_requires_exact_capability_receipt_without_helpers() {
+        let now = Instant::now();
+        let mut m = Monitor::default();
+        let start = m.start(now).0.unwrap();
+        let capabilities = m.observe(&commands(&start, "extension"), now).0.unwrap();
+        let mut foreign = response(&capabilities, json!({"methods":["get_snapshot"]}));
+        foreign["requestId"] = json!("ivy-helpers-999");
+        m.observe(&foreign, now);
+        assert_eq!(m.supports_snapshot(), None);
+        let update = m.observe(
+            &response(&capabilities, json!({"methods":["get_snapshot"]})),
+            now,
+        );
+        assert!(
+            update.0.is_none(),
+            "no list_subagents request when unavailable"
+        );
+        assert_eq!(m.supports_snapshot(), Some(true));
+        m.start(now);
+        assert_eq!(m.supports_snapshot(), None);
     }
 }

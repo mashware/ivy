@@ -273,6 +273,30 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/chrome/gentle_task/transport/wire.rs"),
     ),
     (
+        "src/chrome/gentle_task/transport/conversation.rs",
+        include_str!("../src/chrome/gentle_task/transport/conversation.rs"),
+    ),
+    (
+        "src/chrome/gentle_task/transport/terminal.rs",
+        include_str!("../src/chrome/gentle_task/transport/terminal.rs"),
+    ),
+    (
+        "src/chrome/gentle_task/conversation_view.rs",
+        include_str!("../src/chrome/gentle_task/conversation_view.rs"),
+    ),
+    (
+        "src/chrome/gentle_task/conversation_view/tests.rs",
+        include_str!("../src/chrome/gentle_task/conversation_view/tests.rs"),
+    ),
+    (
+        "src/chrome/gentle_task/transport/snapshot.rs",
+        include_str!("../src/chrome/gentle_task/transport/snapshot.rs"),
+    ),
+    (
+        "src/chrome/gentle_task/transport/process/owned.rs",
+        include_str!("../src/chrome/gentle_task/transport/process/owned.rs"),
+    ),
+    (
         "src/chrome/gentle_task/transport/helpers.rs",
         include_str!("../src/chrome/gentle_task/transport/helpers.rs"),
     ),

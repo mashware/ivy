@@ -47,6 +47,9 @@ pub(crate) struct Chrome {
     frames: usize,
     view_visible: usize,
     view_hidden: usize,
+    native_poll: Duration,
+    native_view: Duration,
+    native_passes: usize,
 }
 
 impl Chrome {
@@ -114,6 +117,11 @@ impl Chrome {
             to,
             "integrated chrome: enabled={}, frames={}, total={:?}",
             self.enabled, self.frames, self.total
+        )?;
+        writeln!(
+            to,
+            "native Gentle: passes={}, poll={:?}, view={:?} (included in integrated chrome; subtracted once)",
+            self.native_passes, self.native_poll, self.native_view
         )
     }
 }
@@ -259,8 +267,18 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let started = Instant::now();
     let ctx = ui.ctx().clone();
     let area = ui.max_rect();
+    let native = window.chrome.gentle_task.has_native_work();
+    let native_started = native.then(Instant::now);
     gentle_task::poll(window, &ctx);
+    if let Some(started) = native_started {
+        window.chrome.native_poll += started.elapsed();
+        window.chrome.native_passes += 1;
+    }
+    let native_started = native.then(Instant::now);
     let task_owned = gentle_task::before_keys(window, ui);
+    if let Some(started) = native_started {
+        window.chrome.native_view += started.elapsed();
+    }
     let geometry = strip(window, area);
     let row = geometry.row;
     let roles = crate::ui::style::roles(&ctx, &window.theme);
@@ -572,6 +590,27 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_subspans_are_named_without_a_second_subtraction() {
+        let mut chrome = Chrome {
+            native_poll: Duration::from_micros(2),
+            native_view: Duration::from_micros(3),
+            native_passes: 1,
+            ..Default::default()
+        };
+        chrome.enable();
+        chrome.record_work(Duration::from_micros(11));
+        let mut report = Vec::new();
+        chrome.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(
+            report.contains("native Gentle: passes=1, poll=2µs, view=3µs"),
+            "{report}"
+        );
+        assert_eq!(chrome.take_cost(), Duration::from_micros(11));
+        assert_eq!(chrome.take_cost(), Duration::ZERO);
+    }
+
     #[test]
     fn shortcut_hints_use_current_bindings_and_disappear_when_unbound() {
         let mut keymap = crate::keyboard::Keymap::default();

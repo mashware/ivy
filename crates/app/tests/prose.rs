@@ -407,6 +407,36 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/chrome/gentle_task/transport/conversation.rs",
+        include_str!("../src/chrome/gentle_task/transport/conversation.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/transport/terminal.rs",
+        include_str!("../src/chrome/gentle_task/transport/terminal.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/conversation_view.rs",
+        include_str!("../src/chrome/gentle_task/conversation_view.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/conversation_view/tests.rs",
+        include_str!("../src/chrome/gentle_task/conversation_view/tests.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/transport/snapshot.rs",
+        include_str!("../src/chrome/gentle_task/transport/snapshot.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/transport/process/owned.rs",
+        include_str!("../src/chrome/gentle_task/transport/process/owned.rs"),
+        0,
+    ),
+    (
         "src/chrome/gentle_task/transport/helpers.rs",
         include_str!("../src/chrome/gentle_task/transport/helpers.rs"),
         0,
@@ -2237,6 +2267,10 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 /// the same delivery and nothing was left watching them either.
 const DOCUMENTS: &[(&str, &str)] = &[
     (
+        "docs/gentle-client-matrix.md",
+        include_str!("../../../docs/gentle-client-matrix.md"),
+    ),
+    (
         "docs/windows-codex-route-checks.md",
         include_str!("../../../docs/windows-codex-route-checks.md"),
     ),
@@ -2685,6 +2719,11 @@ fn no_document_mixes_the_two_languages() {
 /// their Spanish past every guard until the tree was swept by hand.
 // Per-file floors preserve coverage without imposing the older prototypes' size on the 88-line chrome demo.
 const PROTOTYPES: &[(&str, &str, usize)] = &[
+    (
+        "prototypes/gentle-rpc/conversation.py",
+        include_str!("../../../prototypes/gentle-rpc/conversation.py"),
+        95,
+    ),
     (
         "prototypes/gentle-rpc/delegated.ts",
         include_str!("../../../prototypes/gentle-rpc/delegated.ts"),

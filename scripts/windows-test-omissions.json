@@ -1,6 +1,11 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "chrome::gentle_task::conversation_view::tests::native_transcript_composer_and_neighbor_console_own_their_input_under_flood",
+    "reason": "unix-only: drives executable Python shebang clients and a POSIX PTY receiver"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "chrome::gentle_task::tests::reviewer_answers_the_background_session_at_the_same_visible_diff_line",
     "reason": "unix-only: uses executable shebang fixtures and POSIX shell commands for a terminal directory witness"
   },

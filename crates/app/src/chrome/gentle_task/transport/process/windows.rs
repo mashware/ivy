@@ -84,7 +84,7 @@ pub(super) fn spawn(command: &mut Command) -> io::Result<(Child, OwnedHandle)> {
         resume(&child)
     };
     if let Err(error) = result {
-        if let Err(cleanup) = super::stop_and_reap(&mut child) {
+        if let Err(cleanup) = super::owned::stop_and_reap(&mut child) {
             crate::pty_output::say(&format!(
                 "Gentle startup failed and the suspended process could not be retired: {cleanup}"
             ));

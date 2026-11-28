@@ -1,5 +1,9 @@
 //! Each native task owns the pipes of the client that accepted its prompt.
+pub(crate) mod conversation;
 mod helpers;
+pub(super) mod snapshot;
+mod terminal;
+use terminal::Terminal;
 mod process;
 pub(super) use helpers::{Helper, LIMIT as HELPER_LIMIT};
 mod wire;
@@ -41,6 +45,7 @@ pub(super) enum Answer {
 #[derive(Debug)]
 pub(super) enum Event {
     Helpers(HelperList),
+    Snapshot(snapshot::SnapshotUpdate),
     PromptAccepted,
     Notice(String),
     Handled,
@@ -152,12 +157,16 @@ impl HelperMailbox {
 }
 
 struct Initial {
+    display: conversation::Display,
+    terminal: Terminal,
     helpers: HelperMailbox,
     task: String,
     claimed: Arc<AtomicBool>,
 }
 
 pub(super) struct Session {
+    display: conversation::Display,
+    terminal: Terminal,
     helpers: HelperMailbox,
     closing: Option<String>,
     initial_claimed: Arc<AtomicBool>,
@@ -212,7 +221,13 @@ impl Session {
         let worker_claim = launch_claimed.clone();
         let initial_claimed = Arc::new(AtomicBool::new(false));
         let helpers = HelperMailbox::new(wake.clone());
+        let display = conversation::Display::new(wake.clone());
+        display.user(&task);
+        let terminal = Terminal::new(wake.clone());
+        let worker_terminal = terminal.clone();
         let initial = Initial {
+            display: display.clone(),
+            terminal: terminal.clone(),
             helpers: helpers.clone(),
             task,
             claimed: initial_claimed.clone(),
@@ -221,11 +236,22 @@ impl Session {
             .name("gentle-task".into())
             .spawn(move || {
                 let emit = |event| {
-                    let delivered = send.send(event).is_ok();
-                    if delivered {
-                        wake();
+                    if let Event::Closed(reason) = event {
+                        worker_terminal.fail(reason);
+                        return false;
                     }
-                    delivered
+                    match send.try_send(event) {
+                        Ok(()) => {
+                            wake();
+                            true
+                        }
+                        Err(_) => {
+                            worker_terminal.fail(
+                                "Gentle control backlog exceeded its limit or closed.".into(),
+                            );
+                            false
+                        }
+                    }
                 };
                 if stopped.try_recv().is_ok() {
                     return;
@@ -249,6 +275,8 @@ impl Session {
             handle,
         });
         Ok(Self {
+            display,
+            terminal,
             helpers,
             closing: None,
             initial_claimed,
@@ -258,6 +286,10 @@ impl Session {
             stop,
             available: BTreeMap::new(),
         })
+    }
+
+    pub(super) fn display(&self) -> conversation::Display {
+        self.display.clone()
     }
 
     pub(super) fn request_stop(&mut self) -> Result<(), String> {
@@ -311,7 +343,11 @@ impl Session {
                 Ok(Event::Closed(reason)) => self.closing = Some(reason),
                 Ok(event) => break event,
                 Err(mpsc::TryRecvError::Disconnected) =>
-                    self.closing = Some("The Gentle connection closed.".into()),
+                    self.closing = Some(self.terminal.take().unwrap_or_else(|| "The Gentle connection closed.".into())),
+                Err(mpsc::TryRecvError::Empty) if self.terminal.failed() => {
+                    self.closing = self.terminal.take();
+                    continue;
+                }
                 Err(mpsc::TryRecvError::Empty) if self.turn == Turn::BeforePrompt =>
                     break Event::StopOutcome {
                         message: "The initial prompt was never sent. Follow-ups will use this session when Gentle starts.".into(),
@@ -467,10 +503,15 @@ mod tests {
             },
         )
         .unwrap();
-        wake.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(
-            matches!(session.try_event(), Some(Event::Closed(reason)) if reason=="No installed client")
-        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(Event::Closed(reason)) = session.try_event() {
+                assert_eq!(reason, "No installed client");
+                break;
+            }
+            wake.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap();
+        }
     }
 
     #[test]
@@ -485,6 +526,8 @@ mod tests {
         let (tx, events) = mpsc::sync_channel(2);
         let (stop, _) = mpsc::channel();
         let mut session = Session {
+            display: conversation::Display::new(Arc::new(|| {})),
+            terminal: Terminal::new(Arc::new(|| {})),
             helpers: helpers.clone(),
             closing: None,
             initial_claimed: Arc::new(AtomicBool::new(true)),
@@ -527,6 +570,8 @@ mod tests {
         let (tx, events) = mpsc::sync_channel(2);
         let (stop, _) = mpsc::channel();
         let mut session = Session {
+            display: conversation::Display::new(Arc::new(|| {})),
+            terminal: Terminal::new(Arc::new(|| {})),
             helpers: HelperMailbox::new(Arc::new(|| {})),
             closing: None,
             initial_claimed: Arc::new(AtomicBool::new(true)),
@@ -836,5 +881,52 @@ print(json.dumps(dict(type="agent_settled",aborted=False)),flush=True)
         }
         assert!(!root.join("retire").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod saturation_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+    #[test]
+    fn stalled_gui_observes_independent_failure_and_worker_retires() {
+        let root =
+            std::env::temp_dir().join(format!("ivy-gentle-saturation-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join("client");
+        std::fs::write(&program, "#!/usr/bin/env python3\nimport json,time\nfor i in range(100):\n print(json.dumps({'type':'extension_ui_request','method':'confirm','id':str(i),'title':'Question'}),flush=True)\n time.sleep(0.02)\ntime.sleep(30)\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut session =
+            Session::start(program, root.clone(), "task".into(), Arc::new(|| {})).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !session.terminal.failed() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+        let mut closed = false;
+        for _ in 0..18 {
+            if matches!(session.try_event(), Some(Event::Closed(reason)) if reason == "Gentle control backlog exceeded its limit or closed.")
+            {
+                closed = true;
+                break;
+            }
+        }
+        assert!(closed);
+        drop(session);
+        loop {
+            let workers = WORKERS.lock().unwrap();
+            let running = workers.iter().any(|w| !w.handle.is_finished());
+            drop(workers);
+            if !running {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "worker blocked with GUI not draining"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -23,14 +23,30 @@ pub(super) enum Incoming {
     Rejected(String),
     StopControl(Value),
     HelperControl(Value),
+    SnapshotControl(Value),
     HelperReset,
     CommandError,
 }
 
+#[cfg(test)]
 pub(super) fn receive(
     stdout: impl Read,
     target: &Inbox,
     updates: &impl Fn(Option<Value>),
+) -> Result<(), String> {
+    receive_projected(
+        stdout,
+        target,
+        updates,
+        &super::conversation::Display::new(std::sync::Arc::new(|| {})),
+    )
+}
+
+pub(super) fn receive_projected(
+    stdout: impl Read,
+    target: &Inbox,
+    updates: &impl Fn(Option<Value>),
+    display: &super::conversation::Display,
 ) -> Result<(), String> {
     let mut stream = BufReader::new(stdout);
     let mut line = Vec::new();
@@ -49,6 +65,9 @@ pub(super) fn receive(
         if len > MAX_LINE || line.last() != Some(&b'\n') {
             return Err("Gentle sent an incomplete or oversized RPC event.".into());
         }
+        let projection: Value =
+            serde_json::from_slice(&line).map_err(|_| "Gentle sent an invalid RPC event.")?;
+        display.observe(&projection);
         let mut reset = false;
         let event = decode_record(
             &line,
@@ -59,15 +78,15 @@ pub(super) fn receive(
         )?;
         if reset
             && target
-                .send(Message::Incoming(Incoming::HelperReset))
+                .try_send(Message::Incoming(Incoming::HelperReset))
                 .is_err()
         {
-            return Ok(());
+            return Err("Gentle reader control backlog exceeded its limit or closed.".into());
         }
         if let Some(event) = event
-            && target.send(Message::Incoming(event)).is_err()
+            && target.try_send(Message::Incoming(event)).is_err()
         {
-            return Ok(());
+            return Err("Gentle reader control backlog exceeded its limit or closed.".into());
         }
     }
 }
@@ -135,6 +154,9 @@ fn decode_record(
                         *reset = true;
                     }
                     channel.switching = switching;
+                    if line.len() <= 128 * 1024 && super::snapshot::our_id(&envelope["requestId"]) {
+                        return Ok(Some(Incoming::SnapshotControl(envelope)));
+                    }
                     if helpers::our_id(&envelope["requestId"]) {
                         return Ok(Some(Incoming::HelperControl(envelope)));
                     }
@@ -145,6 +167,7 @@ fn decode_record(
             }
             Ok(None)
         }
+        "response" if super::snapshot::our_id(&v["id"]) => Ok(Some(Incoming::SnapshotControl(v))),
         "response" if helpers::our_id(&v["id"]) => Ok(Some(Incoming::HelperControl(v))),
         "response" if stop::our_id(&v["id"]) => Ok(Some(Incoming::StopControl(v))),
         "extension_ui_request" => dialog(&v).map(|q| q.map(Incoming::Question)),
@@ -392,5 +415,67 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn text_flood_bypasses_control_capacity_and_question_still_arrives() {
+        let display = super::super::conversation::Display::new(std::sync::Arc::new(|| {}));
+        let mut bytes = Vec::new();
+        for _ in 0..10000 {
+            bytes.extend_from_slice(b"{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"x\",\"contentIndex\":0}}\n");
+        }
+        bytes.extend_from_slice(b"{\"type\":\"extension_ui_request\",\"method\":\"confirm\",\"id\":\"q\",\"title\":\"Continue?\"}\n");
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let error = receive_projected(Cursor::new(bytes), &send, &|_| {}, &display).unwrap_err();
+        assert!(error.contains("closed"));
+        assert!(
+            matches!(receive.try_recv(), Ok(Message::Incoming(Incoming::Question(q))) if q.id == "q")
+        );
+        let mut cache = super::super::conversation::Cache::default();
+        while display.poll(&mut cache, &mut (64 * 1024)) {}
+        assert_eq!(
+            cache.rows.iter().map(|r| &*r.text).collect::<String>(),
+            "x".repeat(10000)
+        );
+        assert_eq!(cache.rows.len(), 1);
+    }
+    #[test]
+    fn saturated_reader_control_admission_fails_without_waiting_for_a_receiver() {
+        let (send, _receive) = std::sync::mpsc::sync_channel(1);
+        let record = b"{\"type\":\"agent_settled\",\"aborted\":false}\n";
+        let mut bytes = record.to_vec();
+        bytes.extend_from_slice(record);
+        assert!(
+            receive(Cursor::new(bytes), &send, &|_| {})
+                .unwrap_err()
+                .contains("backlog")
+        );
+    }
+    #[test]
+    fn snapshot_namespace_and_ordinary_envelope_bound_stay_separate() {
+        let widget = |id: &str, body: &str| {
+            let inner = json!({"schema":stop::SCHEMA,"kind":"response","requestId":id,"ok":true,"data":{"body":body}});
+            serde_json::to_vec(&json!({"type":"extension_ui_request","method":"setWidget","widgetKey":"gentle-desktop-rpc","widgetLines":[inner.to_string()]})).unwrap()
+        };
+        assert!(
+            matches!(decode(&widget("ivy-view-1", "valid"), &mut false).unwrap(), Some(Incoming::SnapshotControl(v)) if v["requestId"] == "ivy-view-1")
+        );
+        assert!(
+            decode(&widget("ivy-view-foreign", "valid"), &mut false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            decode(&widget("ivy-view-1", &"x".repeat(128 * 1024)), &mut false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            decode(
+                br#"{"type":"response","command":"prompt","id":"ivy-view-1","success":true}"#,
+                &mut false
+            )
+            .unwrap(),
+            Some(Incoming::SnapshotControl(_))
+        ));
     }
 }
