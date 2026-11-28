@@ -192,16 +192,30 @@ pub(super) fn run(
     let reader = inbox.clone();
     let feed = Arc::new(Mutex::new(HelperFeed::default()));
     let reader_feed = feed.clone();
+    let reader_display = initial.display.clone();
+    let reader_terminal = initial.terminal.clone();
+    let writer_terminal = initial.terminal.clone();
     thread::Builder::new()
         .name("gentle-read".into())
         .spawn(move || {
-            if let Err(reason) = wire::receive(stdout, &reader, &|event| {
-                reader_feed
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .publish(event);
-            }) {
-                let _ = reader.send(Message::Failed(reason));
+            if let Err(reason) = wire::receive_projected(
+                stdout,
+                &reader,
+                &|event| {
+                    reader_feed
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .publish(event);
+                },
+                &reader_display,
+            ) {
+                if let Err(error) = reader.try_send(Message::Failed(reason)) {
+                    if let mpsc::TrySendError::Full(Message::Failed(reason))
+                    | mpsc::TrySendError::Disconnected(Message::Failed(reason)) = error
+                    {
+                        reader_terminal.fail(reason);
+                    }
+                }
             }
         })
         .map_err(|e| e.to_string())?;
@@ -230,7 +244,19 @@ pub(super) fn run(
                     }
                 };
                 let failed = matches!(result, Message::Failed(_));
-                if inbox.send(result).is_err() || failed {
+                if let Err(error) = inbox.try_send(result) {
+                    if let mpsc::TrySendError::Full(Message::Failed(reason))
+                    | mpsc::TrySendError::Disconnected(Message::Failed(reason)) = error
+                    {
+                        writer_terminal.fail(reason);
+                    } else {
+                        writer_terminal.fail(
+                            "Gentle writer control backlog exceeded its limit or closed.".into(),
+                        );
+                    }
+                    break;
+                }
+                if failed {
                     break;
                 }
             }
@@ -259,6 +285,9 @@ pub(super) fn run(
     let mut dialogs = Dialogs::new();
     let result = loop {
         if stopped.try_recv().is_ok() {
+            break Ok(());
+        }
+        if initial.terminal.failed() {
             break Ok(());
         }
         if stop_after_ack.is_some_and(|t| Instant::now() >= t) {
@@ -307,6 +336,7 @@ pub(super) fn run(
                 }
                 follow_ups += 1;
                 let id = format!("ivy-follow-up-{follow_ups}");
+                initial.display.user(&message);
                 match writer.try_send(prompt(&id, message)) {
                     Ok(()) => {
                         ready = false;

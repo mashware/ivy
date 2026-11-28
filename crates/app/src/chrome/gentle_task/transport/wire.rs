@@ -27,10 +27,25 @@ pub(super) enum Incoming {
     CommandError,
 }
 
+#[cfg(test)]
 pub(super) fn receive(
     stdout: impl Read,
     target: &Inbox,
     updates: &impl Fn(Option<Value>),
+) -> Result<(), String> {
+    receive_projected(
+        stdout,
+        target,
+        updates,
+        &super::conversation::Display::new(std::sync::Arc::new(|| {})),
+    )
+}
+
+pub(super) fn receive_projected(
+    stdout: impl Read,
+    target: &Inbox,
+    updates: &impl Fn(Option<Value>),
+    display: &super::conversation::Display,
 ) -> Result<(), String> {
     let mut stream = BufReader::new(stdout);
     let mut line = Vec::new();
@@ -49,6 +64,9 @@ pub(super) fn receive(
         if len > MAX_LINE || line.last() != Some(&b'\n') {
             return Err("Gentle sent an incomplete or oversized RPC event.".into());
         }
+        let projection: Value =
+            serde_json::from_slice(&line).map_err(|_| "Gentle sent an invalid RPC event.")?;
+        display.observe(&projection);
         let mut reset = false;
         let event = decode_record(
             &line,
@@ -59,15 +77,15 @@ pub(super) fn receive(
         )?;
         if reset
             && target
-                .send(Message::Incoming(Incoming::HelperReset))
+                .try_send(Message::Incoming(Incoming::HelperReset))
                 .is_err()
         {
-            return Ok(());
+            return Err("Gentle reader control backlog exceeded its limit or closed.".into());
         }
         if let Some(event) = event
-            && target.send(Message::Incoming(event)).is_err()
+            && target.try_send(Message::Incoming(event)).is_err()
         {
-            return Ok(());
+            return Err("Gentle reader control backlog exceeded its limit or closed.".into());
         }
     }
 }
@@ -391,6 +409,40 @@ mod tests {
                 &json!({"method":"select","title":"q","id":"1","options":["x".repeat(MAX_TEXT)]})
             )
             .is_err()
+        );
+    }
+    #[test]
+    fn text_flood_bypasses_control_capacity_and_question_still_arrives() {
+        let display = super::super::conversation::Display::new(std::sync::Arc::new(|| {}));
+        let mut bytes = Vec::new();
+        for _ in 0..10000 {
+            bytes.extend_from_slice(b"{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"x\",\"contentIndex\":0}}\n");
+        }
+        bytes.extend_from_slice(b"{\"type\":\"extension_ui_request\",\"method\":\"confirm\",\"id\":\"q\",\"title\":\"Continue?\"}\n");
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let error = receive_projected(Cursor::new(bytes), &send, &|_| {}, &display).unwrap_err();
+        assert!(error.contains("closed"));
+        assert!(
+            matches!(receive.try_recv(), Ok(Message::Incoming(Incoming::Question(q))) if q.id == "q")
+        );
+        let mut cache = super::super::conversation::Cache::default();
+        while display.poll(&mut cache, &mut (64 * 1024)) {}
+        assert_eq!(
+            cache.rows.iter().map(|r| &*r.text).collect::<String>(),
+            "x".repeat(10000)
+        );
+        assert_eq!(cache.rows.len(), 1);
+    }
+    #[test]
+    fn saturated_reader_control_admission_fails_without_waiting_for_a_receiver() {
+        let (send, _receive) = std::sync::mpsc::sync_channel(1);
+        let record = b"{\"type\":\"agent_settled\",\"aborted\":false}\n";
+        let mut bytes = record.to_vec();
+        bytes.extend_from_slice(record);
+        assert!(
+            receive(Cursor::new(bytes), &send, &|_| {})
+                .unwrap_err()
+                .contains("backlog")
         );
     }
 }
