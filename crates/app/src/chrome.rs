@@ -37,6 +37,8 @@ pub(crate) struct Chrome {
     guide: connection::Guide,
     updates: updates::Dialog,
     held: bool,
+    summary_held: bool,
+    summary_frame: Option<u64>,
     /// Passes in a row that had to move macOS's window buttons back.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     buttons_moved: u8,
@@ -389,8 +391,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let over = pointer.is_some_and(|p| {
         (row.contains(p) && !tabs.is_some_and(|tabs| tabs.contains(p)))
             || (window.chrome.menu && menu_rect.contains(p))
-            || summary.is_some_and(|summary| summary.contains(p))
     });
+    let over_summary = pointer.is_some_and(|p| summary.is_some_and(|rect| rect.contains(p)));
     if summary.is_some()
         && ctx.input(|i| i.pointer.primary_pressed())
         && !pointer.is_some_and(|p| {
@@ -420,13 +422,21 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     {
         window.chrome.menu = false;
     }
-    let owned = window.chrome.guide_blocked(&ctx)
+    let chrome_owned = window.chrome.guide_blocked(&ctx)
         || window.usage.blocks(&ctx)
         || menu_owned
-        || ((over || edge.is_some()) && gesture)
+        || ((over || edge.is_some()) && gesture && !window.chrome.summary_held)
         || window.chrome.held
         || window.chrome.blocked_frame == Some(frame);
-    if owned {
+    let summary_owned = (over_summary && gesture)
+        || window.chrome.summary_held
+        || window.chrome.summary_frame == Some(frame);
+    if summary_owned {
+        window.chrome.summary_frame = Some(frame);
+        window.chrome.summary_held = ctx.input(|i| i.focused && i.pointer.any_down());
+    }
+    let owned = chrome_owned || summary_owned;
+    if chrome_owned {
         window.chrome.blocked_frame = Some(frame);
         window.chrome.held = ctx.input(|i| i.focused && i.pointer.any_down());
         window.header_input.block_for_settings(frame);
@@ -439,6 +449,24 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                         | egui::Event::PointerButton { pressed: false, .. }
                 )
             })
+        });
+    } else if summary_owned {
+        // D132's non-modal summary owns its gesture, never the console's keyboard.
+        window.header_input.block_for_settings(frame);
+        ctx.input_mut(|i| {
+            i.events.retain(|event| {
+                !matches!(
+                    event,
+                    egui::Event::PointerMoved(_)
+                        | egui::Event::MouseMoved(_)
+                        | egui::Event::PointerGone
+                        | egui::Event::PointerButton { pressed: true, .. }
+                        | egui::Event::MouseWheel { .. }
+                        | egui::Event::Zoom(_)
+                        | egui::Event::Rotate(_)
+                        | egui::Event::Touch { .. }
+                )
+            });
         });
     }
     let elapsed = started.elapsed();

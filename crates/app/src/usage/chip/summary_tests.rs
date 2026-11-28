@@ -517,21 +517,75 @@ fn the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion() {
             egui::Event::Text("typed".into()),
         ],
     );
-    for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+    let released = egui::pos2(
+        area.left() + 10.0,
+        crate::chrome::strip(&window, area).row.center().y,
+    );
+    for button in [
+        egui::PointerButton::Primary,
+        egui::PointerButton::Secondary,
+        egui::PointerButton::Middle,
+    ] {
         for pressed in [true, false] {
             painted(
                 &mut window,
                 &ctx,
                 area,
-                vec![egui::Event::PointerButton {
-                    pos: inside,
-                    button,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                }],
+                vec![
+                    egui::Event::PointerButton {
+                        pos: if pressed { inside } else { released },
+                        button,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text(if pressed { "press" } else { "release" }.into()),
+                ],
             );
+            if pressed {
+                painted(
+                    &mut window,
+                    &ctx,
+                    area,
+                    vec![
+                        egui::Event::PointerMoved(egui::pos2(
+                            area.left() + 30.0,
+                            area.bottom() - 30.0,
+                        )),
+                        egui::Event::Text("held".into()),
+                        egui::Event::ModifiersChanged(egui::Modifiers {
+                            ctrl: true,
+                            shift: true,
+                            ..egui::Modifiers::NONE
+                        }),
+                        egui::Event::Paste("paste".into()),
+                        egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                        egui::Event::Key {
+                            key: egui::Key::ArrowLeft,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
         }
     }
+    painted(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(inside),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, 1.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+            egui::Event::Text("wheel".into()),
+        ],
+    );
     for pane in window.active_mut().panes_mut() {
         pane.pty.write(b"blocked").unwrap();
     }
@@ -541,7 +595,8 @@ fn the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion() {
         .iter()
         .map(|pane| {
             if pane.name == focus {
-                b"typedblocked".as_slice()
+                b"typedpressheldpaste\x1b[Dreleasepressheldpaste\x1b[Dreleasepressheldpaste\x1b[Dreleasewheelblocked"
+                    .as_slice()
             } else {
                 b"blocked".as_slice()
             }
