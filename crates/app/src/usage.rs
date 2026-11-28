@@ -21,6 +21,10 @@ pub(crate) fn chip_slot(view: &View) -> f32 {
     view.chip.slot()
 }
 
+pub(crate) fn chip_rect(view: &View, slot: egui::Rect) -> egui::Rect {
+    view.chip.hugged(slot)
+}
+
 /// The chip's summary while it is open, for the title bar's pointer claim.
 pub(crate) fn chip_summary(view: &View) -> Option<egui::Rect> {
     view.chip.summary()
@@ -39,6 +43,15 @@ use report::{Measurement, Timing};
 
 #[cfg(target_os = "linux")]
 mod quota_broker;
+#[cfg(all(test, windows))]
+mod quota_broker {
+    mod tests {
+        crate::windows_unix_omission!(
+            the_chip_follows_receipt_order_between_launches_in_the_same_second,
+            "unix-only: Claude allowance reporting requires Linux socket peer and process-scope verification"
+        );
+    }
+}
 #[cfg(target_os = "linux")]
 mod quota_setup;
 #[cfg(target_os = "linux")]

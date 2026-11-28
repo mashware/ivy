@@ -1,6 +1,11 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "usage::quota_broker::tests::the_chip_follows_receipt_order_between_launches_in_the_same_second",
+    "reason": "unix-only: Claude allowance reporting requires Linux socket peer and process-scope verification"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "usage::allowances::native::tests::failed_reads_carry_the_account_actually_seen_before_the_failure",
     "reason": "unix-only: requires Linux x86_64 private-stdio Codex client fixtures"
   },

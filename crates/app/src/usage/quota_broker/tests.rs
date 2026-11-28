@@ -203,7 +203,10 @@ fn native_receiver_admits_its_launch_and_rejects_another_live_launch() {
 
 #[test]
 fn the_chip_follows_receipt_order_between_launches_in_the_same_second() {
-    use super::super::{chip::{FIVE_HOURS, Source}, quota_view::QuotaView};
+    use super::super::{
+        chip::{FIVE_HOURS, Source},
+        quota_view::QuotaView,
+    };
     let wake = Wake::new(|| {});
     let first = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
     let second = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
@@ -218,27 +221,53 @@ fn the_chip_follows_receipt_order_between_launches_in_the_same_second() {
     view.install_fixture(Arc::clone(&first), Arc::clone(&wake));
     view.install(1, Arc::clone(&second));
     let displayed = || {
-        let Source::Read(reading) = view.chip_source() else { panic!("a producer reading"); };
+        let Source::Read(reading) = view.chip_source() else {
+            panic!("a producer reading");
+        };
         assert_eq!(reading.observed_at, received_at);
         reading.window(FIVE_HOURS).unwrap().used
     };
     second_launch.run("ordered-22");
-    wait_for(&second, |snapshot| matches!(snapshot, Snapshot::Observed { .. }));
+    wait_for(&second, |snapshot| {
+        matches!(snapshot, Snapshot::Observed { .. })
+    });
     assert_eq!(displayed(), Some(22.0));
     let second_receipt = second.ordered_snapshot().0;
     first_launch.run("ordered-88");
-    wait_for(&first, |snapshot| matches!(snapshot, Snapshot::Observed { .. }));
+    wait_for(&first, |snapshot| {
+        matches!(snapshot, Snapshot::Observed { .. })
+    });
     assert!(first.ordered_snapshot().0 > second_receipt);
     assert_eq!(displayed(), Some(88.0));
-    second.state.expire_at(chrono::DateTime::from_timestamp(4_000_000_000, 0).unwrap());
-    assert!(matches!(second.snapshot(), Snapshot::Observed { five_hour: WindowState::Expired, .. }));
+    second
+        .state
+        .expire_at(chrono::DateTime::from_timestamp(4_000_000_000, 0).unwrap());
+    assert!(matches!(
+        second.snapshot(),
+        Snapshot::Observed {
+            five_hour: WindowState::Expired,
+            ..
+        }
+    ));
     assert_eq!(displayed(), Some(88.0));
-    assert_eq!(second.ordered_snapshot().0, second_receipt,
-        "an expiry is not a newer producer receipt");
+    assert_eq!(
+        second.ordered_snapshot().0,
+        second_receipt,
+        "an expiry is not a newer producer receipt"
+    );
     second_launch.run("ordered-22");
-    wait_for(&second, |snapshot| matches!(snapshot, Snapshot::Observed {
-        five_hour: WindowState::Reported(Window { used_percentage: Some(22.0), .. }), ..
-    }));
+    wait_for(&second, |snapshot| {
+        matches!(
+            snapshot,
+            Snapshot::Observed {
+                five_hour: WindowState::Reported(Window {
+                    used_percentage: Some(22.0),
+                    ..
+                }),
+                ..
+            }
+        )
+    });
     assert!(second.ordered_snapshot().0 > first.ordered_snapshot().0);
     assert_eq!(displayed(), Some(22.0));
 }

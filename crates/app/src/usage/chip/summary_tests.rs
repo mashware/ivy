@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! A glance at allowances must leave console keyboard and mouse input alone; only the summary's
 //! own rectangle may claim a gesture (D132).
 
@@ -492,7 +494,27 @@ fn the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion() {
     let ctx = egui::Context::default();
     let area = area(1600.0);
     ready(&mut window, &ctx, area, codex());
-    let summary = open_summary(&mut window, &ctx, area);
+    let focus = window.active().focus;
+    let chip = crate::chrome::strip(&window, area).chip.unwrap();
+    let chip = window.usage.chip.hugged(chip).center();
+    for opens in [true, false, true] {
+        let mut down = press(chip);
+        down.push(egui::Event::Text("chip-down".into()));
+        painted(&mut window, &ctx, area, down);
+        painted(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("chip-held".into())],
+        );
+        let mut up = release(chip);
+        up.push(egui::Event::Text("chip-up".into()));
+        painted(&mut window, &ctx, area, up);
+        painted(&mut window, &ctx, area, vec![]);
+        assert_eq!(crate::usage::chip_summary(&window.usage).is_some(), opens);
+        assert_eq!(window.active().focus, focus);
+    }
+    let summary = crate::usage::chip_summary(&window.usage).unwrap();
     let inside = window
         .active()
         .panes()
@@ -507,7 +529,6 @@ fn the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion() {
         pane.screen.advance(b"\x1b[?1003h\x1b[?1006h");
         assert!(pane.screen.mouse_reporting().motion);
     }
-    let focus = window.active().focus;
     painted(
         &mut window,
         &ctx,
@@ -595,17 +616,19 @@ fn the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion() {
         .iter()
         .map(|pane| {
             if pane.name == focus {
-                b"typedpressheldpaste\x1b[Dreleasepressheldpaste\x1b[Dreleasepressheldpaste\x1b[Dreleasewheelblocked"
-                    .as_slice()
+                [
+                    b"chip-downchip-heldchip-up".repeat(3).as_slice(),
+                    b"typedpressheldpaste\x1b[Dreleasepressheldpaste\x1b[Dreleasepressheldpaste\x1b[Dreleasewheelblocked",
+                ].concat()
             } else {
-                b"blocked".as_slice()
+                b"blocked".to_vec()
             }
         })
         .collect();
     for (input, expected) in received.iter().zip(&expected) {
         assert_eq!(
             input.wait_for(expected.len(), Duration::from_secs(5)),
-            *expected
+            expected.as_slice()
         );
     }
     window.usage.chip.close_summary();

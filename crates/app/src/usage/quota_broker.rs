@@ -385,7 +385,11 @@ impl Broker {
     pub(super) fn observe_for_test(&self, snapshot: Snapshot) {
         let mut model = self.state.model.lock().unwrap();
         model.snapshot = snapshot;
-        model.publication = self.state.wake.receipt(std::ptr::from_ref(self.state.as_ref()) as usize).0;
+        model.publication = self
+            .state
+            .wake
+            .receipt(std::ptr::from_ref(self.state.as_ref()) as usize)
+            .0;
     }
 
     pub(super) fn startup_failed(&self) {

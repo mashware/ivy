@@ -388,16 +388,21 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let summary = crate::usage::chip_summary(&window.usage);
     let frame = ctx.cumulative_frame_nr();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
+    let chip = geometry
+        .chip
+        .map(|slot| crate::usage::chip_rect(&window.usage, slot));
+    let over_chip = pointer.is_some_and(|p| chip.is_some_and(|rect| rect.contains(p)));
     let over = pointer.is_some_and(|p| {
-        (row.contains(p) && !tabs.is_some_and(|tabs| tabs.contains(p)))
+        (row.contains(p) && !tabs.is_some_and(|tabs| tabs.contains(p)) && !over_chip)
             || (window.chrome.menu && menu_rect.contains(p))
     });
-    let over_summary = pointer.is_some_and(|p| summary.is_some_and(|rect| rect.contains(p)));
+    let over_summary =
+        over_chip || pointer.is_some_and(|p| summary.is_some_and(|rect| rect.contains(p)));
     if summary.is_some()
         && ctx.input(|i| i.pointer.primary_pressed())
         && !pointer.is_some_and(|p| {
             summary.is_some_and(|summary| summary.contains(p))
-                || geometry.chip.is_some_and(|chip| chip.contains(p))
+                || chip.is_some_and(|chip| chip.contains(p))
         })
     {
         crate::usage::close_summary(&mut window.usage);
@@ -451,7 +456,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             })
         });
     } else if summary_owned {
-        // D132's non-modal summary owns its gesture, never the console's keyboard.
+        // D132 keeps the chip and its summary non-modal: their gestures cannot claim the keys.
         window.header_input.block_for_settings(frame);
         ctx.input_mut(|i| {
             i.events.retain(|event| {

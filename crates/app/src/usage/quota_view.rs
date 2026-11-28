@@ -454,17 +454,20 @@ fn chip_source(snapshots: &[(u64, Snapshot)], disconnected: bool) -> super::chip
                 received_at,
                 five_hour,
                 seven_day,
-            } => Some((*publication, Reading {
-                observed_at: received_at,
-                windows: [
-                    named("5-hour session", FIVE_HOURS, five_hour),
-                    named("Weekly", WEEK, seven_day),
-                ]
-                .into_iter()
-                .flatten()
-                .collect(),
-                last_failure: None,
-            })),
+            } => Some((
+                *publication,
+                Reading {
+                    observed_at: received_at,
+                    windows: [
+                        named("5-hour session", FIVE_HOURS, five_hour),
+                        named("Weekly", WEEK, seven_day),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+                    last_failure: None,
+                },
+            )),
             _ => None,
         })
         .max_by_key(|(publication, _)| *publication)
@@ -472,10 +475,17 @@ fn chip_source(snapshots: &[(u64, Snapshot)], disconnected: bool) -> super::chip
     // An error comes from the launch's statusline or from Ivy's own receiver; the words blame
     // neither, and a newer error on one launch is not hidden behind another launch's reading.
     const STOPPED: &str = "Claude reporting stopped with an error.";
-    let errored = snapshots.iter().any(|(_, snapshot)| *snapshot == Snapshot::ProducerError);
-    let waiting = snapshots.iter().any(|(_, snapshot)| *snapshot == Snapshot::Waiting);
+    let errored = snapshots
+        .iter()
+        .any(|(_, snapshot)| *snapshot == Snapshot::ProducerError);
+    let waiting = snapshots
+        .iter()
+        .any(|(_, snapshot)| *snapshot == Snapshot::Waiting);
     // A launch ended when its snapshot says so, or when AI usage already pruned it.
-    let ended = disconnected || snapshots.iter().any(|(_, snapshot)| *snapshot == Snapshot::Disconnected);
+    let ended = disconnected
+        || snapshots
+            .iter()
+            .any(|(_, snapshot)| *snapshot == Snapshot::Disconnected);
     // A reading outranks everything, and a launch still to report outranks a failed or ended one.
     match latest {
         Some(mut reading) => {
