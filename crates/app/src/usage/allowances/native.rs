@@ -17,27 +17,57 @@ const MAX_EXCHANGE: usize = 2 * 1024 * 1024;
 const NO_METHOD: i64 = -32601;
 const BAD_PARAMS: i64 = -32602;
 
-/// Any release is read; what admits a reading is the evidence each read returns (D132 amends
-/// D129's pin to 0.167.2): the account tuple before and after, the response's workspace and the
-/// binding witness, checked in `bind_observation`.
 pub(super) fn read(cancelled: Arc<AtomicBool>) -> Result<Observation, Failure> {
+    with_account(|current_account| read_inner(cancelled, current_account))
+}
+
+fn with_account(
+    read: impl FnOnce(&mut Option<Account>) -> Result<Observation, Failure>,
+) -> Result<Observation, Failure> {
+    let mut current_account = None;
+    read(&mut current_account).map_err(|failure| Failure::WithAccount {
+        account: current_account,
+        failure: Box::new(failure),
+    })
+}
+
+fn read_inner(
+    cancelled: Arc<AtomicBool>,
+    current_account: &mut Option<Account>,
+) -> Result<Observation, Failure> {
     let deadline = Instant::now() + Duration::from_secs(8);
     let program = native_codex().map_err(|_| Failure::Unsupported)?;
     let args = ["--version"];
     let mut version = AllowanceProcess::start(&program, &args, false, deadline, cancelled.clone())?;
-    let version_line = version.line(256)?;
+    let version_line = version_line(&mut version)?;
     version.finish()?;
     let version = client_version(&version_line)?;
 
     let args = ["app-server", "--listen", "stdio://", "--disable", "plugins"];
     let mut server = AllowanceProcess::start(&program, &args, true, deadline, cancelled)?;
     handshake(&mut server, &version)?;
-    let before = account(&mut server, 2)?;
-    // A transport failure ends the read; an error answer is judged only once the account is known
-    // not to have changed, since a changed account explains any answer.
-    let quotas = rate_limits(&mut server)?;
+    observe(&mut server, current_account)
+}
+
+fn version_line(process: &mut AllowanceProcess) -> Result<Vec<u8>, Failure> {
+    process.line(256).map_err(|failure| match failure {
+        Failure::Exited => Failure::Refused("Codex --version closed before reporting its version."),
+        other => other,
+    })
+}
+
+fn observe(
+    server: &mut AllowanceProcess,
+    current_account: &mut Option<Account>,
+) -> Result<Observation, Failure> {
+    let before = account(server, 2)?;
+    *current_account = Some(before.clone());
+    let quotas = rate_limits(server)?;
     let observed_at = chrono::Utc::now().timestamp();
-    let after = account(&mut server, 4)?;
+    // A failed second account read must not reuse the identity from before the quota request.
+    *current_account = None;
+    let after = account(server, 4)?;
+    *current_account = Some(after.clone());
     server.finish()?;
     if !before.matches(&after) {
         return Err(ACCOUNT_CHANGED);
@@ -314,7 +344,7 @@ impl AllowanceProcess {
                 return if status.success() {
                     Ok(())
                 } else {
-                    Err(Failure::Unavailable)
+                    Err(Failure::Refused("Codex exited unsuccessfully during the allowance read."))
                 };
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -364,8 +394,10 @@ fn signal_group(pid: u32) {
 }
 
 fn check(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Failure> {
-    if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
-        Err(Failure::Unavailable)
+    if cancelled.load(Ordering::Relaxed) {
+        Err(Failure::Internal("Ivy cancelled the allowance read."))
+    } else if Instant::now() >= deadline {
+        Err(Failure::Internal("Ivy stopped the allowance read at its deadline."))
     } else {
         Ok(())
     }
@@ -422,6 +454,66 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap()
+    }
+
+    fn account_reply(id: u32, user: Option<&str>) -> Value {
+        let result = user.map_or_else(|| json!({"sessions": []}), |user| json!({
+            "activeSessionId": user,
+            "sessions": [{"sessionId": user, "isActive": true, "userId": user,
+                "selectedWorkspaceAccountId": "shared"}]
+        }));
+        json!({"id": id, "result": result})
+    }
+
+    #[test]
+    fn failed_reads_carry_the_account_actually_seen_before_the_failure() {
+        use super::super::AllowanceView;
+        let _serial = crate::client_attestation::CHILD_TEST_SERIAL.lock().unwrap();
+        for (before, after, keep) in [
+            (Some("a"), Some("a"), true),
+            (Some("b"), Some("b"), false),
+            (None, None, false),
+            (Some("a"), None, false),
+            (Some("a"), Some("b"), false),
+        ] {
+            let mut view = AllowanceView { enabled: true, ..Default::default() };
+            let selected = Account::from_response(account_reply(2, Some("a"))["result"].take()).unwrap();
+            view.install(bind_observation(selected.clone(), selected,
+                json!({"accountId": "shared", "ordinaryUsageAllowed": false,
+                    "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 42,
+                        "windowDurationMins": 300, "resetsAt": 5000}}}), 100));
+            let script = [account_reply(2, before),
+                json!({"id": 3, "error": {"code": -32603, "message": "private"}}),
+                account_reply(4, after)]
+                .into_iter().map(|reply| format!("read request\nprintf '%s\\n' '{reply}'\n"))
+                .collect::<String>();
+            let mut server = scripted(&script);
+            view.install(with_account(|current| observe(&mut server, current)));
+            let source = view.chip_source(200);
+            assert_eq!(matches!(source, super::super::super::chip::Source::Read(_)), keep,
+                "before={before:?} after={after:?}: {source:?}");
+            assert!(!format!("{source:?}").contains("private"));
+            if let super::super::super::chip::Source::Read(reading) = source {
+                assert_eq!(reading.observed_at, 100);
+                assert_eq!(reading.windows[0].window.used, Some(42.0));
+                assert!(reading.last_failure.unwrap().contains("account/rateLimits/read"));
+            }
+        }
+    }
+
+    #[test]
+    fn internal_failures_and_version_eof_name_the_operation_that_stopped() {
+        let _serial = crate::client_attestation::CHILD_TEST_SERIAL.lock().unwrap();
+        let mut closed = scripted("exit 0");
+        assert_eq!(failure_text(&version_line(&mut closed).unwrap_err()),
+            "Codex --version closed before reporting its version.");
+        assert_eq!(failure_text(&check(Instant::now(), &AtomicBool::new(false)).unwrap_err()),
+            "Ivy stopped the allowance read at its deadline.");
+        assert_eq!(failure_text(&check(Instant::now() + Duration::from_secs(1), &AtomicBool::new(true)).unwrap_err()),
+            "Ivy cancelled the allowance read.");
+        let mut failed = scripted("exit 2");
+        assert_eq!(failure_text(&failed.finish().unwrap_err()),
+            "Codex exited unsuccessfully during the allowance read.");
     }
 
     fn answering(id: u32, code: i64) -> AllowanceProcess {
@@ -586,7 +678,7 @@ mod tests {
         child.send(json!({"method": "initialized"})).unwrap();
         assert!(matches!(child.line(4), Err(Failure::Unavailable)));
         cancelled.store(true, Ordering::Relaxed);
-        assert!(matches!(child.line(MAX_LINE), Err(Failure::Unavailable)));
+        assert!(matches!(child.line(MAX_LINE), Err(Failure::Internal("Ivy cancelled the allowance read."))));
     }
 
     #[test]

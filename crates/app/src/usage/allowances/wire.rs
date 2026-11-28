@@ -55,18 +55,21 @@ pub(super) fn bind_observation(
     // release pinned it is the evidence every read must carry, and its absence is a refusal.
     // Residual risk (D132): its meaning as a witness was proven for 0.167.2 only; 0.172.0 was
     // seen to send it for a matching user, not to withhold it for another. A release that sends
-    // it unconditionally would let another user's reading through this check; the sign-in source
-    // (#283) does not depend on it and is preferred where it is available.
+    // it unconditionally would let another user's reading through this check.
     if !response["ordinaryUsageAllowed"].is_boolean() {
         return Err(Failure::Identity(
             "Codex sent no identity witness (ordinaryUsageAllowed).",
         ));
     }
     let buckets = parse_buckets(&response).map_err(|_| Failure::SameAccount(after.clone()))?;
+    let main_bucket = optional_text(&response["rateLimits"]["limitId"])
+        .map_err(|_| Failure::SameAccount(after.clone()))?
+        .map(str::to_owned);
     Ok(Observation {
         account: after,
         observed_at,
         buckets,
+        main_bucket,
     })
 }
 
@@ -101,6 +104,7 @@ fn parse_bucket(id: &str, value: &Value) -> Result<Bucket, Failure> {
         .filter(|name| *name != id)
         .map_or_else(|| id.to_owned(), |name| format!("{name} ({id})"));
     Ok(Bucket {
+        id: id.into(),
         label,
         primary: parse_window(&value["primary"])?,
         secondary: parse_window(&value["secondary"])?,
@@ -258,6 +262,29 @@ mod tests {
         year["rateLimitsByLimitId"]["codex"]["primary"]["windowDurationMins"] =
             json!(366 * 24 * 60);
         assert!(bind_observation(account("a"), account("a"), year, 1).is_ok());
+    }
+
+    #[test]
+    fn the_response_main_id_selects_the_chip_and_ambiguous_maps_select_nothing() {
+        let mut response = json!({"accountId": "shared", "ordinaryUsageAllowed": true,
+            "rateLimits": {"limitId": "primary"},
+            "rateLimitsByLimitId": {
+                "code_review": {"primary": {"usedPercent": 99, "windowDurationMins": 300}},
+                "primary": {"primary": {"usedPercent": 42, "windowDurationMins": 300}}
+            }});
+        let read = |response| {
+            let observation = bind_observation(account("a"), account("a"), response, 1).unwrap();
+            super::super::reading_of(&observation, None, 2)
+        };
+        assert_eq!(read(response.clone()).window(super::super::super::chip::FIVE_HOURS).unwrap().used,
+            Some(42.0));
+        response["rateLimits"] = Value::Null;
+        let ambiguous = read(response.clone());
+        assert_eq!(ambiguous.window(super::super::super::chip::FIVE_HOURS), None);
+        assert!(ambiguous.windows.iter().all(|window| window.extra));
+        response["rateLimitsByLimitId"].as_object_mut().unwrap().remove("code_review");
+        assert_eq!(read(response).window(super::super::super::chip::FIVE_HOURS).unwrap().used,
+            Some(42.0));
     }
 
     #[test]

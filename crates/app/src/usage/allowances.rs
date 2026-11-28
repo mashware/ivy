@@ -5,6 +5,20 @@ use std::time::{Duration, Instant};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod native;
+#[cfg(all(test, windows))]
+mod native {
+    mod tests {
+        crate::windows_unix_omission!(
+            failed_reads_carry_the_account_actually_seen_before_the_failure,
+            "unix-only: requires Linux x86_64 private-stdio Codex client fixtures"
+        );
+        crate::windows_unix_omission!(
+            internal_failures_and_version_eof_name_the_operation_that_stopped,
+            "unix-only: requires Linux x86_64 private-stdio Codex client fixtures"
+        );
+    }
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod wire;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -37,10 +51,12 @@ struct Observation {
     account: Account,
     observed_at: i64,
     buckets: Vec<Bucket>,
+    main_bucket: Option<String>,
 }
 
 #[derive(Debug)]
 struct Bucket {
+    id: String,
     label: String,
     primary: Option<AllowanceWindow>,
     secondary: Option<AllowanceWindow>,
@@ -57,14 +73,13 @@ struct AllowanceWindow {
 enum Failure {
     Unsupported,
     Unavailable,
+    Internal(&'static str),
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     SameAccount(Account),
     /// The client answered, but without the evidence a verified reading needs; the text names
     /// what was missing or what the client refused (D132).
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     Refused(&'static str),
-    /// The evidence says the reading may belong to another account or workspace; the text says
-    /// which. The only failures that drop the reading already shown.
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     Identity(&'static str),
     /// The client's server closed its output before answering.
@@ -73,6 +88,32 @@ enum Failure {
     /// The client answered a request with a JSON-RPC error this read does not name otherwise.
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     Rpc { method: &'static str, code: i64 },
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    WithAccount {
+        account: Option<Account>,
+        failure: Box<Failure>,
+    },
+}
+
+
+impl Failure {
+    fn drops_reading(&self, observation: Option<&Observation>) -> bool {
+        match self {
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            Self::Identity(_) => true,
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            Self::SameAccount(account) => !observation
+                .is_some_and(|observation| account.matches(&observation.account)),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            Self::WithAccount { account, failure } => account.as_ref().is_none_or(|account| {
+                !observation.is_some_and(|observation| account.matches(&observation.account))
+            }) || matches!(failure.as_ref(), Self::Identity(_)),
+            _ => {
+                let _ = observation;
+                true
+            }
+        }
+    }
 }
 
 type Reply = Result<Observation, Failure>;
@@ -87,7 +128,12 @@ fn failure_text(failure: &Failure) -> String {
         Failure::Exited => "Codex's app-server closed before answering.".into(),
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         Failure::Rpc { method, code } => format!("Codex answered {method} with error {code}."),
-        _ => "Codex returned no verified reading.".into(),
+        Failure::Unavailable => "Ivy could not complete the allowance read.".into(),
+        Failure::Internal(reason) => (*reason).into(),
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        Failure::SameAccount(_) => "Codex returned invalid allowance data.".into(),
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        Failure::WithAccount { failure, .. } => failure_text(failure),
     }
 }
 
@@ -155,8 +201,10 @@ impl AllowanceView {
                 workspace: "fixture-workspace".into(),
                 label: "fixture@example.invalid · Example workspace".into(),
             },
+            main_bucket: Some("codex".into()),
             observed_at: now,
             buckets: vec![Bucket {
+                id: "codex".into(),
                 label: "codex".into(),
                 primary: Some(AllowanceWindow {
                     used: Some(20.0),
@@ -172,8 +220,6 @@ impl AllowanceView {
         });
     }
 
-    /// What the chip reads: the 5-hour window is the one of 300 minutes and the weekly one the one
-    /// of 10 080, in the first bucket that reports each; Codex labels neither.
     pub(super) fn chip_source(&self, now: i64) -> super::chip::Source {
         use super::chip::Source;
         if !SUPPORTED_PLATFORM {
@@ -185,8 +231,8 @@ impl AllowanceView {
         let Some(observation) = &self.observation else {
             // A failed read says so: «waiting» over a failure hid why no figure ever came.
             return match (&self.pending, &self.failure) {
-                (Some(_), _) => Source::Waiting("Codex reads on · reading now…".into()),
-                (None, Some(failure)) => Source::Failed(failure_text(failure)),
+                (_, Some(failure)) => Source::Failed(failure_text(failure)),
+                (Some(_), None) => Source::Waiting("Codex reads on · reading now…".into()),
                 (None, None) => Source::Waiting(self.next_read_hint()),
             };
         };
@@ -227,8 +273,10 @@ impl AllowanceView {
                 workspace: "w".into(),
                 label: "label".into(),
             },
+            main_bucket: Some("codex".into()),
             observed_at: now,
             buckets: vec![Bucket {
+                id: "codex".into(),
                 label: "codex".into(),
                 primary: Some(AllowanceWindow {
                     used: Some(used),
@@ -274,7 +322,6 @@ impl AllowanceView {
         if !self.enabled || !SUPPORTED_PLATFORM || self.pending.is_some() {
             return;
         }
-        self.failure = None;
         let (sender, result) = mpsc::sync_channel(1);
         let cancelled = Arc::new(AtomicBool::new(false));
         #[cfg(test)]
@@ -303,7 +350,7 @@ impl AllowanceView {
         {
             self.pending = Some(Pending { result, cancelled });
         } else {
-            self.install(Err(Failure::Unavailable));
+            self.install(Err(Failure::Internal("Ivy could not start its allowance reader.")));
             // A thread that cannot start counts as a finished read, or the cadence would retry it
             // on every frame.
             self.last_finished = Some(Instant::now());
@@ -319,7 +366,9 @@ impl AllowanceView {
         let reply = match pending.result.try_recv() {
             Ok(reply) => reply,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err(Failure::Unavailable),
+            Err(mpsc::TryRecvError::Disconnected) => Err(Failure::Internal(
+                "Ivy's allowance reader stopped before publishing a result.",
+            )),
         };
         let current = !pending.cancelled.load(Ordering::Relaxed) && self.enabled;
         if current {
@@ -337,19 +386,7 @@ impl AllowanceView {
                 None
             }
             Err(failure) => {
-                // Only evidence of another account drops what is shown; any other failure keeps
-                // the last reading, which says the failure and greys with age. With a five-minute
-                // cadence, blanking on every transient failure would empty the chip for nothing.
-                let other_account = match &failure {
-                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    Failure::Identity(_) => true,
-                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    Failure::SameAccount(account) => !self
-                        .observation
-                        .as_ref()
-                        .is_some_and(|observation| account.matches(&observation.account)),
-                    _ => false,
-                };
+                let other_account = failure.drops_reading(self.observation.as_ref());
                 if other_account {
                     self.observation = None;
                 }
@@ -397,7 +434,7 @@ impl AllowanceView {
         if self.pending.is_some() {
             // A background read every five minutes must not hide the reading it will replace.
             ui.small("Checking Codex account and allowances…");
-            if self.observation.is_none() {
+            if self.observation.is_none() && self.failure.is_none() {
                 return;
             }
         }
@@ -416,29 +453,23 @@ impl AllowanceView {
     }
 }
 
-/// The chip's reading of an observation. The client's default bucket — the one named `codex`, or
-/// the only one — comes first and is the chip's; any other bucket (code review, a model's own
-/// limit) is listed after it, named, and marked so the chip never takes it for the main allowance.
-/// Buckets otherwise arrive in their ids' alphabetical order, which says nothing about which is
-/// main.
 fn reading_of(
     observation: &Observation,
     failure: Option<&Failure>,
     now: i64,
 ) -> super::chip::Reading {
     use super::chip::{Allowance, Named, Reading};
-    let is_main = |bucket: &Bucket| bucket.label == "codex" || bucket.label.ends_with("(codex)");
     let main = observation
-        .buckets
-        .iter()
-        .position(is_main)
-        .unwrap_or_default();
-    let ordered = observation.buckets.get(main).into_iter().map(|bucket| (bucket, false)).chain(
+        .main_bucket
+        .as_deref()
+        .and_then(|id| observation.buckets.iter().position(|bucket| bucket.id == id))
+        .or_else(|| (observation.buckets.len() == 1).then_some(0));
+    let ordered = main.and_then(|index| observation.buckets.get(index)).into_iter().map(|bucket| (bucket, false)).chain(
         observation
             .buckets
             .iter()
             .enumerate()
-            .filter(move |(index, _)| *index != main)
+            .filter(move |(index, _)| Some(*index) != main)
             .map(|(_, bucket)| (bucket, true)),
     );
     let windows = ordered.flat_map(|(bucket, extra)| {
@@ -561,6 +592,7 @@ mod tests {
     fn observation(user: &str) -> Observation {
         Observation {
             account: account(user),
+            main_bucket: Some("codex".into()),
             observed_at: 42,
             buckets: Vec::new(),
         }
@@ -613,10 +645,8 @@ mod tests {
         view.poll(Instant::now());
     }
 
-    /// A transient failure keeps the last reading, with the failure as its note, to grey with
-    /// age; only evidence of another account drops it.
     #[test]
-    fn only_identity_failures_drop_the_reading_shown() {
+    fn failures_are_visible_and_another_account_drops_the_figure() {
         let mut view = AllowanceView {
             enabled: true,
             ..AllowanceView::default()
@@ -631,7 +661,10 @@ mod tests {
             },
             Failure::Refused("Codex rejected excludeResetCreditDetails."),
         ] {
-            finish_with(&mut view, Err(transient));
+            finish_with(&mut view, Err(Failure::WithAccount {
+                account: Some(account("a")),
+                failure: Box::new(transient),
+            }));
             let super::super::chip::Source::Read(reading) = view.chip_source(100) else {
                 panic!("the last reading is kept");
             };
@@ -649,6 +682,39 @@ mod tests {
         finish_with(&mut view, Ok(observation("a")));
         finish_with(&mut view, Err(Failure::SameAccount(account("b"))));
         assert!(view.observation.is_none(), "another account's reading is not kept");
+    }
+
+    #[test]
+    fn a_worker_failure_without_account_evidence_drops_the_old_figure() {
+        let mut view = AllowanceView { enabled: true, ..Default::default() };
+        view.install(Ok(observation("a")));
+        finish_with(&mut view, Err(Failure::Internal(
+            "Ivy's allowance reader stopped before publishing a result.",
+        )));
+        assert_eq!(view.chip_source(100), super::super::chip::Source::Failed(
+            "Ivy's allowance reader stopped before publishing a result.".into(),
+        ));
+    }
+
+    #[test]
+    fn starting_a_refresh_keeps_the_previous_failure_until_a_reply_replaces_it() {
+        use super::super::chip::Source;
+        let mut view = AllowanceView {
+            enabled: true,
+            stub_reads: true,
+            failure: Some(Failure::Internal("Ivy could not start its allowance reader.")),
+            ..Default::default()
+        };
+        let source = view.chip_source(100);
+        view.refresh(&egui::Context::default());
+        assert!(view.polling());
+        assert_eq!(view.chip_source(100), source);
+        let mut output = egui::Context::default().run_ui(Default::default(), |ui| view.show(ui));
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "Ivy could not start its allowance reader.")));
+        finish_with(&mut view, Ok(observation("a")));
+        assert!(matches!(view.chip_source(100), Source::Read(reading) if reading.last_failure.is_none()));
     }
 
     /// A read in flight — every five minutes in the background — keeps the reading on screen in
@@ -687,6 +753,7 @@ mod tests {
         };
         let mut snapshot = observation("a");
         snapshot.buckets.push(Bucket {
+            id: "fixture".into(),
             label: "Fixture quota".into(),
             primary: Some(AllowanceWindow {
                 used: Some(0.0),
@@ -711,6 +778,18 @@ mod tests {
         assert!(labels.contains(&"Stale · Could not refresh the last successful reading."));
         assert!(labels.contains(&"Primary · 0% used · 300 min · expired"));
     }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    crate::windows_unix_omission!(
+        starting_a_refresh_keeps_the_previous_failure_until_a_reply_replaces_it,
+        "unix-only: Codex allowance reads are supported on Linux x86_64 only"
+    );
+    crate::windows_unix_omission!(
+        a_worker_failure_without_account_evidence_drops_the_old_figure,
+        "unix-only: Codex allowance reads are supported on Linux x86_64 only"
+    );
 }
 
 /// What the chip is handed, on every platform: where reads exist, the windows found by length;
@@ -752,6 +831,35 @@ mod chip_tests {
             Next::Never
         );
     }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn a_scheduled_read_wakes_the_context_at_its_deadline() {
+        let start = Instant::now();
+        let mut view = AllowanceView {
+            enabled: true,
+            stub_reads: true,
+            last_finished: Some(start),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        for _ in 0..4 {
+            let mut output = ctx.run_ui(Default::default(), |_| {});
+            output.textures_delta.clear();
+        }
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            view.tick(ui.ctx(), start + Duration::from_secs(299), true);
+        });
+        output.textures_delta.clear();
+        let wait = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        assert!(wait > Duration::ZERO && wait <= Duration::from_secs(1), "{wait:?}");
+        assert!(!view.polling());
+    }
+
+    crate::windows_unix_omission!(
+        a_scheduled_read_wakes_the_context_at_its_deadline,
+        "unix-only: Codex allowance reads are supported on Linux x86_64 only"
+    );
 
     /// The window's own pass starts the read when it is due, with AI usage closed, and a measured
     /// run never does (D13). Where reads are unsupported nothing starts at all.
@@ -811,6 +919,7 @@ mod chip_tests {
                 workspace: "w".into(),
                 label: "label".into(),
             },
+            main_bucket: Some("codex".into()),
             observed_at: 1,
             buckets: Vec::new(),
         });
@@ -831,6 +940,7 @@ mod chip_tests {
                 workspace: "w".into(),
                 label: "label".into(),
             },
+            main_bucket: Some("codex".into()),
             observed_at: 90,
             buckets,
         })
@@ -848,11 +958,13 @@ mod chip_tests {
         // shorter and fuller window that must not stand in for the main allowance.
         view.observation = observation(vec![
             Bucket {
+                id: "code_review".into(),
                 label: "code_review".into(),
                 primary: window(99.0, 300, 450),
                 secondary: window(1.0, 60, 500),
             },
             Bucket {
+                id: "codex".into(),
                 label: "codex".into(),
                 primary: window(7.0, 10_080, 50),
                 secondary: window(42.0, 300, 400),
@@ -920,7 +1032,7 @@ mod chip_tests {
         view.poll(Instant::now());
         assert_eq!(
             view.chip_source(100),
-            Source::Failed("Codex returned no verified reading.".into())
+            Source::Failed("Ivy's allowance reader stopped before publishing a result.".into())
         );
         view.failure = None;
         assert_eq!(
@@ -934,7 +1046,7 @@ mod chip_tests {
         };
         assert_eq!(
             reading.last_failure.as_deref(),
-            Some("Last read failed: Codex returned no verified reading.")
+            Some("Last read failed: Ivy could not complete the allowance read.")
         );
     }
 }
@@ -954,8 +1066,10 @@ mod length_tests {
                 workspace: "w".into(),
                 label: "label".into(),
             },
+            main_bucket: Some("codex".into()),
             observed_at: 1,
             buckets: vec![Bucket {
+                id: "codex".into(),
                 label: "codex".into(),
                 primary: Some(AllowanceWindow {
                     used: Some(5.0),
