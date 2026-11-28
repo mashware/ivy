@@ -12703,3 +12703,11 @@ would make the same gesture jump in different visual directions after a split.
 **Reason.** Different sessions can launch helpers with the same name. Only their private connection and producer-issued IDs establish ownership. Gentle 5.1.0 exposes a bounded list and owner-driven updates. A disappearing entry can have fallen outside that view.
 
 **Discarded.** Inferring helper completion from disappearance would invent state. Matching names across sessions would combine independent work. Parsing terminal painting would duplicate the producer's semantics.
+
+### Native conversation and review destinations (study #280)
+
+**Proposed decision.** Extend the existing live native task into a readable session view alongside ordinary consoles. Keep its private client process, question routing and stop/follow-up ownership. Board and review use distinct console and native-session destinations. A review retains its originating session and source snapshot when focus changes; a closed destination retains the draft and cannot receive it. This is a design proposal for the next roadmap phase, not an implemented capability.
+
+**Reason.** The existing task already owns a persistent conversation, while the native surface shows questions and status without the transcript. Its two bounded control handoffs cannot also carry every text delta without delaying questions. The current console review sends through a PTY and clears on a queue write; a native prompt is accepted asynchronously. A Gentle change root is an opaque session handle, and its diff identifies HEAD at read time without a commit hash. These boundaries require a bounded display projection, separate feedback acceptance and explicit source identity.
+
+**Discarded.** A fake PTY would give a native session terminal identity and layout obligations it does not need. A second runtime service or durable event log would duplicate session ownership and introduce reopening. Casting session IDs to pane IDs or choosing the current focus at send time could route a review to another project. Mapping root labels to local paths would confuse worktrees with the same name. A new connection generation is unnecessary while every process gets a non-reused task ID and reconnection remains out of scope.
