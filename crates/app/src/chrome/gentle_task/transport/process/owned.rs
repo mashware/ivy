@@ -81,7 +81,7 @@ fn report_signal_error(result: libc::c_int) {
     }
 }
 
-fn stop_and_reap(child: &mut Child) -> std::io::Result<()> {
+pub(super) fn stop_and_reap(child: &mut Child) -> std::io::Result<()> {
     if child.try_wait()?.is_some() {
         return Ok(());
     }
