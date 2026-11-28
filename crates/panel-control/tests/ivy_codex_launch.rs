@@ -684,9 +684,13 @@ exit 37
     #[test]
     fn preserves_client_signal() {
         use std::os::unix::process::ExitStatusExt;
-        let client = Client::new();
-        fs::write(&client.executable, "#!/bin/sh\nkill -TERM $$\n").unwrap();
-        let status = client.command(&["exec"], REMOTE_HELP).status().unwrap();
+        // A rewritten executable can be held writable across another test thread's fork.
+        // The immutable shell avoids ETXTBSY; its $0 selects the launcher's passthrough path.
+        let status = Command::new(env!("CARGO_BIN_EXE_ivy-codex"))
+            .arg("/bin/sh")
+            .args(["-c", "kill -TERM $$", "exec"])
+            .status()
+            .unwrap();
         assert_eq!(status.signal(), Some(15));
     }
 
