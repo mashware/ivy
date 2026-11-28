@@ -87,7 +87,10 @@ enum Failure {
     Exited,
     /// The client answered a request with a JSON-RPC error this read does not name otherwise.
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    Rpc { method: &'static str, code: i64 },
+    Rpc {
+        method: &'static str,
+        code: i64,
+    },
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     WithAccount {
         account: Option<Account>,
@@ -95,19 +98,21 @@ enum Failure {
     },
 }
 
-
 impl Failure {
     fn drops_reading(&self, observation: Option<&Observation>) -> bool {
         match self {
             #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
             Self::Identity(_) => true,
             #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            Self::SameAccount(account) => !observation
-                .is_some_and(|observation| account.matches(&observation.account)),
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            Self::WithAccount { account, failure } => account.as_ref().is_none_or(|account| {
+            Self::SameAccount(account) => {
                 !observation.is_some_and(|observation| account.matches(&observation.account))
-            }) || matches!(failure.as_ref(), Self::Identity(_)),
+            }
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            Self::WithAccount { account, failure } => {
+                account.as_ref().is_none_or(|account| {
+                    !observation.is_some_and(|observation| account.matches(&observation.account))
+                }) || matches!(failure.as_ref(), Self::Identity(_))
+            }
             _ => {
                 let _ = observation;
                 true
@@ -350,7 +355,9 @@ impl AllowanceView {
         {
             self.pending = Some(Pending { result, cancelled });
         } else {
-            self.install(Err(Failure::Internal("Ivy could not start its allowance reader.")));
+            self.install(Err(Failure::Internal(
+                "Ivy could not start its allowance reader.",
+            )));
             // A thread that cannot start counts as a finished read, or the cadence would retry it
             // on every frame.
             self.last_finished = Some(Instant::now());
@@ -462,16 +469,25 @@ fn reading_of(
     let main = observation
         .main_bucket
         .as_deref()
-        .and_then(|id| observation.buckets.iter().position(|bucket| bucket.id == id))
+        .and_then(|id| {
+            observation
+                .buckets
+                .iter()
+                .position(|bucket| bucket.id == id)
+        })
         .or_else(|| (observation.buckets.len() == 1).then_some(0));
-    let ordered = main.and_then(|index| observation.buckets.get(index)).into_iter().map(|bucket| (bucket, false)).chain(
-        observation
-            .buckets
-            .iter()
-            .enumerate()
-            .filter(move |(index, _)| Some(*index) != main)
-            .map(|(_, bucket)| (bucket, true)),
-    );
+    let ordered = main
+        .and_then(|index| observation.buckets.get(index))
+        .into_iter()
+        .map(|bucket| (bucket, false))
+        .chain(
+            observation
+                .buckets
+                .iter()
+                .enumerate()
+                .filter(move |(index, _)| Some(*index) != main)
+                .map(|(_, bucket)| (bucket, true)),
+        );
     let windows = ordered.flat_map(|(bucket, extra)| {
         [&bucket.primary, &bucket.secondary]
             .into_iter()
@@ -661,14 +677,21 @@ mod tests {
             },
             Failure::Refused("Codex rejected excludeResetCreditDetails."),
         ] {
-            finish_with(&mut view, Err(Failure::WithAccount {
-                account: Some(account("a")),
-                failure: Box::new(transient),
-            }));
+            finish_with(
+                &mut view,
+                Err(Failure::WithAccount {
+                    account: Some(account("a")),
+                    failure: Box::new(transient),
+                }),
+            );
             let super::super::chip::Source::Read(reading) = view.chip_source(100) else {
                 panic!("the last reading is kept");
             };
-            assert!(reading.last_failure.is_some_and(|note| note.starts_with("Last read failed")));
+            assert!(
+                reading
+                    .last_failure
+                    .is_some_and(|note| note.starts_with("Last read failed"))
+            );
         }
         finish_with(
             &mut view,
@@ -681,19 +704,31 @@ mod tests {
         );
         finish_with(&mut view, Ok(observation("a")));
         finish_with(&mut view, Err(Failure::SameAccount(account("b"))));
-        assert!(view.observation.is_none(), "another account's reading is not kept");
+        assert!(
+            view.observation.is_none(),
+            "another account's reading is not kept"
+        );
     }
 
     #[test]
     fn a_worker_failure_without_account_evidence_drops_the_old_figure() {
-        let mut view = AllowanceView { enabled: true, ..Default::default() };
+        let mut view = AllowanceView {
+            enabled: true,
+            ..Default::default()
+        };
         view.install(Ok(observation("a")));
-        finish_with(&mut view, Err(Failure::Internal(
-            "Ivy's allowance reader stopped before publishing a result.",
-        )));
-        assert_eq!(view.chip_source(100), super::super::chip::Source::Failed(
-            "Ivy's allowance reader stopped before publishing a result.".into(),
-        ));
+        finish_with(
+            &mut view,
+            Err(Failure::Internal(
+                "Ivy's allowance reader stopped before publishing a result.",
+            )),
+        );
+        assert_eq!(
+            view.chip_source(100),
+            super::super::chip::Source::Failed(
+                "Ivy's allowance reader stopped before publishing a result.".into(),
+            )
+        );
     }
 
     #[test]
@@ -702,7 +737,9 @@ mod tests {
         let mut view = AllowanceView {
             enabled: true,
             stub_reads: true,
-            failure: Some(Failure::Internal("Ivy could not start its allowance reader.")),
+            failure: Some(Failure::Internal(
+                "Ivy could not start its allowance reader.",
+            )),
             ..Default::default()
         };
         let source = view.chip_source(100);
@@ -714,7 +751,9 @@ mod tests {
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::Text(text) if text.galley.text() == "Ivy could not start its allowance reader.")));
         finish_with(&mut view, Ok(observation("a")));
-        assert!(matches!(view.chip_source(100), Source::Read(reading) if reading.last_failure.is_none()));
+        assert!(
+            matches!(view.chip_source(100), Source::Read(reading) if reading.last_failure.is_none())
+        );
     }
 
     /// A read in flight — every five minutes in the background — keeps the reading on screen in
@@ -741,8 +780,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(labels.iter().any(|text| text == "Same workspace"), "{labels:?}");
-        assert!(labels.iter().any(|text| text == "Checking Codex account and allowances…"));
+        assert!(
+            labels.iter().any(|text| text == "Same workspace"),
+            "{labels:?}"
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|text| text == "Checking Codex account and allowances…")
+        );
     }
 
     #[test]
@@ -852,7 +898,10 @@ mod chip_tests {
         });
         output.textures_delta.clear();
         let wait = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
-        assert!(wait > Duration::ZERO && wait <= Duration::from_secs(1), "{wait:?}");
+        assert!(
+            wait > Duration::ZERO && wait <= Duration::from_secs(1),
+            "{wait:?}"
+        );
         assert!(!view.polling());
     }
 

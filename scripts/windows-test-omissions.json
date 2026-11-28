@@ -1,6 +1,36 @@
 [
   {
     "binary": "app/app:lib",
+    "name": "usage::allowances::native::tests::failed_reads_carry_the_account_actually_seen_before_the_failure",
+    "reason": "unix-only: requires Linux x86_64 private-stdio Codex client fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "usage::allowances::native::tests::internal_failures_and_version_eof_name_the_operation_that_stopped",
+    "reason": "unix-only: requires Linux x86_64 private-stdio Codex client fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "usage::allowances::tests::starting_a_refresh_keeps_the_previous_failure_until_a_reply_replaces_it",
+    "reason": "unix-only: Codex allowance reads are supported on Linux x86_64 only"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "usage::allowances::tests::a_worker_failure_without_account_evidence_drops_the_old_figure",
+    "reason": "unix-only: Codex allowance reads are supported on Linux x86_64 only"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "usage::allowances::chip_tests::a_scheduled_read_wakes_the_context_at_its_deadline",
+    "reason": "unix-only: Codex allowance reads are supported on Linux x86_64 only"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "usage::chip::summary_tests::the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion",
+    "reason": "unix-only: uses stty raw mode and cat to witness the console program's input"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "shell_integration::tests::git_bash_routes_the_native_launcher_instead_of_the_extensionless_npm_shim",
     "reason": "unix-only: exercises the MSYS lookup branch using executable POSIX shell fixtures"
   },

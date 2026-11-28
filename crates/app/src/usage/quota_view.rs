@@ -298,8 +298,7 @@ impl QuotaView {
         self.disconnected = false;
     }
 
-    /// Called on every frame before the chip reads the launches: clearing the pending wake is what
-    /// lets the next change schedule its own repaint.
+    // A pending wake must be acknowledged before another producer change can wake the window.
     pub(super) fn chip_frame(&self, shown: bool) {
         if let Some(wake) = &self.wake {
             let shown = shown && self.enabled.load(Ordering::Acquire);

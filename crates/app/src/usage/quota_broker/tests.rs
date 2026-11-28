@@ -339,7 +339,10 @@ fn with_the_view_closed_only_a_changed_value_wakes_the_window_for_the_chip() {
     let published = |frames: usize| {
         let deadline = Instant::now() + Duration::from_secs(4);
         while broker.published_for_test() < frames {
-            assert!(Instant::now() < deadline, "frame {frames} was not published");
+            assert!(
+                Instant::now() < deadline,
+                "frame {frames} was not published"
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
         wakes.load(Ordering::Relaxed)

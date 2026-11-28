@@ -214,9 +214,7 @@ impl BrokerState {
         };
         let same = same_value(&model.snapshot, &snapshot);
         let was_stale = match model.snapshot {
-            Snapshot::Observed { received_at, .. } => {
-                now - received_at > super::chip::STALE_AFTER
-            }
+            Snapshot::Observed { received_at, .. } => now - received_at > super::chip::STALE_AFTER,
             _ => false,
         };
         model.snapshot = snapshot;
@@ -226,7 +224,8 @@ impl BrokerState {
         let launch = std::ptr::from_ref(self) as usize;
         self.wake.published(launch, same, was_stale);
         #[cfg(test)]
-        self.published.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.published
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn expire(&self) -> Option<Duration> {
@@ -357,7 +356,9 @@ impl Broker {
 
     #[cfg(test)]
     pub(super) fn published_for_test(&self) -> usize {
-        self.state.published.load(std::sync::atomic::Ordering::SeqCst)
+        self.state
+            .published
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     #[cfg(test)]

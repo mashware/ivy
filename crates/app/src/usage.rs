@@ -471,7 +471,6 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     }
     if !view.measuring {
         let started = Instant::now();
-        // Every enabled agent is on the chip until its items can be chosen (#283, PR 3).
         view.allowances.tick(&ctx, started, true);
         #[cfg(target_os = "linux")]
         view.quota.chip_frame(true);

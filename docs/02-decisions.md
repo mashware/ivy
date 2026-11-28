@@ -12625,8 +12625,9 @@ timer would wake Ivy when the AI usage screen is closed.
 
 **Amended by [D132](#d132--the-title-bar-chip-reads-allowances-with-ai-usage-closed)
 (#283):** while the title bar's chip shows Claude, a change in a launch's
-windows wakes the window with AI usage closed. A frame that repeats the same
-values still does not.
+windows wakes the window with AI usage closed. An unchanged snapshot from the same launch
+does not wake it while the displayed reading is still fresh; another launch or renewal of a stale
+reading can change what the chip displays even when the percentages match.
 
 ## D129 — Codex allowances are account-bound observations
 
@@ -12689,7 +12690,8 @@ in this window (#283). It amends D128 and D129 in four places:
   read finished. The first read starts as soon as reads are enabled. One read is in flight at
   most, and a read that was revoked does not start the clock.
 - While the chip shows Claude, a launch's broker wakes the window when the windows it reports
-  change. A frame that repeats the same values does not wake it.
+  change, another launch becomes the latest source, or a stale reading is renewed. Unchanged
+  snapshots from the same launch do not wake it while the displayed reading remains fresh.
 - The Codex read no longer requires release 0.167.2. Any `codex-cli <semver>` is read, and the
   app-server must report the same release. Every read must still carry D129's identity
   evidence:
@@ -12698,24 +12700,33 @@ in this window (#283). It amends D128 and D129 in four places:
   - the `ordinaryUsageAllowed` binding witness.
 
   Missing evidence is refused with a reason naming what was missing, never shown as a reading.
-  A release that refuses `--disable plugins`, `excludeResetCreditDetails` or a method fails with
-  that reason. Codex CLI 0.172.0 returned every witness on 27 November 2026.
+  A refused startup option or RPC is reported without quoting the client's raw error output;
+  the operation and numeric RPC code are named when known. Codex CLI 0.172.0 returned every
+  witness on 27 November 2026.
 
-The chip shows the most recently updated Claude launch. A reading older than 30 minutes, or none
-yet, is greyed as stale rather than shown as a figure. «Shows» means the agent is one of the chip's
+  **Accepted compatibility risk.** The binding meaning of `ordinaryUsageAllowed` was verified
+  with matching and mismatching users on 0.167.2 only. The 0.172.0 check observed a matching
+  user, not a mismatching one. A release that sends this boolean unconditionally could pass
+  the witness check for another user in the same workspace. Removing the release pin accepts
+  this gap; the shape checks alone do not prove that every release preserves its semantics.
+
+The chip shows the most recently updated Claude launch. A reading older than 30 minutes is greyed
+as stale rather than shown as a current figure. With no reading, a grey marker distinguishes
+waiting, unavailable and failed states; it never invents zero usage. «Shows» means the agent is one of the chip's
 items, not that the bar is wide enough to draw it. A narrow window that hides the chip keeps the
 cadence, so the figure is current when the window widens. A measured run starts no background
 read.
 
 **Why.** A glance at the bar is only worth something if the figure is current with AI usage
 closed, which is where a person spends their time. D129's revoke-on-close made every Codex figure
-disappear the moment it was read. Five minutes keeps a 5-hour window's figure within a few points
-while starting the official client about twelve times an hour. Timing from the end of a read,
-rather than its start, keeps a slow client from overlapping itself. Waking on a change in value
-alone keeps a statusline that repeats itself on every keystroke from repainting the window.
+disappear the moment it was read. Five minutes balances update frequency with starting the
+official client about twelve times an hour; it is not a bound on how far usage can move between
+reads. Timing from the end of a read, rather than its start, keeps a slow client from overlapping
+itself. Suppressing unchanged fresh snapshots keeps a statusline that repeats itself on every
+redraw from repainting the window.
 The release pin refused every person whose client had updated: the installed 0.172.0 could not
-be read at all. What protects the reading is the identity evidence, which is checked on every
-read, whatever release produced it.
+be read at all. The identity checks remain on every read, with the cross-release semantic gap
+accepted above.
 
 **Discarded.**
 - Pinning one admitted release per version: each Codex update would break reads until Ivy

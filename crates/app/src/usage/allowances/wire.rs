@@ -45,7 +45,9 @@ pub(super) fn bind_observation(
     observed_at: i64,
 ) -> Result<Observation, Failure> {
     if !before.matches(&after) {
-        return Err(Failure::Identity("Codex's account changed during the read."));
+        return Err(Failure::Identity(
+            "Codex's account changed during the read.",
+        ));
     }
     if response["accountId"].as_str() != Some(after.workspace.as_str()) {
         return Err(Failure::Identity("Codex answered for another workspace."));
@@ -267,24 +269,40 @@ mod tests {
     #[test]
     fn the_response_main_id_selects_the_chip_and_ambiguous_maps_select_nothing() {
         let mut response = json!({"accountId": "shared", "ordinaryUsageAllowed": true,
-            "rateLimits": {"limitId": "primary"},
-            "rateLimitsByLimitId": {
-                "code_review": {"primary": {"usedPercent": 99, "windowDurationMins": 300}},
-                "primary": {"primary": {"usedPercent": 42, "windowDurationMins": 300}}
-            }});
+        "rateLimits": {"limitId": "primary"},
+        "rateLimitsByLimitId": {
+            "code_review": {"primary": {"usedPercent": 99, "windowDurationMins": 300}},
+            "primary": {"primary": {"usedPercent": 42, "windowDurationMins": 300}}
+        }});
         let read = |response| {
             let observation = bind_observation(account("a"), account("a"), response, 1).unwrap();
             super::super::reading_of(&observation, None, 2)
         };
-        assert_eq!(read(response.clone()).window(super::super::super::chip::FIVE_HOURS).unwrap().used,
-            Some(42.0));
+        assert_eq!(
+            read(response.clone())
+                .window(super::super::super::chip::FIVE_HOURS)
+                .unwrap()
+                .used,
+            Some(42.0)
+        );
         response["rateLimits"] = Value::Null;
         let ambiguous = read(response.clone());
-        assert_eq!(ambiguous.window(super::super::super::chip::FIVE_HOURS), None);
+        assert_eq!(
+            ambiguous.window(super::super::super::chip::FIVE_HOURS),
+            None
+        );
         assert!(ambiguous.windows.iter().all(|window| window.extra));
-        response["rateLimitsByLimitId"].as_object_mut().unwrap().remove("code_review");
-        assert_eq!(read(response).window(super::super::super::chip::FIVE_HOURS).unwrap().used,
-            Some(42.0));
+        response["rateLimitsByLimitId"]
+            .as_object_mut()
+            .unwrap()
+            .remove("code_review");
+        assert_eq!(
+            read(response)
+                .window(super::super::super::chip::FIVE_HOURS)
+                .unwrap()
+                .used,
+            Some(42.0)
+        );
     }
 
     #[test]
