@@ -417,6 +417,26 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/chrome/gentle_task/conversation_view.rs",
+        include_str!("../src/chrome/gentle_task/conversation_view.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/conversation_view/tests.rs",
+        include_str!("../src/chrome/gentle_task/conversation_view/tests.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/transport/snapshot.rs",
+        include_str!("../src/chrome/gentle_task/transport/snapshot.rs"),
+        0,
+    ),
+    (
+        "src/chrome/gentle_task/transport/process/owned.rs",
+        include_str!("../src/chrome/gentle_task/transport/process/owned.rs"),
+        0,
+    ),
+    (
         "src/chrome/gentle_task/transport/helpers.rs",
         include_str!("../src/chrome/gentle_task/transport/helpers.rs"),
         0,
@@ -2246,6 +2266,10 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 /// The two READMEs are here for the same reason and by the same milestone: they were translated in
 /// the same delivery and nothing was left watching them either.
 const DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "docs/gentle-client-matrix.md",
+        include_str!("../../../docs/gentle-client-matrix.md"),
+    ),
     (
         "docs/windows-codex-route-checks.md",
         include_str!("../../../docs/windows-codex-route-checks.md"),

@@ -1,4 +1,5 @@
 //! Window-owned interactions for explicitly submitted Gentle tasks.
+mod conversation_view;
 mod transport;
 mod view;
 pub(crate) use transport::shutdown;
@@ -11,6 +12,10 @@ use transport::{Answer, Event, HelperList, Kind, Question, Session};
 #[derive(Default)]
 pub(crate) struct GentleTasks {
     next: u64,
+    selected_conversation: Option<u64>,
+    poll_cursor: u64,
+    conversation_pointer: bool,
+    conversation_focus: bool,
     sessions: BTreeMap<u64, Task>,
     surface: Option<Surface>,
     previous_focus: Option<egui::Id>,
@@ -39,11 +44,17 @@ enum Surface {
 
 struct Task {
     directory: PathBuf,
+    display: transport::conversation::Display,
+    transcript: transport::conversation::Cache,
+    snapshot: transport::snapshot::SnapshotState,
+    history_view: conversation_view::HistoryView,
     session: Option<Session>,
     dialogs: Vec<Dialog>,
     issue: Option<String>,
     helpers: Option<HelperList>,
     initial_handled: bool,
+    failed: bool,
+    closed_by_user: bool,
     turn: Turn,
     follow_up: String,
     awaiting_prompt_receipt: bool,
@@ -94,6 +105,7 @@ impl Task {
 
     fn receive(&mut self, event: Event) {
         match event {
+            Event::Snapshot(snapshot) => self.snapshot.apply(snapshot),
             Event::Helpers(list) => self.helpers = Some(list),
             Event::Question(question) => {
                 if self.dialogs.iter().any(|d| d.question.id == question.id) {
@@ -120,11 +132,14 @@ impl Task {
             Event::Handled => self.initial_handled = true,
             Event::Notice(reason) => self.issue = Some(reason),
             Event::TurnFailed(reason) => {
+                self.failed = true;
                 self.awaiting_prompt_receipt = false;
                 self.turn = Turn::Ready;
                 self.issue = Some(reason);
             }
             Event::Completed => {
+                self.initial_handled = false;
+                self.failed = false;
                 self.turn = Turn::Ready;
                 self.dialogs.retain(|d| d.status != Status::Sent);
             }
@@ -153,6 +168,7 @@ impl Task {
         match session.request_stop() {
             Ok(()) => {
                 self.turn = Turn::Stopping;
+                self.failed = false;
                 self.issue = None;
             }
             Err(reason) => self.issue = Some(reason),
@@ -174,6 +190,7 @@ impl Task {
                 self.awaiting_prompt_receipt = true;
                 self.turn = Turn::Working;
                 self.initial_handled = false;
+                self.failed = false;
                 self.issue = None;
                 true
             }
@@ -194,8 +211,14 @@ impl Task {
         }
     }
 
+    fn close_session(&mut self) {
+        self.closed_by_user = true;
+        self.disconnect("Session closed.".into());
+    }
+
     fn disconnect(&mut self, reason: String) {
         self.session = None;
+        self.snapshot.unavailable = true;
         if let Some(list) = &mut self.helpers {
             list.unavailable = true;
         }
@@ -213,6 +236,10 @@ impl Task {
 }
 
 impl GentleTasks {
+    pub(crate) fn has_native_work(&self) -> bool {
+        !self.sessions.is_empty() || self.surface.is_some()
+    }
+
     pub(crate) fn blocks(&self, ctx: &egui::Context) -> bool {
         self.surface.is_some()
             || self.pressed_badge
@@ -238,8 +265,6 @@ impl GentleTasks {
     }
 
     fn prune(&mut self, ctx: &egui::Context) {
-        self.sessions
-            .retain(|_, task| task.session.is_some() || task.needs_attention());
         if matches!(self.surface, Some(Surface::Overview))
             && !self.sessions.values().any(Task::visible_in_overview)
         {
@@ -256,7 +281,9 @@ impl GentleTasks {
         };
         let Some(directory) = cwd.clone() else { return };
         if self.sessions.len() >= 16 {
-            *error = "Close a Gentle session or dismiss its status before starting another.".into();
+            *error =
+                "Discard an ended conversation before starting another (16 retained sessions)."
+                    .into();
             return;
         }
         if prompt.trim().is_empty() || prompt.len() > transport::MAX_TEXT {
@@ -275,18 +302,25 @@ impl GentleTasks {
                 self.sessions.insert(
                     self.next,
                     Task {
+                        display: session.display(),
+                        transcript: Default::default(),
+                        snapshot: Default::default(),
+                        history_view: Default::default(),
                         directory,
                         session: Some(session),
                         dialogs: Vec::new(),
                         issue: None,
                         helpers: None,
                         initial_handled: false,
+                        failed: false,
+                        closed_by_user: false,
                         turn: Turn::Working,
                         follow_up: String::new(),
-                        awaiting_prompt_receipt: false,
+                        awaiting_prompt_receipt: true,
                     },
                 );
                 self.close(ctx);
+                self.selected_conversation = Some(self.next);
             }
             Err(reason) => *error = reason,
         }
@@ -354,6 +388,7 @@ pub(crate) fn poll(window: &mut Window, ctx: &egui::Context) {
             state.close(ctx);
         }
         state.sessions.clear();
+        state.selected_conversation = None;
         return;
     }
     for task in state.sessions.values_mut() {
@@ -364,6 +399,17 @@ pub(crate) fn poll(window: &mut Window, ctx: &egui::Context) {
             };
             task.receive(event);
             ctx.request_repaint();
+        }
+    }
+    let mut remaining = transport::conversation::FRAME_BYTES;
+    let ids: Vec<_> = state.sessions.keys().copied().collect();
+    let start = ids.partition_point(|id| *id <= state.poll_cursor);
+    for id in ids[start..].iter().chain(&ids[..start]) {
+        let task = state.sessions.get_mut(id).expect("retained session");
+        task.display.poll(&mut task.transcript, &mut remaining);
+        state.poll_cursor = *id;
+        if remaining < 16 * 1024 + transport::conversation::ROW_BYTES {
+            break;
         }
     }
     state.prune(ctx);
@@ -378,12 +424,18 @@ mod tests {
     #[test]
     fn disconnect_keeps_unconfirmed_submission_and_clears_unanswered_routes() {
         let mut task = Task {
+            display: transport::conversation::Display::new(Arc::new(|| {})),
+            transcript: Default::default(),
+            snapshot: Default::default(),
+            history_view: Default::default(),
             directory: PathBuf::from("B"),
             session: None,
             dialogs: Vec::new(),
             issue: None,
             helpers: None,
             initial_handled: false,
+            failed: false,
+            closed_by_user: false,
             turn: Turn::Working,
             follow_up: String::new(),
             awaiting_prompt_receipt: false,
@@ -407,12 +459,18 @@ mod tests {
     #[test]
     fn stop_preserves_unconfirmed_work_and_drafts_until_the_client_reconciles_them() {
         let mut task = Task {
+            display: transport::conversation::Display::new(Arc::new(|| {})),
+            transcript: Default::default(),
+            snapshot: Default::default(),
+            history_view: Default::default(),
             directory: PathBuf::from("A"),
             session: None,
             dialogs: Vec::new(),
             issue: None,
             helpers: None,
             initial_handled: false,
+            failed: false,
+            closed_by_user: false,
             turn: Turn::Working,
             follow_up: String::new(),
             awaiting_prompt_receipt: false,
@@ -454,12 +512,18 @@ mod tests {
     #[test]
     fn acknowledgement_clears_only_a_submitted_follow_up_and_loss_preserves_its_draft() {
         let mut task = Task {
+            display: transport::conversation::Display::new(Arc::new(|| {})),
+            transcript: Default::default(),
+            snapshot: Default::default(),
+            history_view: Default::default(),
             directory: "A".into(),
             session: None,
             dialogs: vec![],
             issue: None,
             helpers: None,
             initial_handled: false,
+            failed: false,
+            closed_by_user: false,
             turn: Turn::Working,
             follow_up: "another prompt".into(),
             awaiting_prompt_receipt: false,
@@ -493,12 +557,18 @@ mod tests {
             ..Default::default()
         };
         let mut task = Task {
+            display: transport::conversation::Display::new(Arc::new(|| {})),
+            transcript: Default::default(),
+            snapshot: Default::default(),
+            history_view: Default::default(),
             directory: "B".into(),
             session: None,
             dialogs: vec![],
             issue: None,
             helpers: None,
             initial_handled: false,
+            failed: false,
+            closed_by_user: false,
             turn: Turn::Working,
             follow_up: String::new(),
             awaiting_prompt_receipt: false,
@@ -819,12 +889,18 @@ for line in sys.stdin:
             window.chrome.gentle_task.sessions.insert(
                 id,
                 Task {
+                    display: session.display(),
+                    transcript: Default::default(),
+                    snapshot: Default::default(),
+                    history_view: Default::default(),
                     directory: cwd,
                     session: Some(session),
                     dialogs: vec![],
                     issue: None,
                     helpers: None,
                     initial_handled: false,
+                    failed: false,
+                    closed_by_user: false,
                     turn: Turn::Working,
                     follow_up: String::new(),
                     awaiting_prompt_receipt: false,

@@ -1,6 +1,7 @@
 //! Each native task owns the pipes of the client that accepted its prompt.
 pub(crate) mod conversation;
 mod helpers;
+pub(super) mod snapshot;
 mod terminal;
 use terminal::Terminal;
 mod process;
@@ -44,6 +45,7 @@ pub(super) enum Answer {
 #[derive(Debug)]
 pub(super) enum Event {
     Helpers(HelperList),
+    Snapshot(snapshot::SnapshotUpdate),
     PromptAccepted,
     Notice(String),
     Handled,

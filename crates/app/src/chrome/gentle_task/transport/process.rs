@@ -1,4 +1,6 @@
 //! Pipe IO, launch and process retirement live off the GUI thread.
+mod owned;
+use owned::Owned;
 #[cfg(windows)]
 mod windows;
 
@@ -6,7 +8,7 @@ use super::wire::{self, Incoming};
 use super::{Answer, Dialogs, Event, HelperList, HelperMailbox, Inbox, Initial, Message, helpers};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -277,6 +279,7 @@ pub(super) fn run(
             .map_err(|_| "Could not send the initial prompt to Gentle.".to_string())?;
         helpers.start(&writer);
     }
+    let mut snapshot = super::snapshot::SnapshotMonitor::default();
     let mut expected_prompt = (!ready).then(|| wire::PROMPT_ID.to_owned());
     let mut has_assignment = !ready;
     let mut stop_after_ack = None;
@@ -302,6 +305,15 @@ pub(super) fn run(
         apply_stop(tick, &mut stop, &writer, &mut dialogs, &mut ready, emit)?;
         dialogs.expire(emit);
         helpers.poll(&writer);
+        let (request, update) = snapshot.tick(helpers.monitor.supports_snapshot(), Instant::now());
+        if let Some(update) = update {
+            emit(Event::Snapshot(update));
+        }
+        if let Some(request) = request
+            && writer.try_send(Outgoing::Command(request)).is_err()
+        {
+            emit(Event::Snapshot(snapshot.failed(Instant::now())));
+        }
         let msg = match requests.recv_timeout(Duration::from_millis(100)) {
             Ok(msg) => msg,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -358,7 +370,13 @@ pub(super) fn run(
                     }
                 }
             }
+            Message::Incoming(Incoming::SnapshotControl(value)) => {
+                if let Some(update) = snapshot.observe(&value, Instant::now()) {
+                    emit(Event::Snapshot(update));
+                }
+            }
             Message::Incoming(Incoming::HelperReset) => {
+                emit(Event::Snapshot(snapshot.reset()));
                 helpers.epoch += 1;
                 if has_assignment {
                     helpers.start(&writer);
@@ -519,105 +537,6 @@ fn apply_stop(
         });
     }
     Ok(())
-}
-
-struct Owned {
-    child: Child,
-    #[cfg(windows)]
-    job: std::os::windows::io::OwnedHandle,
-}
-
-impl Owned {
-    /// The PID stays reserved until retirement can signal the client's whole process group.
-    #[cfg(unix)]
-    fn exited(&self) -> std::io::Result<bool> {
-        // SAFETY: waitid writes a siginfo record and WNOWAIT preserves our child.
-        unsafe {
-            let mut info: libc::siginfo_t = std::mem::zeroed();
-            let result = libc::waitid(
-                libc::P_PID,
-                self.child.id() as libc::id_t,
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            );
-            if result < 0 {
-                let error = std::io::Error::last_os_error();
-                if error.kind() == std::io::ErrorKind::Interrupted {
-                    return Ok(false);
-                }
-                return Err(error);
-            }
-            Ok(info.si_pid() != 0)
-        }
-    }
-
-    #[cfg(windows)]
-    fn exited(&mut self) -> std::io::Result<bool> {
-        self.child.try_wait().map(|status| status.is_some())
-    }
-}
-
-impl Drop for Owned {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        {
-            let pid = self.child.id() as i32;
-            // The official launcher forwards termination to Pi. Sending it directly to both
-            // would deliver two signals and force Pi to skip graceful shutdown.
-            // SAFETY: the unreaped PID belongs to our launcher.
-            let result = unsafe { libc::kill(pid, libc::SIGTERM) };
-            report_signal_error(result);
-            // A launcher can exit before the client or its pipes. Keep its PID reserved
-            // through the grace period, then reach any surviving group members.
-            thread::sleep(Duration::from_millis(750));
-            // SAFETY: this child has not been reaped, so its process group ID cannot be recycled.
-            let result = unsafe { libc::kill(-pid, libc::SIGKILL) };
-            report_signal_error(result);
-        }
-        #[cfg(windows)]
-        if let Err(error) = windows::terminate(&self.job) {
-            crate::pty_output::say(&format!("Could not terminate the Gentle task job: {error}"));
-        }
-        if let Err(error) = stop_and_reap(&mut self.child) {
-            crate::pty_output::say(&format!(
-                "Gentle task cleanup could not confirm exit: {error}"
-            ));
-        }
-    }
-}
-
-#[cfg(unix)]
-fn report_signal_error(result: libc::c_int) {
-    if result == -1 {
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            crate::pty_output::say(&format!(
-                "Could not signal the Gentle task process: {error}"
-            ));
-        }
-    }
-}
-
-fn stop_and_reap(child: &mut Child) -> std::io::Result<()> {
-    if child.try_wait()?.is_some() {
-        return Ok(());
-    }
-    let kill = child.kill();
-    let deadline = Instant::now() + Duration::from_secs(1);
-    loop {
-        if child.try_wait()?.is_some() {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err(kill.err().unwrap_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "the client did not exit before its retirement deadline",
-                )
-            }));
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
 }
 
 #[cfg(test)]

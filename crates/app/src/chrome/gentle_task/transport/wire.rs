@@ -23,6 +23,7 @@ pub(super) enum Incoming {
     Rejected(String),
     StopControl(Value),
     HelperControl(Value),
+    SnapshotControl(Value),
     HelperReset,
     CommandError,
 }
@@ -153,6 +154,9 @@ fn decode_record(
                         *reset = true;
                     }
                     channel.switching = switching;
+                    if line.len() <= 128 * 1024 && super::snapshot::our_id(&envelope["requestId"]) {
+                        return Ok(Some(Incoming::SnapshotControl(envelope)));
+                    }
                     if helpers::our_id(&envelope["requestId"]) {
                         return Ok(Some(Incoming::HelperControl(envelope)));
                     }
@@ -163,6 +167,7 @@ fn decode_record(
             }
             Ok(None)
         }
+        "response" if super::snapshot::our_id(&v["id"]) => Ok(Some(Incoming::SnapshotControl(v))),
         "response" if helpers::our_id(&v["id"]) => Ok(Some(Incoming::HelperControl(v))),
         "response" if stop::our_id(&v["id"]) => Ok(Some(Incoming::StopControl(v))),
         "extension_ui_request" => dialog(&v).map(|q| q.map(Incoming::Question)),
@@ -444,5 +449,33 @@ mod tests {
                 .unwrap_err()
                 .contains("backlog")
         );
+    }
+    #[test]
+    fn snapshot_namespace_and_ordinary_envelope_bound_stay_separate() {
+        let widget = |id: &str, body: &str| {
+            let inner = json!({"schema":stop::SCHEMA,"kind":"response","requestId":id,"ok":true,"data":{"body":body}});
+            serde_json::to_vec(&json!({"type":"extension_ui_request","method":"setWidget","widgetKey":"gentle-desktop-rpc","widgetLines":[inner.to_string()]})).unwrap()
+        };
+        assert!(
+            matches!(decode(&widget("ivy-view-1", "valid"), &mut false).unwrap(), Some(Incoming::SnapshotControl(v)) if v["requestId"] == "ivy-view-1")
+        );
+        assert!(
+            decode(&widget("ivy-view-foreign", "valid"), &mut false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            decode(&widget("ivy-view-1", &"x".repeat(128 * 1024)), &mut false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            decode(
+                br#"{"type":"response","command":"prompt","id":"ivy-view-1","success":true}"#,
+                &mut false
+            )
+            .unwrap(),
+            Some(Incoming::SnapshotControl(_))
+        ));
     }
 }

@@ -2,7 +2,9 @@
 use super::*;
 use crate::ui::floating;
 
-enum Action {
+pub(super) enum Action {
+    OpenConversation(u64),
+    DiscardConversation(u64),
     Close,
     Launch,
     Reply(u64, String, Answer),
@@ -14,7 +16,8 @@ enum Action {
 }
 
 pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui) -> bool {
-    if !interact(window, ui) {
+    let conversation_owned = super::conversation_view::show(window, ui);
+    if !interact(window, ui) && !conversation_owned {
         return false;
     }
     crate::sidebar::consume_input(window, ui.ctx());
@@ -47,6 +50,19 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
     if state.surface.is_some() {
         let action = dialog(state, &window.theme, &ctx);
         match action {
+            Some(Action::OpenConversation(id)) => {
+                state.selected_conversation = Some(id);
+                state.close(&ctx);
+            }
+            Some(Action::DiscardConversation(id)) => {
+                if state.sessions.get(&id).is_some_and(|t| t.session.is_none()) {
+                    state.sessions.remove(&id);
+                    if state.selected_conversation == Some(id) {
+                        state.selected_conversation = None;
+                    }
+                }
+                state.prune(&ctx);
+            }
             Some(Action::Close) => state.close(&ctx),
             Some(Action::Launch) => state.launch(&ctx),
             Some(Action::Reply(task, id, answer)) => state.respond(task, &id, answer, &ctx),
@@ -82,9 +98,9 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
             }
             Some(Action::CloseSession(id)) => {
                 if let Some(task) = state.sessions.get_mut(&id) {
-                    task.disconnect("Session closed.".into());
+                    task.close_session();
                     if task.dialogs.is_empty() && task.follow_up.is_empty() {
-                        state.sessions.remove(&id);
+                        task.issue = None;
                     }
                 }
                 state.prune(&ctx);
@@ -128,7 +144,11 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
             state.previous_focus = focus_before;
         }
         state.pressed_badge = false;
-        state.surface = Some(Surface::Overview);
+        if state.sessions.values().any(Task::visible_in_overview) {
+            state.surface = Some(Surface::Overview);
+        } else {
+            state.selected_conversation = state.sessions.keys().next_back().copied();
+        }
         ctx.request_repaint();
         return claim(state, ui);
     }
@@ -167,7 +187,11 @@ fn indicator(sessions: &BTreeMap<u64, Task>) -> Option<String> {
         }
         let plus = if bounded { "+" } else { "" };
         let qualifier = if stale { " · last known" } else { "" };
-        return (count > 0).then(|| format!("Gentle helpers · {count}{plus}{qualifier}"));
+        return if count > 0 {
+            Some(format!("Gentle helpers · {count}{plus}{qualifier}"))
+        } else {
+            (!sessions.is_empty()).then(|| format!("Gentle conversations · {}", sessions.len()))
+        };
     };
     let project = task
         .directory
@@ -284,7 +308,7 @@ fn dialog(
     action
 }
 
-fn helper_rows(ui: &mut egui::Ui, list: &HelperList) {
+pub(super) fn helper_rows(ui: &mut egui::Ui, list: &HelperList) {
     if !list.rows.is_empty() {
         ui.strong("Helpers");
     }
@@ -309,11 +333,22 @@ fn helper_rows(ui: &mut egui::Ui, list: &HelperList) {
     }
 }
 
-fn entry(ui: &mut egui::Ui, task: &mut Task, task_id: u64, compose: bool) -> Option<Action> {
+pub(super) fn entry(
+    ui: &mut egui::Ui,
+    task: &mut Task,
+    task_id: u64,
+    compose: bool,
+) -> Option<Action> {
     let mut action = None;
     let project = task.directory.display();
     ui.separator();
     ui.strong(format!("Session #{task_id} · {project}"));
+    if ui.button("Open conversation").clicked() {
+        action = Some(Action::OpenConversation(task_id));
+    }
+    if task.session.is_none() && ui.button("Discard conversation").clicked() {
+        action = Some(Action::DiscardConversation(task_id));
+    }
     if compose && task.initial_handled {
         ui.label("Command handled");
     }

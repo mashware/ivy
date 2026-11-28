@@ -50,7 +50,7 @@ struct ConversationStore {
 }
 
 impl Display {
-    pub(super) fn new(wake: Wake) -> Self {
+    pub(in super::super) fn new(wake: Wake) -> Self {
         Self {
             inner: Arc::default(),
             wake,

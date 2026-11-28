@@ -12686,7 +12686,7 @@ would make the same gesture jump in different visual directions after a split.
 
 **Reason.** In the two-process experiment, identically worded questions belonged to different live processes. A reply written to the process had no receipt for helper continuation. Name the project and session; show an uncertain outcome when delivery cannot be established. Let the installed client own authentication.
 
-**Discarded.** Attaching the interactive protocol after launch has no documented support in Gentle 5.1.0. Guessing a helper from nearby activity would misattribute overlapping questions. Opening the originating console would displace the active review. A complete transcript and continuing conversation belong to the next roadmap phase.
+**Discarded.** Attaching the interactive protocol after launch has no documented support in Gentle 5.1.0. Guessing a helper from nearby activity would misattribute overlapping questions. Opening the originating console would displace the active review. The first delivery deferred the transcript to the native conversation phase below.
 
 ### Stopping work while keeping the conversation (#296)
 
@@ -12704,10 +12704,18 @@ would make the same gesture jump in different visual directions after a split.
 
 **Discarded.** Inferring helper completion from disappearance would invent state. Matching names across sessions would combine independent work. Parsing terminal painting would duplicate the producer's semantics.
 
-### Native conversation and review destinations (study #280)
+### A native Gentle conversation beside ordinary consoles (#280)
 
-**Proposed decision.** Extend the existing live native task into a readable session view alongside ordinary consoles. Keep its private client process, question routing and stop/follow-up ownership. Board and review use distinct console and native-session destinations. A review retains its originating session and source snapshot when focus changes; a closed destination retains the draft and cannot receive it. This is a design proposal for the next roadmap phase, not an implemented capability.
+**Decision.** Keep a readable, nonmodal conversation for each explicitly started native task. User messages, streamed assistant text, authoritative final text and declared tool activity belong to that session. Keep question and stop controls with their existing owner. Read optional producer tasks and activity only after the installed client advertises the snapshot method; failed observations retain last-known values with an unavailable indication. Closing the view hides it; closing the session ends the client while retaining its in-memory history until explicit discard. Restarting Ivy does not reopen it.
 
-**Reason.** The existing task already owns a persistent conversation, while the native surface shows questions and status without the transcript. Its two bounded control handoffs cannot also carry every text delta without delaying questions. The current console review sends through a PTY and clears on a queue write; a native prompt is accepted asynchronously. A Gentle change root is an opaque session handle, and its diff identifies HEAD at read time without a commit hash. These boundaries require a bounded display projection, separate feedback acceptance and explicit source identity.
+**Reason.** The private process already owns a continuing conversation, but a completed prompt otherwise leaves no native transcript to read. Both existing control handoffs have bounded queues. Display deltas must be folded before those queues, with bounded retained text, visible clipping and fair frame delivery, so text cannot occupy every question/receipt slot. A saturated semantic queue ends the connection explicitly through an independent terminal slot. A prompt receipt establishes acceptance, while the producer's settled event establishes the end of a turn. Optional snapshot support does not establish that the session's feed owner exists.
 
-**Discarded.** A fake PTY would give a native session terminal identity and layout obligations it does not need. A second runtime service or durable event log would duplicate session ownership and introduce reopening. Casting session IDs to pane IDs or choosing the current focus at send time could route a review to another project. Mapping root labels to local paths would confuse worktrees with the same name. A new connection generation is unnecessary while every process gets a non-reused task ID and reconnection remains out of scope.
+**Discarded.** A fake PTY would give an RPC conversation terminal identity and saved-layout obligations it does not need. A second service or durable event store would duplicate process ownership and introduce reopening. Feeding every text delta through either control queue would make questions wait behind rendering. Appending authoritative final content to partial text would duplicate the answer. Inferring todo state from terminal painting or tool text would violate D6. Treating unavailable reads as empty would erase work nobody observed finishing.
+
+### Cross-project review destinations (study #280)
+
+**Proposed decision.** Board and review will use distinct console and native-session destinations. A review will retain its originating session and source snapshot when focus changes; a closed destination will retain the draft and refuse delivery. This remains a proposal for the cross-project review phase.
+
+**Reason.** Console review sends through a PTY and clears on a queue write, while a native prompt is accepted asynchronously. A Gentle change root is an opaque session handle; its diff identifies HEAD at read time without a commit hash. These boundaries require separate feedback acceptance and explicit source identity.
+
+**Discarded.** Casting session IDs to pane IDs or choosing the current focus at send time could route a review to another project. Mapping root labels to local paths would confuse worktrees with the same name. A replacement connection generation is unnecessary while each process gets a non-reused task ID and reconnection remains out of scope.
