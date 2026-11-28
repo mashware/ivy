@@ -139,18 +139,6 @@ impl SnapshotMonitor {
     }
 }
 
-fn text(v: &Value, limit: usize) -> Option<String> {
-    v.as_str()
-        .filter(|s| {
-            !s.trim().is_empty()
-                && s.len() <= limit
-                && !s.chars().any(|c| {
-                    c.is_control() || matches!(c, '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-                })
-        })
-        .map(str::to_owned)
-}
-
 fn parse(data: &Value) -> Option<SnapshotState> {
     let session = &data["state"]["session"];
     let todo = &session["todo"];
@@ -164,12 +152,12 @@ fn parse(data: &Value) -> Option<SnapshotState> {
         if !ids.insert(id) {
             return None;
         }
-        let title = text(&row["title"], 1024)?;
-        let state = text(&row["state"], 128)?;
+        let title = row["title"].as_str()?.to_owned();
+        let state = row["state"].as_str()?.to_owned();
         let note = if row["note"].is_null() {
             None
         } else {
-            Some(text(&row["note"], 2048)?)
+            Some(row["note"].as_str()?.to_owned())
         };
         items.push(Todo {
             id,
@@ -180,7 +168,7 @@ fn parse(data: &Value) -> Option<SnapshotState> {
     }
     Some(SnapshotState {
         items,
-        activity: Some(text(&session["activity"]["label"], 512)?),
+        activity: Some(session["activity"]["label"].as_str()?.to_owned()),
         truncated: todo["truncated"].as_bool()?,
         unavailable: false,
     })
@@ -282,7 +270,27 @@ mod tests {
         ]);
         assert!(parse(&d).is_none());
         let mut d = data();
-        d["state"]["session"]["todo"]["items"][0]["title"] = json!("x".repeat(1025));
+        d["state"]["session"]["todo"]["items"][0]["title"] = json!(42);
         assert!(parse(&d).is_none());
+    }
+
+    #[test]
+    fn producer_unicode_and_multiline_text_survives_the_snapshot() {
+        let mut monitor = SnapshotMonitor::default();
+        let now = Instant::now();
+        let request = monitor.tick(Some(true), now).0.unwrap();
+        let title = "界".repeat(499) + "…";
+        let note = "First line\nSecond line\twith a tab";
+        let mut value = data();
+        value["state"]["session"]["todo"]["items"][0]["title"] = json!(title);
+        value["state"]["session"]["todo"]["items"][0]["note"] = json!(note);
+        let update = monitor
+            .observe(&response(&request["id"], value), now)
+            .unwrap();
+        let SnapshotUpdate::Rows(snapshot) = update else {
+            panic!("valid producer text made the complete task list unavailable")
+        };
+        assert_eq!(snapshot.items[0].title, title);
+        assert_eq!(snapshot.items[0].note.as_deref(), Some(note));
     }
 }

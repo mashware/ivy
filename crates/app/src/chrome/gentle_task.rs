@@ -14,6 +14,8 @@ pub(crate) struct GentleTasks {
     next: u64,
     selected_conversation: Option<u64>,
     poll_cursor: u64,
+    display_frame: Option<u64>,
+    display_remaining: usize,
     conversation_pointer: bool,
     conversation_focus: bool,
     conversation_rect: Option<egui::Rect>,
@@ -402,14 +404,19 @@ pub(crate) fn poll(window: &mut Window, ctx: &egui::Context) {
             ctx.request_repaint();
         }
     }
-    let mut remaining = transport::conversation::FRAME_BYTES;
+    let frame = ctx.cumulative_frame_nr();
+    if state.display_frame != Some(frame) {
+        state.display_frame = Some(frame);
+        state.display_remaining = transport::conversation::FRAME_BYTES;
+    }
     let ids: Vec<_> = state.sessions.keys().copied().collect();
     let start = ids.partition_point(|id| *id <= state.poll_cursor);
     for id in ids[start..].iter().chain(&ids[..start]) {
         let task = state.sessions.get_mut(id).expect("retained session");
-        task.display.poll(&mut task.transcript, &mut remaining);
+        task.display
+            .poll(&mut task.transcript, &mut state.display_remaining);
         state.poll_cursor = *id;
-        if remaining < 16 * 1024 + transport::conversation::ROW_BYTES {
+        if state.display_remaining < 16 * 1024 + transport::conversation::ROW_BYTES {
             break;
         }
     }

@@ -174,6 +174,30 @@ for line in sys.stdin:
         );
         std::thread::sleep(Duration::from_millis(5));
     }
+    // egui may repeat its UI closure without advancing the frame (D13).
+    window
+        .chrome
+        .gentle_task
+        .sessions
+        .get_mut(&2)
+        .unwrap()
+        .transcript = Default::default();
+    let output = ctx.run_ui(Default::default(), |_| {
+        for _ in 0..2 {
+            super::super::poll(&mut window, &ctx);
+        }
+        let copied: usize = window.chrome.gentle_task.sessions[&2]
+            .transcript
+            .rows
+            .iter()
+            .map(|row| row.text.len() + transport::conversation::ROW_BYTES)
+            .sum();
+        assert!(
+            copied > 0 && copied <= transport::conversation::FRAME_BYTES,
+            "repeated UI passes copied {copied} transcript bytes in one frame"
+        );
+    });
+    output.drop_without_applying_deltas();
     // A transcript selection owns the press, movement and release outside its window.
     let labels = frame(&mut window, &ctx, vec![]);
     let text = point(&labels, "Visible assistant reply");
