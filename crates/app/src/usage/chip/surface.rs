@@ -86,7 +86,7 @@ impl Chip {
         }
         self.live = width(&self.items, &mut |text| measure(ctx, text));
         if self.items.is_empty() {
-            self.popover = false;
+            self.close_summary();
         } else if let Some(at) = super::next_change(&[&claude, &codex], now) {
             // A window at rest paints nothing, so the stale flip and a reset need their own frame.
             let wait = u64::try_from(at - now).unwrap_or_default();

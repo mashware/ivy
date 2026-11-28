@@ -386,7 +386,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let summary = crate::usage::chip_summary(&window.usage);
     let frame = ctx.cumulative_frame_nr();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
-    // The summary claims the pointer over its own rectangle only: it is not modal (#283).
     let over = pointer.is_some_and(|p| {
         (row.contains(p) && !tabs.is_some_and(|tabs| tabs.contains(p)))
             || (window.chrome.menu && menu_rect.contains(p))

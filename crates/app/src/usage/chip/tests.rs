@@ -247,7 +247,13 @@ fn the_summary_names_each_state_without_a_reading() {
             Some("Codex returned no verified reading.")
         )
     );
-    assert!(matches!(failed.body, Body::Message { tone: Tone::Failed, .. }));
+    assert!(matches!(
+        failed.body,
+        Body::Message {
+            tone: Tone::Failed,
+            ..
+        }
+    ));
     // A launch that ended is not a launch still to come.
     let ended = Source::Ended("Start Claude Code with reporting from AI usage.".into());
     let ended = describe(Agent::Claude, &ended, NOW, &zone());
@@ -265,9 +271,18 @@ fn a_failed_read_is_a_red_mark_and_the_rest_grey_a_dash() {
         let items = items(&source, &Source::Off, NOW, &zone());
         (items[0].value.clone(), items[0].tone)
     };
-    assert_eq!(tones(Source::Failed("why".into())), ("!".into(), Tone::Failed));
-    assert_eq!(tones(Source::Waiting("hint".into())), ("—".into(), Tone::Unavailable));
-    assert_eq!(tones(Source::Ended("hint".into())), ("—".into(), Tone::Unavailable));
+    assert_eq!(
+        tones(Source::Failed("why".into())),
+        ("!".into(), Tone::Failed)
+    );
+    assert_eq!(
+        tones(Source::Waiting("hint".into())),
+        ("—".into(), Tone::Unavailable)
+    );
+    assert_eq!(
+        tones(Source::Ended("hint".into())),
+        ("—".into(), Tone::Unavailable)
+    );
     let old = reading(NOW - STALE_AFTER - 1, window(10.0, at(18, 0)), None);
     assert_eq!(tones(old), ("—".into(), Tone::Stale));
 }
@@ -298,12 +313,13 @@ fn every_window_label_fits_four_characters() {
 #[test]
 fn the_summary_shows_each_window_with_use_reset_and_pace() {
     // Half of the five hours gone and 80 % used: ahead, and out before the reset.
-    let claude = read(
+    let claude = reading(
+        NOW,
         window(80.0, NOW + FIVE_HOURS / 2),
         window(10.0, NOW + WEEK - WEEK / 10),
     );
     let panel = describe(Agent::Claude, &claude, NOW, &zone());
-    assert_eq!(panel.updated.as_deref(), Some("Updated 1m ago"));
+    assert_eq!(panel.updated.as_deref(), Some("Updated just now"));
     assert_eq!((panel.stale, panel.failure), (None, None));
     let Body::Windows(rows) = panel.body else {
         panic!("no windows");
@@ -398,7 +414,10 @@ fn a_reset_past_midnight_names_its_day() {
     let midnight = NOW - NOW % 86_400;
     let late = midnight + 23 * 3600;
     assert_eq!(clock(late + 1800, late, &zone()).as_deref(), Some("23:30"));
-    assert_eq!(clock(late + 2 * 3600, late, &zone()).as_deref(), Some("Sat 01:00"));
+    assert_eq!(
+        clock(late + 2 * 3600, late, &zone()).as_deref(),
+        Some("Sat 01:00")
+    );
 }
 
 /// A share that comes as negative zero still reads «0%».
@@ -414,7 +433,7 @@ fn negative_zero_reads_zero() {
 fn pace_is_judged_on_the_figure_it_shows() {
     // Half of the five hours gone: a share of 50 % is on track.
     let pace = |used: f64| {
-        let source = read(window(used, NOW + FIVE_HOURS / 2), None);
+        let source = reading(NOW, window(used, NOW + FIVE_HOURS / 2), None);
         let Body::Windows(rows) = describe(Agent::Codex, &source, NOW, &zone()).body else {
             panic!("no windows");
         };
@@ -422,7 +441,32 @@ fn pace_is_judged_on_the_figure_it_shows() {
     };
     assert!(pace(55.4).starts_with("Pace: on track"), "{}", pace(55.4));
     assert!(pace(44.6).starts_with("Pace: on track"), "{}", pace(44.6));
-    assert!(pace(55.6).starts_with("Pace: ahead (+6%)"), "{}", pace(55.6));
-    assert!(pace(44.4).starts_with("Pace: behind (−6%)"), "{}", pace(44.4));
-    assert!(pace(20.0).starts_with("Pace: behind (−30%)"), "{}", pace(20.0));
+    assert!(
+        pace(55.6).starts_with("Pace: ahead (+6%)"),
+        "{}",
+        pace(55.6)
+    );
+    assert!(
+        pace(44.4).starts_with("Pace: behind (−6%)"),
+        "{}",
+        pace(44.4)
+    );
+    assert!(
+        pace(20.0).starts_with("Pace: behind (−30%)"),
+        "{}",
+        pace(20.0)
+    );
+}
+
+#[test]
+fn pace_stays_bound_to_when_the_share_was_observed() {
+    let source = reading(NOW, window(50.0, NOW + FIVE_HOURS / 2), None);
+    let pace = |now| {
+        let Body::Windows(rows) = describe(Agent::Codex, &source, now, &zone()).body else {
+            panic!("no windows");
+        };
+        rows[0].pace.clone().unwrap()
+    };
+    assert_eq!(pace(NOW), "Pace: on track · lasts to reset");
+    assert_eq!(pace(NOW + 20 * 60), pace(NOW));
 }

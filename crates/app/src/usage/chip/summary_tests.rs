@@ -1,6 +1,5 @@
-//! The summary under the chip in real application passes: it opens and closes by the pointer
-//! alone, it opens AI usage, and it is not modal — it neither dims the consoles nor takes their
-//! input outside its own rectangle (#283, AC5 and AC8).
+//! A glance at allowances must leave console keyboard and mouse input alone; only the summary's
+//! own rectangle may claim a gesture (D132).
 
 use super::Source;
 use super::bar_tests::{area, codex, integrated, painted};
@@ -204,7 +203,6 @@ fn below_tabs(summary: egui::Rect) -> f32 {
     summary.top() + 10.0 + 44.0
 }
 
-/// The header's agent name: the first agent name painted below .
 fn header(shapes: &[egui::epaint::ClippedShape], top: f32) -> Option<String> {
     shapes.iter().find_map(|shape| match &shape.shape {
         egui::Shape::Text(text)
@@ -435,4 +433,178 @@ fn the_owners_window_shows_codex_alone_on_every_open() {
             }
         }
     }
+}
+
+#[test]
+fn disabling_every_source_closes_the_summary_and_forgets_its_tab() {
+    let (mut window, ctx) = integrated();
+    let area = area(1600.0);
+    ready(&mut window, &ctx, area, both());
+    open_summary(&mut window, &ctx, area);
+    window.usage.chip.tab = Some(super::Agent::Codex);
+    window.usage.chip.forced = Some((Source::Off, Source::Off));
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    assert!(crate::usage::chip_summary(&window.usage).is_none());
+    assert!(
+        !super::bar_tests::texts(&shapes)
+            .iter()
+            .any(|text| text == "Open AI usage")
+    );
+    window.usage.chip.forced = Some(both());
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    assert!(crate::usage::chip_summary(&window.usage).is_none());
+    assert!(
+        !super::bar_tests::texts(&shapes)
+            .iter()
+            .any(|text| text == "Open AI usage")
+    );
+    let summary = open_summary(&mut window, &ctx, area);
+    let shapes = painted(&mut window, &ctx, area, vec![]);
+    assert_eq!(
+        header(&shapes, below_tabs(summary)).as_deref(),
+        Some("Claude Code")
+    );
+}
+
+crate::windows_unix_omission!(
+    the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion,
+    "unix-only: uses stty raw mode and cat to witness the console program's input"
+);
+
+#[cfg(unix)]
+#[test]
+fn the_summary_blocks_buttons_and_keeps_keyboard_input_during_motion() {
+    use std::time::Duration;
+    use term_core::received::Received;
+    let received = [
+        Received::new("chip-mouse-first"),
+        Received::new("chip-mouse-second"),
+    ];
+    let scripts = received
+        .each_ref()
+        .map(|input| input.script("stty raw -echo"));
+    let mut window = crate::tests::window_of_tabs([[scripts[0].as_str(), scripts[1].as_str()]]);
+    for input in &received {
+        input.wait_until_ready(Duration::from_secs(5));
+    }
+    window.chrome.enable();
+    window.headers = window.headers.integrated(true);
+    let ctx = egui::Context::default();
+    let area = area(1600.0);
+    ready(&mut window, &ctx, area, codex());
+    let summary = open_summary(&mut window, &ctx, area);
+    let inside = window
+        .active()
+        .panes()
+        .iter()
+        .find_map(|pane| {
+            let console = pane.painted_console.as_ref()?.area;
+            let covered = console.intersect(summary.shrink(10.0));
+            covered.is_positive().then_some(covered.center())
+        })
+        .expect("the summary covers a console's actual text area");
+    for pane in window.active_mut().panes_mut() {
+        pane.screen.advance(b"\x1b[?1003h\x1b[?1006h");
+        assert!(pane.screen.mouse_reporting().motion);
+    }
+    let focus = window.active().focus;
+    painted(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(inside),
+            egui::Event::Text("typed".into()),
+        ],
+    );
+    for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+        for pressed in [true, false] {
+            painted(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerButton {
+                    pos: inside,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+    }
+    for pane in window.active_mut().panes_mut() {
+        pane.pty.write(b"blocked").unwrap();
+    }
+    let expected: Vec<_> = window
+        .active()
+        .panes()
+        .iter()
+        .map(|pane| {
+            if pane.name == focus {
+                b"typedblocked".as_slice()
+            } else {
+                b"blocked".as_slice()
+            }
+        })
+        .collect();
+    for (input, expected) in received.iter().zip(&expected) {
+        assert_eq!(
+            input.wait_for(expected.len(), Duration::from_secs(5)),
+            *expected
+        );
+    }
+    window.usage.chip.close_summary();
+    painted(&mut window, &ctx, area, vec![]);
+    let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let controls: Vec<_> = window
+        .active()
+        .panes()
+        .iter()
+        .zip(&expected)
+        .map(|(pane, previous)| {
+            let mut bytes = previous.to_vec();
+            if let Some(cell) = pane
+                .painted_console
+                .as_ref()
+                .and_then(|painted| pane.cell_under(painted.area, inside, &metrics))
+            {
+                for report in [
+                    crate::mouse::MouseReport::Press(egui::PointerButton::Primary),
+                    crate::mouse::MouseReport::Release(egui::PointerButton::Primary),
+                ] {
+                    bytes.extend(
+                        crate::mouse::encode(
+                            report,
+                            crate::mouse::CellPos::from_zero(cell.row, cell.col),
+                            pane.screen.mouse_reporting(),
+                            egui::Modifiers::NONE,
+                        )
+                        .unwrap(),
+                    );
+                }
+            }
+            bytes.extend(b"control");
+            bytes
+        })
+        .collect();
+    painted(&mut window, &ctx, area, press(inside));
+    painted(&mut window, &ctx, area, release(inside));
+    for pane in window.active_mut().panes_mut() {
+        pane.pty.write(b"control").unwrap();
+    }
+    let got: Vec<_> = received
+        .iter()
+        .zip(&controls)
+        .map(|(input, expected)| input.wait_for(expected.len(), Duration::from_secs(5)))
+        .collect();
+    assert!(
+        got.iter()
+            .any(|bytes| bytes.windows(4).any(|part| part == b"\x1b[<0")),
+        "{got:?}"
+    );
+    assert!(
+        got.iter().all(|bytes| bytes.ends_with(b"control")),
+        "{got:?}"
+    );
+    assert_eq!(got, controls);
 }

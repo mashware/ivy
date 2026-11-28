@@ -116,7 +116,7 @@ where
             reading
                 .windows
                 .iter()
-                .map(|named| row(named, stale, now, zone))
+                .map(|named| row(named, stale, reading.observed_at, now, zone))
                 .collect(),
         )
     };
@@ -128,7 +128,7 @@ where
     }
 }
 
-fn row<Tz: TimeZone>(named: &Named, stale: bool, now: i64, zone: &Tz) -> Row
+fn row<Tz: TimeZone>(named: &Named, stale: bool, observed_at: i64, now: i64, zone: &Tz) -> Row
 where
     Tz::Offset: Display,
 {
@@ -165,18 +165,18 @@ where
         used: Some(used),
         used_text: format!("{} used", percent(used)),
         reset,
-        pace: resets_at.and_then(|at| pace(named.length, used, at, now)),
+        pace: resets_at.and_then(|at| pace(named.length, used, at, observed_at)),
         tone: if stale { Tone::Stale } else { tone_of(used) },
     }
 }
 
 /// Whether the window is being used faster than its time runs — the used share against the share
 /// of the window already gone — and, at that rate, whether it lasts to its reset.
-fn pace(length: i64, used: f64, resets_at: i64, now: i64) -> Option<String> {
+fn pace(length: i64, used: f64, resets_at: i64, observed_at: i64) -> Option<String> {
     if length <= 0 || used >= 100.0 {
         return None;
     }
-    let left = (resets_at - now).clamp(0, length);
+    let left = (resets_at - observed_at).clamp(0, length);
     let gone = length - left;
     let elapsed = gone as f64 * 100.0 / length as f64;
     // Classified on the figure it prints, so «on track» and «ahead (+5%)» never share one.

@@ -33,10 +33,14 @@ fn proportional(size: f32) -> FontId {
 /// The header's height: name, then each of «Updated …», the stale note and the failure that are
 /// there.
 fn header_height(panel: &Panel) -> f32 {
-    let notes = [panel.updated.is_some(), panel.stale.is_some(), panel.failure.is_some()]
-        .into_iter()
-        .filter(|present| *present)
-        .count();
+    let notes = [
+        panel.updated.is_some(),
+        panel.stale.is_some(),
+        panel.failure.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
     4.0 + 20.0 + notes as f32 * (2.0 + LINE) + SECTION
 }
 

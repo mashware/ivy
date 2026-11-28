@@ -194,3 +194,108 @@ fn a_measured_run_does_no_chip_work() {
     );
     assert_eq!(crate::chrome::strip(&window, wide).chip, None);
 }
+
+#[test]
+fn the_painted_figures_and_claude_dot_use_their_declared_inks() {
+    let (mut window, ctx) = integrated();
+    let area = area(1600.0);
+    let now = chrono::Utc::now().timestamp();
+    let roles = crate::ui::style::roles(&ctx, &window.theme);
+    let read = |used, observed_at| {
+        Source::Read(Reading {
+            observed_at,
+            windows: [super::FIVE_HOURS, super::WEEK]
+                .into_iter()
+                .map(|length| Named {
+                    name: "window".into(),
+                    length,
+                    extra: false,
+                    window: Allowance {
+                        used: Some(used),
+                        resets_at: Some(now + 7200),
+                        expired: false,
+                    },
+                })
+                .collect(),
+            last_failure: None,
+        })
+    };
+    for (source, wanted, color) in [
+        (read(85.0, now), "85%", roles.wait),
+        (read(100.0, now), "100%", roles.block),
+        (read(10.0, now - super::STALE_AFTER - 1), "—", roles.tx3),
+        (Source::Waiting("reading".into()), "—", roles.tx3),
+        (Source::Failed("failed".into()), "!", roles.block),
+    ] {
+        window.usage.chip.forced = Some((source.clone(), source));
+        for _ in 0..2 {
+            painted(&mut window, &ctx, area, vec![]);
+        }
+        let shapes = painted(&mut window, &ctx, area, vec![]);
+        let slot = crate::chrome::strip(&window, area).chip.unwrap();
+        let chip = window.usage.chip.hugged(slot);
+        let figures: Vec<_> = shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text)
+                    if chip.contains(text.pos) && text.galley.text() == wanted =>
+                {
+                    Some(
+                        text.override_text_color
+                            .unwrap_or(text.galley.job.sections[0].format.color)
+                            .gamma_multiply(text.opacity_factor),
+                    )
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(figures, vec![color; 3], "painted {wanted}");
+        assert!(
+            shapes.iter().any(|shape| matches!(
+                &shape.shape,
+                egui::Shape::Circle(circle)
+                    if chip.contains(circle.center)
+                        && circle.fill == egui::Color32::from_rgb(0xd9, 0x77, 0x57)
+            )),
+            "Claude's dot was not painted in clay"
+        );
+    }
+}
+
+fn repaint_after(ctx: &egui::Context, mut draw: impl FnMut(&egui::Context)) -> std::time::Duration {
+    let mut delay = std::time::Duration::ZERO;
+    for _ in 0..4 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| draw(ui.ctx()));
+        output.textures_delta.clear();
+        delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    }
+    delay
+}
+
+#[test]
+fn the_chip_schedules_the_frame_that_marks_a_reading_stale() {
+    let ctx = egui::Context::default();
+    let mut chip = super::surface::Chip::default();
+    let now = 1_800_000_000;
+    let source = Source::Read(Reading {
+        observed_at: now - super::STALE_AFTER + 120,
+        windows: Vec::new(),
+        last_failure: None,
+    });
+    let delay = repaint_after(&ctx, |ctx| {
+        chip.update(ctx, Source::Off, source.clone(), now)
+    });
+    assert!(delay > std::time::Duration::from_secs(120), "{delay:?}");
+    assert!(delay <= std::time::Duration::from_secs(121), "{delay:?}");
+}
+
+#[test]
+fn an_open_summary_schedules_its_next_minute_without_a_new_reading() {
+    let (mut window, ctx) = integrated();
+    window.usage.chip.forced = Some(codex());
+    let closed = repaint_after(&ctx, |ctx| super::begin_pass(&mut window.usage, ctx));
+    assert!(closed > std::time::Duration::from_secs(60), "{closed:?}");
+    window.usage.chip.popover = true;
+    let open = repaint_after(&ctx, |ctx| super::begin_pass(&mut window.usage, ctx));
+    assert!(open <= std::time::Duration::from_secs(60), "{open:?}");
+}
