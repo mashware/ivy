@@ -412,13 +412,13 @@ pub(crate) fn poll(window: &mut Window, ctx: &egui::Context) {
     let ids: Vec<_> = state.sessions.keys().copied().collect();
     let start = ids.partition_point(|id| *id <= state.poll_cursor);
     for id in ids[start..].iter().chain(&ids[..start]) {
+        if state.display_remaining < 16 * 1024 + transport::conversation::ROW_BYTES {
+            break;
+        }
         let task = state.sessions.get_mut(id).expect("retained session");
         task.display
             .poll(&mut task.transcript, &mut state.display_remaining);
         state.poll_cursor = *id;
-        if state.display_remaining < 16 * 1024 + transport::conversation::ROW_BYTES {
-            break;
-        }
     }
     state.prune(ctx);
 }

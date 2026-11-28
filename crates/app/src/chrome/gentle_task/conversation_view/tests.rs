@@ -135,7 +135,7 @@ for line in sys.stdin:
   send(dict(type="response",id=v["id"],command="get_commands",success=True,data=dict(commands=[])))
 "#).unwrap();
     fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).unwrap();
-    for name in ["quiet", "noisy"] {
+    for name in ["quiet", "noisy", "peer"] {
         fs::create_dir(root.0.join(name)).unwrap();
     }
     let receiver = root.0.join("console-bytes");
@@ -175,29 +175,67 @@ for line in sys.stdin:
         std::thread::sleep(Duration::from_millis(5));
     }
     // egui may repeat its UI closure without advancing the frame (D13).
+    let peer = Session::start(
+        exe.clone(),
+        root.0.join("peer"),
+        "noisy".into(),
+        Arc::new(|| {}),
+    )
+    .unwrap();
     window
         .chrome
         .gentle_task
         .sessions
-        .get_mut(&2)
-        .unwrap()
-        .transcript = Default::default();
-    let output = ctx.run_ui(Default::default(), |_| {
-        for _ in 0..2 {
-            super::super::poll(&mut window, &ctx);
-        }
-        let copied: usize = window.chrome.gentle_task.sessions[&2]
-            .transcript
-            .rows
-            .iter()
-            .map(|row| row.text.len() + transport::conversation::ROW_BYTES)
-            .sum();
+        .insert(3, task(peer, root.0.join("peer")));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while window.chrome.gentle_task.sessions[&3].dialogs.is_empty() {
+        frame(&mut window, &ctx, vec![]);
         assert!(
-            copied > 0 && copied <= transport::conversation::FRAME_BYTES,
-            "repeated UI passes copied {copied} transcript bytes in one frame"
+            Instant::now() < deadline,
+            "second flood never reached its question"
         );
-    });
-    output.drop_without_applying_deltas();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for id in [2, 3] {
+        window
+            .chrome
+            .gentle_task
+            .sessions
+            .get_mut(&id)
+            .unwrap()
+            .transcript = Default::default();
+    }
+    let retained_bytes = |window: &Window| -> usize {
+        [2, 3]
+            .into_iter()
+            .flat_map(|id| &window.chrome.gentle_task.sessions[&id].transcript.rows)
+            .map(|row| row.text.len() + transport::conversation::ROW_BYTES)
+            .sum()
+    };
+    for _ in 0..2 {
+        let before = retained_bytes(&window);
+        let output = ctx.run_ui(Default::default(), |_| {
+            for _ in 0..2 {
+                super::super::poll(&mut window, &ctx);
+            }
+            let copied = retained_bytes(&window) - before;
+            assert!(
+                copied > 0 && copied <= transport::conversation::FRAME_BYTES,
+                "repeated UI passes copied {copied} transcript bytes in one frame"
+            );
+        });
+        output.drop_without_applying_deltas();
+    }
+    assert!(
+        [2, 3]
+            .into_iter()
+            .all(|id| !window.chrome.gentle_task.sessions[&id]
+                .transcript
+                .rows
+                .is_empty()),
+        "a backlogged session received no transcript across frames"
+    );
+    window.chrome.gentle_task.sessions.remove(&3);
     // A transcript selection owns the press, movement and release outside its window.
     let labels = frame(&mut window, &ctx, vec![]);
     let text = point(&labels, "Visible assistant reply");
