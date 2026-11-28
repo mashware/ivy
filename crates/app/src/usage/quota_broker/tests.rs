@@ -62,12 +62,17 @@ fn native_helper() {
                             seven_day: None,
                         },
                     },
-                    "steady" | "moved" => Frame {
+                    "steady" | "moved" | "ordered-22" | "ordered-88" => Frame {
                         v: 1,
                         sequence: admission.sequence,
                         outcome: Outcome::Observed {
                             five_hour: Some(Window {
-                                used_percentage: Some(if mode == "steady" { 10.0 } else { 20.0 }),
+                                used_percentage: Some(match mode.as_str() {
+                                    "steady" => 10.0,
+                                    "moved" => 20.0,
+                                    "ordered-22" => 22.0,
+                                    _ => 88.0,
+                                }),
                                 resets_at: Some(4_000_000_000),
                             }),
                             seven_day: None,
@@ -194,6 +199,48 @@ fn native_receiver_admits_its_launch_and_rejects_another_live_launch() {
     assert_eq!(second.snapshot(), Snapshot::Waiting);
     foreign.pty.write(b"quit\n").unwrap();
     wait_for(&second, |snapshot| snapshot == Snapshot::Disconnected);
+}
+
+#[test]
+fn the_chip_follows_receipt_order_between_launches_in_the_same_second() {
+    use super::super::{chip::{FIVE_HOURS, Source}, quota_view::QuotaView};
+    let wake = Wake::new(|| {});
+    let first = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+    let second = Arc::new(Broker::prepare(Arc::clone(&wake)).unwrap());
+    let received_at = unix_seconds();
+    *first.state.receipt_time.lock().unwrap() = Some(received_at);
+    *second.state.receipt_time.lock().unwrap() = Some(received_at);
+    let mut first_launch = Launch::new(first.endpoint());
+    first_launch.bind(&first);
+    let mut second_launch = Launch::new(second.endpoint());
+    second_launch.bind(&second);
+    let mut view = QuotaView::default();
+    view.install_fixture(Arc::clone(&first), Arc::clone(&wake));
+    view.install(1, Arc::clone(&second));
+    let displayed = || {
+        let Source::Read(reading) = view.chip_source() else { panic!("a producer reading"); };
+        assert_eq!(reading.observed_at, received_at);
+        reading.window(FIVE_HOURS).unwrap().used
+    };
+    second_launch.run("ordered-22");
+    wait_for(&second, |snapshot| matches!(snapshot, Snapshot::Observed { .. }));
+    assert_eq!(displayed(), Some(22.0));
+    let second_receipt = second.ordered_snapshot().0;
+    first_launch.run("ordered-88");
+    wait_for(&first, |snapshot| matches!(snapshot, Snapshot::Observed { .. }));
+    assert!(first.ordered_snapshot().0 > second_receipt);
+    assert_eq!(displayed(), Some(88.0));
+    second.state.expire_at(chrono::DateTime::from_timestamp(4_000_000_000, 0).unwrap());
+    assert!(matches!(second.snapshot(), Snapshot::Observed { five_hour: WindowState::Expired, .. }));
+    assert_eq!(displayed(), Some(88.0));
+    assert_eq!(second.ordered_snapshot().0, second_receipt,
+        "an expiry is not a newer producer receipt");
+    second_launch.run("ordered-22");
+    wait_for(&second, |snapshot| matches!(snapshot, Snapshot::Observed {
+        five_hour: WindowState::Reported(Window { used_percentage: Some(22.0), .. }), ..
+    }));
+    assert!(second.ordered_snapshot().0 > first.ordered_snapshot().0);
+    assert_eq!(displayed(), Some(22.0));
 }
 
 #[test]
@@ -376,7 +423,8 @@ fn a_repeat_wakes_the_chip_when_it_was_stale_or_from_another_launch() {
     let woke = |launch, same, stale| {
         wake.begin_frame();
         let before = wakes.load(Ordering::Relaxed);
-        wake.published(launch, same, stale);
+        let (_, other_launch) = wake.receipt(launch);
+        wake.published(same, stale, other_launch);
         wakes.load(Ordering::Relaxed) > before
     };
     assert!(woke(1, false, false), "a new value");

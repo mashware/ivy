@@ -309,8 +309,7 @@ impl QuotaView {
         }
     }
 
-    /// What the chip reads: the most recently updated launch's snapshot, since several launches can
-    /// report and none of them is verified to be the account the person means.
+    /// A timer expiry is not evidence of a newer producer receipt (D132).
     pub(super) fn chip_source(&self) -> super::chip::Source {
         if !self.enabled.load(Ordering::Acquire) {
             return super::chip::Source::Off;
@@ -318,7 +317,7 @@ impl QuotaView {
         let snapshots: Vec<_> = self
             .brokers
             .iter()
-            .map(|(_, broker)| broker.snapshot())
+            .map(|(_, broker)| broker.ordered_snapshot())
             .collect();
         chip_source(&snapshots, self.disconnected)
     }
@@ -425,7 +424,7 @@ fn paint_window(ui: &mut egui::Ui, label: &str, state: WindowState) {
 }
 
 /// The chip's reading from the launches' snapshots.
-fn chip_source(snapshots: &[Snapshot], disconnected: bool) -> super::chip::Source {
+fn chip_source(snapshots: &[(u64, Snapshot)], disconnected: bool) -> super::chip::Source {
     use super::chip::{Allowance, FIVE_HOURS, Named, Reading, Source, WEEK};
     let named = |name: &str, length: i64, state: WindowState| {
         let window = match state {
@@ -450,12 +449,12 @@ fn chip_source(snapshots: &[Snapshot], disconnected: bool) -> super::chip::Sourc
     };
     let latest = snapshots
         .iter()
-        .filter_map(|snapshot| match *snapshot {
+        .filter_map(|(publication, snapshot)| match *snapshot {
             Snapshot::Observed {
                 received_at,
                 five_hour,
                 seven_day,
-            } => Some(Reading {
+            } => Some((*publication, Reading {
                 observed_at: received_at,
                 windows: [
                     named("5-hour session", FIVE_HOURS, five_hour),
@@ -465,17 +464,18 @@ fn chip_source(snapshots: &[Snapshot], disconnected: bool) -> super::chip::Sourc
                 .flatten()
                 .collect(),
                 last_failure: None,
-            }),
+            })),
             _ => None,
         })
-        .max_by_key(|reading| reading.observed_at);
+        .max_by_key(|(publication, _)| *publication)
+        .map(|(_, reading)| reading);
     // An error comes from the launch's statusline or from Ivy's own receiver; the words blame
     // neither, and a newer error on one launch is not hidden behind another launch's reading.
     const STOPPED: &str = "Claude reporting stopped with an error.";
-    let errored = snapshots.contains(&Snapshot::ProducerError);
-    let waiting = snapshots.contains(&Snapshot::Waiting);
+    let errored = snapshots.iter().any(|(_, snapshot)| *snapshot == Snapshot::ProducerError);
+    let waiting = snapshots.iter().any(|(_, snapshot)| *snapshot == Snapshot::Waiting);
     // A launch ended when its snapshot says so, or when AI usage already pruned it.
-    let ended = disconnected || snapshots.contains(&Snapshot::Disconnected);
+    let ended = disconnected || snapshots.iter().any(|(_, snapshot)| *snapshot == Snapshot::Disconnected);
     // A reading outranks everything, and a launch still to report outranks a failed or ended one.
     match latest {
         Some(mut reading) => {
@@ -640,14 +640,14 @@ mod tests {
         let Source::Read(reading) = view.chip_source() else {
             panic!("a reading was expected");
         };
-        assert_eq!(reading.observed_at, 300);
+        assert_eq!(reading.observed_at, 100);
         assert_eq!(
             reading.last_failure.as_deref(),
             Some("Claude reporting stopped with an error."),
             "another launch's error is not hidden behind this reading"
         );
         let five_hour = reading.window(super::super::chip::FIVE_HOURS).unwrap();
-        assert_eq!(five_hour.used, Some(30.0));
+        assert_eq!(five_hour.used, Some(10.0));
         assert!(reading.window(super::super::chip::WEEK).unwrap().expired);
         view.disable();
         assert_eq!(view.chip_source(), Source::Off);

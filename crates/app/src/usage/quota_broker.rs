@@ -46,12 +46,12 @@ pub(super) struct Wake {
 #[derive(Default)]
 struct WakeState {
     visible: bool,
-    /// The title bar's chip shows Claude: only a changed value wakes the window for it (D132).
+    /// The title bar must not wake on every statusline redraw (D132).
     chip: bool,
     pending: bool,
-    /// The launch that published last, which is the one the chip shows: a repeat from another
-    /// launch changes what the chip reads even when its values do not.
+    /// Switching producer is visible even when both publish identical windows.
     last_publisher: usize,
+    publication: u64,
 }
 
 impl Wake {
@@ -89,14 +89,14 @@ impl Wake {
         self.wake(true);
     }
 
-    /// A frame was published by `launch`. The chip needs a frame when its values changed, when it
-    /// was showing them as stale, or when another launch was the one it showed; a repeat of the
-    /// same, current values from the same launch only refreshes the open view.
-    fn published(&self, launch: usize, same: bool, was_stale: bool) {
-        let other_launch = {
-            let mut state = self.state.lock().unwrap();
-            std::mem::replace(&mut state.last_publisher, launch) != launch
-        };
+    fn receipt(&self, launch: usize) -> (u64, bool) {
+        let mut state = self.state.lock().unwrap();
+        state.publication += 1;
+        let other_launch = std::mem::replace(&mut state.last_publisher, launch) != launch;
+        (state.publication, other_launch)
+    }
+
+    fn published(&self, same: bool, was_stale: bool, other_launch: bool) {
         if same && !was_stale && !other_launch {
             self.changed();
         } else {
@@ -162,6 +162,7 @@ impl Root {
 struct Model {
     root: Option<Arc<Root>>,
     snapshot: Snapshot,
+    publication: u64,
     stopped: bool,
 }
 
@@ -171,6 +172,8 @@ struct BrokerState {
     /// Frames published, counted after their wake was decided, for tests to wait on.
     #[cfg(test)]
     published: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    receipt_time: Mutex<Option<i64>>,
 }
 
 impl BrokerState {
@@ -201,6 +204,8 @@ impl BrokerState {
             return;
         }
         let now = unix_seconds();
+        #[cfg(test)]
+        let now = self.receipt_time.lock().unwrap().unwrap_or(now);
         let snapshot = match frame.outcome {
             Outcome::Observed {
                 five_hour,
@@ -217,18 +222,24 @@ impl BrokerState {
             Snapshot::Observed { received_at, .. } => now - received_at > super::chip::STALE_AFTER,
             _ => false,
         };
+        let launch = std::ptr::from_ref(self) as usize;
+        let (publication, other_launch) = self.wake.receipt(launch);
         model.snapshot = snapshot;
+        model.publication = publication;
         drop(model);
         // A statusline repeats itself on every redraw; only what the chip would show differently
         // is worth a frame.
-        let launch = std::ptr::from_ref(self) as usize;
-        self.wake.published(launch, same, was_stale);
+        self.wake.published(same, was_stale, other_launch);
         #[cfg(test)]
         self.published
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn expire(&self) -> Option<Duration> {
+        self.expire_at(chrono::Utc::now())
+    }
+
+    fn expire_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
         let mut model = self.model.lock().unwrap();
         let mut changed = false;
         let next = if let Snapshot::Observed {
@@ -237,7 +248,6 @@ impl BrokerState {
             ..
         } = &mut model.snapshot
         {
-            let now = chrono::Utc::now();
             changed = expire(five_hour, now.timestamp()) | expire(seven_day, now.timestamp());
             [deadline(five_hour), deadline(seven_day)]
                 .into_iter()
@@ -283,11 +293,14 @@ impl Broker {
             model: Mutex::new(Model {
                 root: None,
                 snapshot: Snapshot::Waiting,
+                publication: 0,
                 stopped: false,
             }),
             wake,
             #[cfg(test)]
             published: Default::default(),
+            #[cfg(test)]
+            receipt_time: Mutex::new(None),
         });
         let worker_state = state.clone();
         std::thread::Builder::new()
@@ -339,7 +352,14 @@ impl Broker {
     }
 
     pub(super) fn snapshot(&self) -> Snapshot {
-        let mut snapshot = self.state.model.lock().unwrap().snapshot;
+        self.ordered_snapshot().1
+    }
+
+    pub(super) fn ordered_snapshot(&self) -> (u64, Snapshot) {
+        let (publication, mut snapshot) = {
+            let model = self.state.model.lock().unwrap();
+            (model.publication, model.snapshot)
+        };
         if let Snapshot::Observed {
             five_hour,
             seven_day,
@@ -351,7 +371,7 @@ impl Broker {
             expire(five_hour, now);
             expire(seven_day, now);
         }
-        snapshot
+        (publication, snapshot)
     }
 
     #[cfg(test)]
@@ -363,7 +383,9 @@ impl Broker {
 
     #[cfg(test)]
     pub(super) fn observe_for_test(&self, snapshot: Snapshot) {
-        self.state.model.lock().unwrap().snapshot = snapshot;
+        let mut model = self.state.model.lock().unwrap();
+        model.snapshot = snapshot;
+        model.publication = self.state.wake.receipt(std::ptr::from_ref(self.state.as_ref()) as usize).0;
     }
 
     pub(super) fn startup_failed(&self) {
