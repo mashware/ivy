@@ -250,6 +250,42 @@ for line in sys.stdin:
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(window.chrome.gentle_task.selected_conversation, Some(1));
+    let labels = frame(&mut window, &ctx, vec![]);
+    let title = point(&labels, "Gentle conversation");
+    frame(&mut window, &ctx, vec![Input::PointerMoved(title)]);
+    frame(
+        &mut window,
+        &ctx,
+        vec![Input::PointerButton {
+            pos: title,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        }],
+    );
+    let moved = title - egui::vec2(0., 120.);
+    frame(&mut window, &ctx, vec![Input::PointerMoved(moved)]);
+    frame(
+        &mut window,
+        &ctx,
+        vec![Input::PointerButton {
+            pos: moved,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }],
+    );
+    let labels = frame(&mut window, &ctx, vec![]);
+    let badge = point(&labels, "Gentle question");
+    let native = window.chrome.gentle_task.conversation_rect.unwrap();
+    assert!(
+        native.top() <= 90.,
+        "the window must cross the old badge position"
+    );
+    assert!(
+        !native.contains(badge),
+        "the question badge obscures the native conversation"
+    );
     // The background question remains actionable through the existing modal route.
     let labels = frame(&mut window, &ctx, vec![]);
     click(&mut window, &ctx, point(&labels, "Gentle question"));

@@ -16,6 +16,7 @@ pub(crate) struct GentleTasks {
     poll_cursor: u64,
     conversation_pointer: bool,
     conversation_focus: bool,
+    conversation_rect: Option<egui::Rect>,
     sessions: BTreeMap<u64, Task>,
     surface: Option<Surface>,
     previous_focus: Option<egui::Id>,

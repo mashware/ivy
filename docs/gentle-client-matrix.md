@@ -7,7 +7,8 @@ This is the first native-conversation delivery of [#280](https://github.com/mash
 | Environment | Exact client | Observed result | Boundary |
 |---|---|---|---|
 | Linux, Ubuntu 26.04, Node 24.14.1 | Gentle Shell 5.1.0 / Pi 1.6.1 | Two real isolated processes emitted text deltas, final messages and todo tool activity; numeric todo IDs and declared state came from the snapshot owner; a follow-up retained its session ID while its neighbor stayed unchanged | Deterministic loopback model, temporary homes, offline provider configuration; no subscription account exercised |
-| Linux graphical host | Same pinned runtime | Desktop interaction pending | Virtual X11 driver prepared; process evidence alone does not prove desktop input |
+| Linux graphical host, X11/Xvfb, 2026-11-28 | Gentle Shell 5.1.0 / Pi 1.6.1 | Native conversation, tool activity, producer task rows, same-session follow-up, two project/session destinations, paths containing spaces, independent console keyboard input, retained user-close and child-loss states observed | Release executable on an isolated virtual desktop; deterministic loopback model and temporary homes; no official-provider login |
+| Linux, Node 24.14.1 | Gentle Shell 5.0.0 / Pi 1.6.1 | Two installed processes passed the same conversation, todo snapshot and isolated follow-up probe | Process evidence only; this version supports the exercised snapshot sections and is not an unsupported-capability witness |
 | Older/missing snapshot capability | Production decoder/monitor fixtures | No optional read before advertised support; foreign/late responses ignored; rejected/malformed/timed-out observations preserve last-known values as unavailable | Fixtures establish receiver behavior, not an older installed runtime |
 | macOS | Not exercised in this delivery | Native desktop result unverified | Compilation and Linux fixtures cannot establish macOS interaction |
 | Windows | Not exercised in this delivery | Native desktop result unverified | Existing `.cmd` launcher limitation remains; an executable discoverable in an absolute desktop PATH is required for native launch |
@@ -26,6 +27,6 @@ The complete epic remains open until the review journey and its required client/
 
 ## Reproduction and remaining checks
 
-The work evidence records the pinned runtime installation, deterministic two-process probe, native frame-input regression, targeted mutations and desktop captures. Use temporary HOME/configuration directories to keep accounts and layout isolated. Do not substitute a successful build or package for a native desktop observation.
+The work evidence records the pinned runtime installation, deterministic two-process probe, native frame-input regression, targeted mutations and desktop captures. The portable process probe is `prototypes/gentle-rpc/conversation.py`; its README gives the pinned installation and invocation. Use temporary HOME/configuration directories to keep accounts and layout isolated. Do not substitute a successful build or package for a native desktop observation.
 
-Remaining platform checks: launch from desktop discovery, a directory containing spaces, missing/older runtime, child loss, ordinary-console fallback and official-client login on each named OS. Results not observed stay unverified.
+Remaining checks include macOS/Windows native interactions, official-client login and ordinary-console fallback on each named OS. Linux discovery used an executable on the isolated desktop PATH; shell-only installation discovery and missing-runtime behavior are covered by receiver/launch tests rather than installed-client desktop observations. Results not observed stay unverified.

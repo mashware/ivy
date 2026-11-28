@@ -10,6 +10,7 @@ pub(super) struct HistoryView {
 pub(super) fn show(window: &mut Window, ui: &mut egui::Ui) -> bool {
     let ctx = ui.ctx().clone();
     let state = &mut window.chrome.gentle_task;
+    state.conversation_rect = None;
     if !window.gentle_enabled
         || state.surface.is_some()
         || window.settings_editor.is_open()
@@ -32,12 +33,19 @@ pub(super) fn show(window: &mut Window, ui: &mut egui::Ui) -> bool {
     let mut open = true;
     let mut action = None;
     let mut selector_open = false;
+    let bounds = ctx.content_rect();
+    let available = egui::Rect::from_min_max(
+        bounds.min + egui::vec2(8., 48.),
+        bounds.max - egui::vec2(8., 8.),
+    );
     let response = egui::Window::new("Gentle conversation")
         .id(egui::Id::new("gentle-native-conversation"))
         .open(&mut open)
         .default_pos(egui::pos2(400., 140.))
         .default_size(egui::vec2(620., 570.))
         .min_size(egui::vec2(300., 300.))
+        .max_size(available.size().max(egui::vec2(300., 300.)))
+        .constrain_to(available)
         .show(&ctx, |ui| {
             crate::ui::floating::style(ui, &window.theme);
             selector_open = egui::ComboBox::from_id_salt("native-session-selector")
@@ -65,7 +73,7 @@ pub(super) fn show(window: &mut Window, ui: &mut egui::Ui) -> bool {
             }
             egui::ScrollArea::vertical()
                 .id_salt(("native-history", id))
-                .max_height((ui.available_height() - 225.).max(80.))
+                .max_height((bounds.height() - 450.).clamp(80., 320.))
                 .min_scrolled_height(80.)
                 .stick_to_bottom(true)
                 .show_viewport(ui, |ui, viewport| {
@@ -84,6 +92,7 @@ pub(super) fn show(window: &mut Window, ui: &mut egui::Ui) -> bool {
             action = controls(ui, task, id);
         });
     let rect = response.as_ref().map(|r| r.response.rect);
+    state.conversation_rect = rect;
     let over = selector_open
         || ctx.input(|i| {
             i.pointer
@@ -251,8 +260,8 @@ fn dispatch(state: &mut GentleTasks, action: Option<view::Action>, ctx: &egui::C
 
 fn producer(ui: &mut egui::Ui, snapshot: &transport::snapshot::SnapshotState) {
     if snapshot.unavailable {
-        ui.label("Producer tasks / activity unavailable. Showing last known values when present.");
-        ui.label("Use New Gentle session for interactions this client cannot expose here.");
+        ui.label("Task/activity data is not currently available. Last known values are retained.");
+        ui.label("Open New Gentle session for console-only interactions.");
     }
     if let Some(label) = &snapshot.activity {
         ui.label(format!("Activity · {label}"));
@@ -273,9 +282,27 @@ fn row_height(row: &Row, width: f32, heights: &BTreeMap<u64, (u32, f32)>) -> f32
         .get(&row.id)
         .filter(|(w, _)| *w == width.to_bits())
         .map_or_else(
-            || ((row.text.len() as f32 * 7. / width.max(1.)).ceil().max(1.) * 18.) + 24.,
+            || {
+                if row.role == "tool" {
+                    44.
+                } else {
+                    ((row.text.len() as f32 * 7. / width.max(1.)).ceil().max(1.) * 18.) + 24.
+                }
+            },
             |(_, height)| *height,
         )
+}
+
+fn tool_title(row: &Row, continued: bool) -> String {
+    if continued {
+        return "Tool output continued".into();
+    }
+    let mut chars = row.text.lines().next().unwrap_or("Tool activity").chars();
+    let mut title: String = chars.by_ref().take(120).collect();
+    if chars.next().is_some() {
+        title.push('…');
+    }
+    title
 }
 
 fn history(ui: &mut egui::Ui, cache: &Cache, state: &mut HistoryView, viewport: egui::Rect) {
@@ -297,7 +324,15 @@ fn history(ui: &mut egui::Ui, cache: &Cache, state: &mut HistoryView, viewport: 
                 if previous != Some(row.message) {
                     ui.strong(row.role);
                 }
-                ui.add(egui::Label::new(row.text.as_ref()).wrap().selectable(true));
+                if row.role == "tool" {
+                    egui::CollapsingHeader::new(tool_title(row, previous == Some(row.message)))
+                        .id_salt(("tool-details", row.id))
+                        .show(ui, |ui| {
+                            ui.add(egui::Label::new(row.text.as_ref()).wrap().selectable(true));
+                        });
+                } else {
+                    ui.add(egui::Label::new(row.text.as_ref()).wrap().selectable(true));
+                }
             });
             state
                 .heights

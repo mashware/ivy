@@ -120,13 +120,14 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
         return false;
     };
     let focus_before = ctx.memory(|m| m.focused());
+    let (anchor, offset, width) = badge_position(ctx.content_rect(), state.conversation_rect);
     let badge = egui::Area::new(egui::Id::new("gentle-question-indicator"))
         .order(egui::Order::Tooltip)
-        .anchor(egui::Align2::CENTER_TOP, [0.0, 90.0])
+        .anchor(anchor, offset)
         .movable(false)
         .show(&ctx, |ui| {
             floating::style(ui, &window.theme);
-            ui.set_max_width((ctx.content_rect().width() - 32.0).clamp(80.0, 330.0));
+            ui.set_max_width(width);
             ui.button(label)
         });
     let pressed = ctx.input(|i| {
@@ -159,6 +160,27 @@ fn interact(window: &mut Window, ui: &mut egui::Ui) -> bool {
         return claim(state, ui);
     }
     false
+}
+
+fn badge_position(
+    bounds: egui::Rect,
+    conversation: Option<egui::Rect>,
+) -> (egui::Align2, [f32; 2], f32) {
+    if let Some(rect) = conversation {
+        let left = rect.left() - bounds.left() - 16.;
+        let right = bounds.right() - rect.right() - 16.;
+        if left >= right && left >= 80. {
+            return (egui::Align2::LEFT_TOP, [8., 90.], left.min(330.));
+        }
+        if right >= 80. {
+            return (egui::Align2::RIGHT_TOP, [-8., 90.], right.min(330.));
+        }
+    }
+    (
+        egui::Align2::CENTER_TOP,
+        [0., 90.],
+        (bounds.width() - 32.).clamp(80., 330.),
+    )
 }
 
 fn indicator(sessions: &BTreeMap<u64, Task>) -> Option<String> {

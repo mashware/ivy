@@ -22,6 +22,12 @@ A Linux process handle separately verifies that the fixture child exits after it
 The fixture installs its own disconnect handler for this check.
 The npm installation stays in the supplied directory.
 
+## Native conversation stream
+
+With the pinned installation above, run `python3 conversation.py "$probe_dir" --evidence-dir /tmp/ivy-conversation-evidence`. The probe resolves the actual Node executable before isolating HOME, starts two real Gentle processes against a deterministic loopback model and records their exact installed package versions. It verifies user messages, Unicode text deltas, authoritative final replies, todo tool activity, numeric task IDs from the snapshot owner and a follow-up in the same session while the neighbor stays unchanged. Each process has a fresh temporary home. No provider account or subscription is used. These process observations do not establish graphical input or another operating system's behavior.
+
+The native frame regression separately floods the production decoder and view with 640 text deltas carrying 2,621,440 bytes. It requires visible history clipping, an answered background question, a follow-up delivered only to its selected process and an ordinary console's independent byte receiver while the conversation stays open. It also checks explicit history discard and distinguishes user closure from connection loss.
+
 ## What Ivy can display
 
 The observed selection request contains `type`, `id`, `method`, `title` and `options`. The parent process and dialog ID identify the reply destination. The dialog contains no structured helper ID. In Gentle 5.1.0 the task runner knows the helper ID, but the registered UI callback drops it before opening the dialog. Task-mode helpers can ask through this path. The runner cancels background-mode dialogs. [Parent relay](https://github.com/Gentleman-Programming/gentle-shell/blob/v5.1.0/extensions/gentle-agents.ts) · [Task runner](https://github.com/Gentleman-Programming/gentle-shell/blob/v5.1.0/lib/agents-runner.ts)

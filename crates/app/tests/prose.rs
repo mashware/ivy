@@ -2720,6 +2720,11 @@ fn no_document_mixes_the_two_languages() {
 // Per-file floors preserve coverage without imposing the older prototypes' size on the 88-line chrome demo.
 const PROTOTYPES: &[(&str, &str, usize)] = &[
     (
+        "prototypes/gentle-rpc/conversation.py",
+        include_str!("../../../prototypes/gentle-rpc/conversation.py"),
+        95,
+    ),
+    (
         "prototypes/gentle-rpc/delegated.ts",
         include_str!("../../../prototypes/gentle-rpc/delegated.ts"),
         50,

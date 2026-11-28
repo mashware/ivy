@@ -210,14 +210,12 @@ pub(super) fn run(
                         .publish(event);
                 },
                 &reader_display,
-            ) {
-                if let Err(error) = reader.try_send(Message::Failed(reason)) {
-                    if let mpsc::TrySendError::Full(Message::Failed(reason))
-                    | mpsc::TrySendError::Disconnected(Message::Failed(reason)) = error
-                    {
-                        reader_terminal.fail(reason);
-                    }
-                }
+            ) && let Err(
+                mpsc::TrySendError::Full(Message::Failed(reason))
+                | mpsc::TrySendError::Disconnected(Message::Failed(reason)),
+            ) = reader.try_send(Message::Failed(reason))
+            {
+                reader_terminal.fail(reason);
             }
         })
         .map_err(|e| e.to_string())?;
